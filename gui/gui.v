@@ -521,9 +521,90 @@ fn value_label(text string) &vgui.Label {
 	return l
 }
 
+// Цвета оформления (тёмная тема): область просмотра темнее панели
+// инструментов - фото на тёмно-сером нейтральном фоне, как в проявщиках.
+const viewer_bg = vgui.Color{22, 22, 24, 255}
+const panel_bg = vgui.Color{37, 37, 38, 255}
+const divider_color = vgui.Color{58, 58, 62, 255}
+
+// make_placeholder - заглушка области просмотра, пока файл не открыт:
+// мягкий радиальный градиент (центр светлее) и по центру значок
+// диафрагмы с подсказкой. Градиент - Canvas с растяжкой (stretch),
+// пассивный: без зума, панорамы и событий.
+fn make_placeholder() &vgui.Stack {
+	gw, gh := 960, 720
+	mut bg := vgui.canvas(gw, gh)
+	bg.stretch = true
+	bg.enabled = false
+	bg.set_wheel_zoom(false)
+	bg.set_pan_buttons(0)
+	unsafe {
+		mut p := &u8(bg.pixels.data)
+		mut seed := u32(12345)
+		for y in 0 .. gh {
+			for x in 0 .. gw {
+				dx := (f32(x) - gw / 2) / (gw / 2)
+				dy := (f32(y) - gh / 2) / (gh / 2)
+				r := math.sqrtf(dx * dx + dy * dy) / 1.4142
+				t := r * r * (3 - 2 * r) // smoothstep: мягкий спад к краям
+				v := 36 - (36 - f32(viewer_bg.r)) * t
+				// Дизер ±0.5: на тёмном гладком градиенте иначе видны ступени
+				seed = seed * 1664525 + 1013904223
+				n := f32(seed >> 8) / 16777216.0 - 0.5
+				c := u8(v + n + 0.5)
+				p[0] = c
+				p[1] = c
+				p[2] = u8(f32(c) + 2 * (1 - t)) // чуть холоднее в центре
+				p[3] = 255
+				p += 4
+			}
+		}
+	}
+
+	mut ic := vgui.icon('aperture')
+	ic.set_size(64)
+	ic.set_color(vgui.Color{92, 94, 100, 255})
+	mut title := vgui.label('Откройте RAW-файл')
+	title.align = .center
+	title.font_size = 20
+	title.color = vgui.Color{176, 176, 182, 255}
+	mut hint := vgui.label('Кнопка «Открыть RAW...» на панели справа')
+	hint.align = .center
+	hint.color = vgui.Color{120, 120, 126, 255}
+	mut fmts := vgui.label('CR3 · CR2 · NEF · ARW · DNG · RAF · ORF · RW2')
+	fmts.align = .center
+	fmts.color = vgui.Color{92, 92, 98, 255}
+
+	mut col := vgui.create_vbox_fill()
+	col.set_spacing(6)
+	col.add_fixed(ic, 76)
+	col.add_fixed(title, 32)
+	col.add_fixed(hint, 22)
+	col.add_fixed(fmts, 22)
+	mut center := vgui.create_centered(420, 170)
+	center.set_child(col)
+
+	mut ph := &vgui.Stack{}
+	ph.add(bg)
+	ph.add(center)
+	return ph
+}
+
+// show_viewer убирает заглушку и показывает холст превью (файл открыт)
+fn show_viewer(mut cv vgui.Canvas, mut placeholder vgui.Stack) {
+	placeholder.visible = false
+	cv.visible = true
+}
+
 fn main() {
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
-	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1280, height: 946)!
+	// Тема задаётся окну: create_app(theme) на окна не влияет
+	mut win := vgui.create_window(
+		title:  'vraw - проявка RAW'
+		width:  1280
+		height: 946
+		theme:  vgui.dark_theme()
+	)!
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
@@ -538,8 +619,11 @@ fn main() {
 
 	mut st := &State{}
 
+	// Холст превью скрыт до открытия файла - на его месте заглушка
 	mut cv := vgui.canvas(4, 3)
-	cv.fill(vgui.Color{24, 24, 26, 255})
+	cv.fill(viewer_bg)
+	cv.visible = false
+	mut placeholder := make_placeholder()
 
 	// Гистограмма: буфер 256 колонок (колонка = бин), растягивается на виджет.
 	// Зум и панораму отключаем - это индикатор, а не изображение.
@@ -838,7 +922,7 @@ fn main() {
 
 	// ── Кнопки ──
 	mut b_open := vgui.button('Открыть RAW...')
-	b_open.on_click = fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, win, reset_sliders, reset_defaults] () {
+	b_open.on_click = fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, mut placeholder, win, reset_sliders, reset_defaults] () {
 		path := vgui.native_open_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
 			filter_names:    ['RAW-файлы', 'Все файлы']
 			filter_patterns: [raw_patterns, '*']
@@ -869,6 +953,7 @@ fn main() {
 		st.suppress = false
 		load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
 		setup_curve(mut st, mut crv_cb, mut cv, mut hist)
+		show_viewer(mut cv, mut placeholder)
 		nm.show_info('${os.file_name(path)}: превью ${st.pw}x${st.ph}')
 	}
 
@@ -1019,18 +1104,35 @@ fn main() {
 	scroll.sb_width = 8
 	scroll.add(controls)
 
+	// Правая панель - свой фон и внутренние отступы; от области
+	// просмотра её отделяет тонкая вертикальная линия.
 	mut right := vgui.create_vbox_fill()
 	right.set_spacing(6)
+	right.set_padding(10)
+	right.set_bg(panel_bg)
 	right.add_fixed(hist, 120)
 	right.add_fixed(files_row, 34)
 	right.add(scroll, 1)
 	right.add_fixed(view_row, 30)
-	right.add_fixed(vgui.create_spacer(), 6) // отступ от нижнего края окна
+
+	// Область просмотра: тёмный нейтральный фон, картинка с отступом от
+	// краёв. Холст и заглушка лежат друг на друге в Stack, видим один.
+	mut view_stack := &vgui.Stack{}
+	view_stack.add(cv)
+	view_stack.add(placeholder)
+	mut viewer := vgui.create_vbox_fill()
+	viewer.set_padding(16)
+	viewer.set_bg(viewer_bg)
+	viewer.add(view_stack, 1)
+
+	mut divider := vgui.vseparator()
+	divider.color = divider_color
 
 	mut top := vgui.create_hbox_fill()
-	top.set_spacing(8)
-	top.add(cv, 1)
-	top.add_fixed(right, 420)
+	top.set_spacing(0)
+	top.add(viewer, 1)
+	top.add_fixed(divider, 1)
+	top.add_fixed(right, 440)
 
 	win.add_widget(top)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
@@ -1045,12 +1147,11 @@ fn main() {
 			setup_corrector(mut st, mut lens_cb, mut lens_lb)
 			load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
 			setup_curve(mut st, mut crv_cb, mut cv, mut hist)
+			show_viewer(mut cv, mut placeholder)
 			nm.show_info('${os.file_name(os.args[1])}: превью ${st.pw}x${st.ph}')
 		} else {
 			nm.show_error('Ошибка: не удалось открыть ${os.args[1]}')
 		}
-	} else {
-		nm.show_info('Откройте RAW-файл (CR3 и другие форматы LibRaw)')
 	}
 
 	app.run()
