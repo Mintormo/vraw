@@ -6,7 +6,9 @@ module pipeline
 // даёт 14 бит, так что запас есть). Порядок операций:
 //
 //   линейный RGB -> экспозиция -> маска по люме (тени + тон-эквалайзер)
-//     -> гамма 1/2.2 + контраст (S-кривая) -> насыщенность -> 8 бит
+//     -> гамма 1/2.2 + камерная кривая + контраст (S-кривая)
+//     -> тональные кривые (общая RGB, затем по каналу) -> насыщенность
+//     -> HSL-эквалайзер -> 8 бит
 //
 // Ради живых ползунков всё тяжёлое вынесено в две таблицы, которые
 // перестраиваются за ~130К операций при изменении любого параметра:
@@ -14,10 +16,14 @@ module pipeline
 //         тени, эквалайзер) - маска по яркости, а не по каналу, чтобы
 //         подъём теней не сдвигал цвет;
 //   flut: линейное значение канала u16 -> тоновое значение 0..255
-//         (гамма + камерная кривая + контраст);
+//         (гамма + камерная кривая + контраст + тональные кривые); при
+//         кривых по каналам таблиц три - своя на R, G, B;
 //   slut: размытая люма u16 -> множитель «Тени/Света» (см. build_slut) -
 //         маска по окрестности сохраняет локальный контраст.
-// На пиксель остаются только умножения и выборки из таблиц.
+//   HSL: оттенок -> сдвиг оттенка / множители насыщенности и яркости
+//         (1024 корзины по кругу оттенков, build_hsl).
+// На пиксель остаются только умножения и выборки из таблиц (HSL добавляет
+// перевод в HSV и обратно - только когда эквалайзер не нулевой).
 
 import math
 
@@ -37,6 +43,21 @@ pub mut:
 	// тон 0..255 -> тон 0..255. Пустой массив - кривой нет (тождественная).
 	// Применяется после гаммы, до контраста.
 	curve []f32
+	// Тональные кривые (редактор кривых): по 256 значений, тон 0..255 ->
+	// тон 0..255, пустой массив - тождественная. Сначала общая (tc_rgb),
+	// затем своя у канала. Применяются после контраста, до насыщенности.
+	tc_rgb []f32
+	tc_r   []f32
+	tc_g   []f32
+	tc_b   []f32
+	// HSL-эквалайзер: 8 цветовых диапазонов (hsl_centers - красный,
+	// оранжевый, жёлтый, зелёный, голубой, синий, фиолетовый, пурпурный),
+	// значения -100..100. Оттенок: 100 = +30°; насыщенность: -100 - ч/б,
+	// +100 - ×2; яркость: ±100 = ±1 EV. Сила действия растёт с
+	// насыщенностью пикселя - серое не трогается.
+	hsl_hue [8]f32
+	hsl_sat [8]f32
+	hsl_lum [8]f32
 	// Дизеринг финального квантования в 8 бит (TPDF ±1 LSB) - убирает
 	// полосы (banding) на гладких градиентах (небо). Включён по умолчанию.
 	dither bool = true
@@ -102,6 +123,119 @@ fn build_flut(p &Params) []f32 {
 		f[x] = g * 255.0
 	}
 	return f
+}
+
+// curve_at - значение кривой (256 узлов тон -> тон) в тоне v 0..255,
+// линейная интерполяция между узлами.
+fn curve_at(c []f32, v f32) f32 {
+	mut pos := v
+	if pos < 0 {
+		pos = 0
+	} else if pos > 255 {
+		pos = 255
+	}
+	mut i := int(pos)
+	if i > 254 {
+		i = 254
+	}
+	frac := pos - f32(i)
+	return c[i] * (1.0 - frac) + c[i + 1] * frac
+}
+
+// channel_luts - таблицы канал -> тон с тональными кривыми. Без кривых по
+// каналам все три указывают на одну таблицу (общая кривая вшита в неё),
+// с ними - три своих: tc_c(tc_rgb(flut)).
+fn channel_luts(p &Params, base []f32) ([]f32, []f32, []f32) {
+	has_rgb := p.tc_rgb.len == 256
+	has_ch := p.tc_r.len == 256 || p.tc_g.len == 256 || p.tc_b.len == 256
+	if !has_rgb && !has_ch {
+		return base, base, base
+	}
+	mut common := base.clone()
+	if has_rgb {
+		for x in 0 .. 65536 {
+			common[x] = curve_at(p.tc_rgb, common[x])
+		}
+	}
+	if !has_ch {
+		return common, common, common
+	}
+	mut out := [][]f32{len: 3}
+	curves := [p.tc_r, p.tc_g, p.tc_b]
+	for c in 0 .. 3 {
+		if curves[c].len != 256 {
+			out[c] = common
+			continue
+		}
+		mut t := []f32{len: 65536}
+		for x in 0 .. 65536 {
+			t[x] = curve_at(curves[c], common[x])
+		}
+		out[c] = t
+	}
+	return out[0], out[1], out[2]
+}
+
+// Центры восьми цветовых диапазонов HSL, градусы оттенка: красный,
+// оранжевый, жёлтый, зелёный, голубой, синий, фиолетовый, пурпурный.
+// Шаг неравномерный (как у Lightroom): тёплых оттенков больше.
+pub const hsl_centers = [f32(0), 30, 60, 120, 180, 240, 270, 300]
+
+const hsl_bins = 1024
+
+// HslLut - HSL-эквалайзер по корзинам оттенка (hsl_bins на круг):
+// сдвиг оттенка (в секстантах HSV, 1 = 60°), множитель насыщенности,
+// добавка к множителю яркости (2^EV - 1).
+struct HslLut {
+	dh  []f32
+	sm  []f32
+	lm  []f32
+	act []u8 // 1 - корзину эквалайзер меняет; 0 - пиксель выходит сразу
+}
+
+fn hsl_active(p &Params) bool {
+	for i in 0 .. 8 {
+		if p.hsl_hue[i] != 0 || p.hsl_sat[i] != 0 || p.hsl_lum[i] != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// hsl_weight - вклад значения диапазонов в оттенок deg: линейная
+// интерполяция между соседними центрами по кругу (300° -> 360° = красный).
+fn hsl_interp(vals [8]f32, deg f32) f32 {
+	for i in 0 .. 8 {
+		lo := hsl_centers[i]
+		hi := if i == 7 { f32(360) } else { hsl_centers[i + 1] }
+		if deg >= lo && deg < hi {
+			t := (deg - lo) / (hi - lo)
+			nxt := if i == 7 { vals[0] } else { vals[i + 1] }
+			return vals[i] * (1 - t) + nxt * t
+		}
+	}
+	return vals[0]
+}
+
+fn build_hsl(p &Params) HslLut {
+	mut dh := []f32{len: hsl_bins}
+	mut sm := []f32{len: hsl_bins}
+	mut lm := []f32{len: hsl_bins}
+	mut act := []u8{len: hsl_bins}
+	for b in 0 .. hsl_bins {
+		deg := (f32(b) + 0.5) * 360.0 / f32(hsl_bins)
+		dh[b] = hsl_interp(p.hsl_hue, deg) * f32(0.5 / 100.0) // 100 -> 30° = 0.5 секстанта
+		mut sv := 1.0 + hsl_interp(p.hsl_sat, deg) * f32(1.0 / 100.0)
+		if sv < 0 {
+			sv = 0
+		}
+		sm[b] = sv
+		lm[b] = math.powf(2.0, hsl_interp(p.hsl_lum, deg) * f32(1.0 / 100.0)) - 1.0
+		if dh[b] != 0 || sm[b] != 1 || lm[b] != 0 {
+			act[b] = 1
+		}
+	}
+	return HslLut{dh, sm, lm, act}
 }
 
 // build_slut - таблица инструмента «Тени/Света»: РАЗМЫТАЯ люма (u16) ->
@@ -288,6 +422,77 @@ fn box_blur_v(src []u16, mut dst []u16, w int, h int, r int) {
 	}
 }
 
+// hsl_pixel - HSL-эквалайзер одного пикселя в тоновом пространстве
+// (0..255): RGB -> HSV, по корзине оттенка - сдвиг оттенка, множитель
+// насыщенности и яркости, обратно в RGB. Сдвиг оттенка и яркость
+// взвешены насыщенностью s: почти серые пиксели (оттенок неустойчив)
+// почти не меняются, совсем серые (размах < 0.5) - пропускаются.
+@[inline]
+fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8) (f32, f32, f32) {
+	mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
+	mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
+	c := mx - mn
+	if c < 0.5 {
+		return r, g, b
+	}
+	inv_c := 1 / c
+	mut h := if mx == r {
+		(g - b) * inv_c
+	} else if mx == g {
+		(b - r) * inv_c + 2
+	} else {
+		(r - g) * inv_c + 4
+	}
+	if h < 0 {
+		h += 6
+	}
+	mut bin := int(h * f32(hsl_bins) / 6.0)
+	if bin >= hsl_bins {
+		bin = hsl_bins - 1
+	}
+	unsafe {
+		// Корзину эквалайзер не трогает (обычно правят 1-2 цвета) - выход
+		if hact[bin] == 0 {
+			return r, g, b
+		}
+		inv_mx := 1 / mx
+		s := c * inv_mx
+		v := mx * (1 + hlm[bin] * s)
+		mut k := hsm[bin]
+		if s * k > 1 {
+			k = 1 / s // насыщенность HSV не больше 1
+		}
+		dh := hdh[bin] * s
+		if dh == 0 {
+			// Только насыщенность и яркость: канал в HSV - mx·(1 - s·f),
+			// f = (mx - ch)/c, поэтому при s -> s·k, mx -> v он становится
+			// v/mx · (mx - k·(mx - ch)) - без обратного перевода HSV -> RGB
+			q := v * inv_mx
+			return q * (mx - k * (mx - r)), q * (mx - k * (mx - g)), q * (mx - k * (mx - b))
+		}
+		h += dh
+		if h < 0 {
+			h += 6
+		} else if h >= 6 {
+			h -= 6
+		}
+		s2 := s * k
+		sec := int(h)
+		f := h - f32(sec)
+		pp := v * (1 - s2)
+		q := v * (1 - s2 * f)
+		t := v * (1 - s2 * (1 - f))
+		return match sec {
+			0 { v, t, pp }
+			1 { q, v, pp }
+			2 { pp, v, t }
+			3 { pp, q, v }
+			4 { t, pp, v }
+			else { v, pp, q }
+		}
+	}
+}
+
 // apply прогоняет линейный 16-битный RGB (плотный, npix пикселей) через
 // пайплайн и пишет 8-битный результат: dst_stride 4 - RGBA для холста
 // (альфа 255), 3 - RGB для JPEG. dst должен вмещать npix * dst_stride байт.
@@ -295,7 +500,9 @@ fn box_blur_v(src []u16, mut dst []u16, w int, h int, r int) {
 // nil допустим - тогда sh_shadows/sh_highlights игнорируются.
 pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int) {
 	mlut := build_mlut(&p)
-	flut := build_flut(&p)
+	flut_r, flut_g, flut_b := channel_luts(&p, build_flut(&p))
+	use_hsl := hsl_active(&p)
+	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
 	sat := p.saturation
@@ -303,7 +510,13 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 		mut s := src
 		mut d := &u8(dst.data)
 		ml := &f32(mlut.data)
-		fl := &f32(flut.data)
+		flr := &f32(flut_r.data)
+		flg := &f32(flut_g.data)
+		flb := &f32(flut_b.data)
+		hdh := &f32(hsl.dh.data)
+		hsm := &f32(hsl.sm.data)
+		hlm := &f32(hsl.lm.data)
+		hact := &u8(hsl.act.data)
 		sl := &f32(slut.data)
 		mk := mask
 		for i in 0 .. npix {
@@ -328,14 +541,17 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 			if fb > 65535.0 {
 				fb = 65535.0
 			}
-			mut vr := fl[int(fr)]
-			mut vg := fl[int(fg)]
-			mut vb := fl[int(fb)]
+			mut vr := flr[int(fr)]
+			mut vg := flg[int(fg)]
+			mut vb := flb[int(fb)]
 			if sat != 1.0 {
 				l := 0.2126 * vr + 0.7152 * vg + 0.0722 * vb
 				vr = l + sat * (vr - l)
 				vg = l + sat * (vg - l)
 				vb = l + sat * (vb - l)
+			}
+			if use_hsl {
+				vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact)
 			}
 			if vr < 0 {
 				vr = 0

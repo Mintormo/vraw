@@ -19,6 +19,7 @@ const lf_pf_f32 = 3 // lfPixelFormat: LF_PF_F32
 const lf_modify_tca = 1 // LF_MODIFY_TCA
 const lf_modify_vignetting = 2 // LF_MODIFY_VIGNETTING
 const lf_modify_distortion = 8 // LF_MODIFY_DISTORTION
+const lf_modify_scale = 0x20 // LF_MODIFY_SCALE - без него scale в initialize игнорируется
 const lf_rectilinear = 1 // lfLensType: LF_RECTILINEAR
 const lf_cr_intensity = 3 // LF_CR_1(INTENSITY) - одноканальный буфер
 // Потолок СЫРОГО усиления профиля - ×8 (3 EV): сильнее виньетка у реальных
@@ -72,6 +73,7 @@ fn C.lf_modifier_apply_color_modification(m &C.lfModifier, pixels voidptr, x f32
 	width int, height int, comp_role int, row_stride int) int
 fn C.lf_modifier_apply_subpixel_geometry_distortion(m &C.lfModifier, xu f32, yu f32,
 	width int, height int, res &f32) int
+fn C.lf_modifier_get_auto_scale(m &C.lfModifier, reverse int) f32
 
 // Corrector - найденная пара камера+объектив. Указатели cam/lens живут
 // внутри db, поэтому база держится открытой всё время жизни Corrector
@@ -250,16 +252,20 @@ pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
 	if isnil(c.lens) || w <= 0 || h <= 0 {
 		return false
 	}
-	m := C.lf_modifier_new(c.lens, c.crop, w, h)
-	if isnil(m) {
-		return false
-	}
-	// Диафрагма и дистанция на геометрию не влияют - ставим типовые.
-	got := C.lf_modifier_initialize(m, c.lens, lf_pf_f32, focal, 8.0, 1000.0, 0.0,
-		lf_rectilinear, lf_modify_distortion | lf_modify_tca, 0)
-	if got & (lf_modify_distortion | lf_modify_tca) == 0 {
+	mut m := c.geometry_modifier(w, h, focal, 0.0) or { return false }
+	// Авто-масштаб lensfun приблизительный (так и сказано в lensfun.h):
+	// бывает чуть меньше нужного, и край кадра берёт точки за пределами
+	// источника - после клампа это 3-4 повторённых крайних столбца.
+	// Меряем вылет по рамке кадра и доувеличиваем масштаб (обычно
+	// хватает одного шага, второй - страховка).
+	for _ in 0 .. 2 {
+		over := border_overflow(m, w, h)
+		if over <= 1.0 {
+			break
+		}
+		scale := C.lf_modifier_get_auto_scale(m, 0) * over * 1.001
 		C.lf_modifier_destroy(m)
-		return false
+		m = c.geometry_modifier(w, h, focal, scale) or { return false }
 	}
 	// Ремап читает произвольные точки источника - нужна его копия.
 	mut src := []u16{len: w * h * 3}
@@ -288,6 +294,60 @@ pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
 	}
 	C.lf_modifier_destroy(m)
 	return true
+}
+
+// geometry_modifier - модификатор дисторсии + TCA; scale 0 - авто-масштаб
+// lensfun. none - в профиле нет данных геометрии.
+fn (c &Corrector) geometry_modifier(w int, h int, focal f32, scale f32) ?&C.lfModifier {
+	m := C.lf_modifier_new(c.lens, c.crop, w, h)
+	if isnil(m) {
+		return none
+	}
+	// Диафрагма и дистанция на геометрию не влияют - ставим типовые.
+	// LF_MODIFY_SCALE обязателен: без него lensfun молча не масштабирует
+	// (ни авто, ни заданный scale) и край кадра смотрит за источник.
+	got := C.lf_modifier_initialize(m, c.lens, lf_pf_f32, focal, 8.0, 1000.0, scale,
+		lf_rectilinear, lf_modify_distortion | lf_modify_tca | lf_modify_scale, 0)
+	if got & (lf_modify_distortion | lf_modify_tca) == 0 {
+		C.lf_modifier_destroy(m)
+		return none
+	}
+	return m
+}
+
+// border_overflow - во сколько раз точки источника, в которые смотрит рамка
+// кадра (крайние строки и столбцы, все три канала), выходят за источник:
+// максимум |s - центр| / полуразмер по обеим осям. <= 1 - всё внутри.
+// Около края дисторсия локально почти линейна, поэтому доувеличение
+// масштаба в это число раз убирает вылет.
+fn border_overflow(m &C.lfModifier, w int, h int) f32 {
+	cx := f32(w - 1) * 0.5
+	cy := f32(h - 1) * 0.5
+	mut worst := f32(0)
+	// Верхняя и нижняя строки, левый и правый столбцы
+	fw := f32(w)
+	fh := f32(h)
+	spans := [[f32(0), 0, fw, 1], [f32(0), fh - 1, fw, 1], [f32(0), 0, 1, fh],
+		[fw - 1, 0, 1, fh]]
+	for sp in spans {
+		n := int(sp[2]) * int(sp[3])
+		mut res := []f32{len: n * 6}
+		if C.lf_modifier_apply_subpixel_geometry_distortion(m, sp[0], sp[1], int(sp[2]),
+			int(sp[3]), unsafe { &f32(res.data) }) == 0 {
+			continue
+		}
+		for i := 0; i < res.len; i += 2 {
+			rx := math.abs(res[i] - cx) / cx
+			ry := math.abs(res[i + 1] - cy) / cy
+			if rx > worst {
+				worst = rx
+			}
+			if ry > worst {
+				worst = ry
+			}
+		}
+	}
+	return worst
 }
 
 pub fn (mut c Corrector) free() {

@@ -231,3 +231,83 @@ fn test_dither() {
 	diff := math.abs(mean_d - mean_nod)
 	assert diff < 1.0, 'среднее сместилось: без дизера ${mean_nod:.3f}, с дизером ${mean_d:.3f}'
 }
+
+// px1 - один пиксель через пайплайн (RGB 8 бит, без дизера)
+fn px1(r u16, g u16, b u16, p Params) []u8 {
+	src := [r, g, b]
+	mut out := []u8{len: 3}
+	apply(unsafe { &u16(src.data) }, unsafe { nil }, 1, p, mut out, 3)
+	return out
+}
+
+// Кривая «тон + d» на 256 узлов
+fn lift_curve(d f32) []f32 {
+	mut c := []f32{len: 256}
+	for i in 0 .. 256 {
+		v := f32(i) + d
+		c[i] = if v > 255 { f32(255) } else { v }
+	}
+	return c
+}
+
+// Тональные кривые: общая действует на все каналы, канальная - только на свой
+fn test_tone_curves() {
+	base := px1(20000, 20000, 20000, Params{ dither: false })
+	assert base[0] == base[1] && base[1] == base[2]
+
+	// Тождественная кривая ничего не меняет
+	mut id := []f32{len: 256}
+	for i in 0 .. 256 {
+		id[i] = f32(i)
+	}
+	same := px1(20000, 20000, 20000, Params{ dither: false, tc_rgb: id })
+	assert same == base
+
+	// Общая кривая +20: все каналы светлее, серое остаётся серым
+	lifted := px1(20000, 20000, 20000, Params{ dither: false, tc_rgb: lift_curve(20) })
+	assert lifted[0] == lifted[1] && lifted[1] == lifted[2]
+	assert int(lifted[0]) - int(base[0]) >= 19
+
+	// Кривая красного +20: только R
+	red := px1(20000, 20000, 20000, Params{ dither: false, tc_r: lift_curve(20) })
+	assert int(red[0]) - int(base[0]) >= 19
+	assert red[1] == base[1] && red[2] == base[2]
+
+	// Общая и канальная складываются: tc_b(tc_rgb(v))
+	both := px1(20000, 20000, 20000, Params{ dither: false, tc_rgb: lift_curve(10), tc_b: lift_curve(10) })
+	assert int(both[2]) - int(base[2]) >= 19
+	assert int(both[0]) - int(base[0]) >= 9 && int(both[0]) - int(base[0]) <= 11
+}
+
+// HSL-эквалайзер: действует на свой диапазон оттенков, серое не трогает
+fn test_hsl_equalizer() {
+	red := [u16(40000), 6000, 6000]
+	blue := [u16(6000), 8000, 40000]
+	base_r := px1(red[0], red[1], red[2], Params{ dither: false })
+	base_b := px1(blue[0], blue[1], blue[2], Params{ dither: false })
+	gray := px1(20000, 20000, 20000, Params{ dither: false })
+
+	// Насыщенность красных -100: красный пиксель почти серый, синий цел
+	mut p := Params{ dither: false }
+	p.hsl_sat[0] = -100
+	r2 := px1(red[0], red[1], red[2], p)
+	assert math.abs(int(r2[0]) - int(r2[1])) <= 1
+	assert px1(blue[0], blue[1], blue[2], p) == base_b
+	assert px1(20000, 20000, 20000, p) == gray
+
+	// Яркость синих +100: синий светлее, красный цел
+	mut pl := Params{ dither: false }
+	pl.hsl_lum[5] = 100
+	b2 := px1(blue[0], blue[1], blue[2], pl)
+	assert b2[2] > base_b[2]
+	assert px1(red[0], red[1], red[2], pl) == base_r
+
+	// Сдвиг оттенка красных +100 (+30°): красный уходит к оранжевому -
+	// зелёный канал растёт, красный остаётся максимальным
+	mut ph := Params{ dither: false }
+	ph.hsl_hue[0] = 100
+	r3 := px1(red[0], red[1], red[2], ph)
+	assert r3[1] > base_r[1] + 20
+	assert r3[0] >= r3[1]
+	assert px1(20000, 20000, 20000, ph) == gray
+}

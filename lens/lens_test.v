@@ -89,6 +89,56 @@ fn test_geometry_remap() {
 	c.free()
 }
 
+// Край кадра после geometry не прижат к рамке: авто-масштаб (с
+// LF_MODIFY_SCALE и доувеличением по border_overflow) не даёт рамке
+// смотреть за источник - иначе крайние столбцы повторяют один и тот же
+// клампнутый столбец. На градиенте по x соседние крайние столбцы разные.
+//
+// Проверяется на RF 24-105 при 105 мм: подушка, у которой без
+// масштабирования рамка смотрит за источник (IMG_0991.CR3). Бочка RF 24-50
+// на 24 мм такого не даёт.
+fn test_geometry_edges_not_clamped() {
+	mut c := find('Canon', 'EOS R8', 'RF24-105mm F4-7.1 IS STM') or {
+		eprintln('ПРОПУСК: профиль RF 24-105 F4-7.1 не найден в базе lensfun')
+		return
+	}
+	w := 600
+	h := 400
+	mut buf := []u16{len: w * h * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			i := (y * w + x) * 3
+			v := u16(1000 + x * 100)
+			buf[i] = v
+			buf[i + 1] = v
+			buf[i + 2] = v
+		}
+	}
+	for focal in [f32(105), 70] {
+		mut g := buf.clone()
+		assert c.geometry(unsafe { &u16(g.data) }, w, h, focal)
+		row := (h / 2) * w * 3
+		// Левый и правый края: соседние столбцы различаются (не клампнуты)
+		assert g[row + 1 * 3 + 1] > g[row + 0 * 3 + 1]
+		assert g[row + (w - 1) * 3 + 1] > g[row + (w - 2) * 3 + 1]
+		// И угол тоже
+		assert g[(1 * w + 1) * 3 + 1] > g[(1 * w + 0) * 3 + 1]
+	}
+	assert border_overflow_ok(c, w, h, 105)
+	c.free()
+}
+
+// border_overflow_ok - после geometry_modifier с подобранным масштабом
+// рамка кадра смотрит внутрь источника
+fn border_overflow_ok(c &Corrector, w int, h int, focal f32) bool {
+	m := c.geometry_modifier(w, h, focal, 0.0) or { return false }
+	over := border_overflow(m, w, h)
+	C.lf_modifier_destroy(m)
+	// Сам авто-масштаб бывает чуть мал - это нормально, geometry()
+	// доувеличит; проверяем, что вылет небольшой и измеряется
+	return over > 0.5 && over < 1.05
+}
+
 fn test_find_unknown_lens() {
 	if _ := find('Canon', 'EOS R8', 'Fantasy Lens 1-999mm f/0.5') {
 		assert false, 'выдуманный объектив не должен находиться'

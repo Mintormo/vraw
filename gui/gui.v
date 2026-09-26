@@ -55,6 +55,16 @@ mut:
 	prep_running bool
 	prep_threads []thread
 	prep_done    fn (PrepResult) = unsafe { nil } // приём результата в главном потоке
+	// Тональные кривые: опорные точки на канал (0 - RGB, 1..3 - R, G, B),
+	// редактор показывает выбранный (curve_ch), остальные - призраками
+	curve_pts [][]vgui.CurvePoint
+	curve_ch  int
+	curve_ed  &vgui.CurveEditor = unsafe { nil }
+	curve_btns []&vgui.Button // кнопки RGB/R/G/B, активная - стиль accent
+	// Последние гистограммы результата (render_histogram) - фон редактора кривых
+	hist_r []u32
+	hist_g []u32
+	hist_b []u32
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -78,7 +88,8 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	npix := st.pw * st.ph
 	pipeline.apply(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, npix, st.params, mut cv.pixels, 4)
 	cv.mark_dirty()
-	render_histogram(mut hist, cv.pixels)
+	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
+	update_curve_histogram(mut st)
 }
 
 // load_preview проявляет открытый RAW в линейное 16-битное превью
@@ -336,7 +347,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (bool, string)) {
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
 // (RGBA-буфер холста). Сэмплируется каждый второй пиксель - на форму
 // гистограммы это не влияет, а стоимость вдвое ниже.
-fn render_histogram(mut hist vgui.Canvas, pixels []u8) {
+fn render_histogram(mut hist vgui.Canvas, pixels []u8) ([]u32, []u32, []u32) {
 	mut hr := []u32{len: 256}
 	mut hg := []u32{len: 256}
 	mut hb := []u32{len: 256}
@@ -383,6 +394,7 @@ fn render_histogram(mut hist vgui.Canvas, pixels []u8) {
 		}
 	}
 	hist.mark_dirty()
+	return hr, hg, hb
 }
 
 // auto_exposure_ev подбирает экспозицию по линейному превью: медиана
@@ -596,6 +608,100 @@ fn show_viewer(mut cv vgui.Canvas, mut placeholder vgui.Stack) {
 	cv.visible = true
 }
 
+// ── Тональные кривые ──
+
+const curve_names = ['RGB', 'R', 'G', 'B']
+const curve_colors = [vgui.Color{225, 225, 228, 255}, vgui.Color{235, 85, 85, 255},
+	vgui.Color{90, 200, 100, 255}, vgui.Color{90, 140, 245, 255}]
+
+fn identity_curve() []vgui.CurvePoint {
+	return [vgui.CurvePoint{0, 0}, vgui.CurvePoint{1, 1}]
+}
+
+// tone_lut - кривая редактора (0..1) как таблица пайплайна: 256 узлов тон
+// 0..255 -> тон 0..255; тождественная - пустой массив (кривой нет).
+fn tone_lut(pts []vgui.CurvePoint) []f32 {
+	if vgui.curve_is_identity(pts) {
+		return []f32{}
+	}
+	mut l := vgui.curve_lut(pts, 256)
+	for i in 0 .. 256 {
+		l[i] *= 255.0
+	}
+	return l
+}
+
+// curves_to_params переносит точки всех четырёх кривых в Params
+fn curves_to_params(mut st State) {
+	st.params.tc_rgb = tone_lut(st.curve_pts[0])
+	st.params.tc_r = tone_lut(st.curve_pts[1])
+	st.params.tc_g = tone_lut(st.curve_pts[2])
+	st.params.tc_b = tone_lut(st.curve_pts[3])
+}
+
+// sync_curve_editor показывает в редакторе кривую выбранного канала его
+// цветом, изменённые кривые остальных каналов - полупрозрачными призраками.
+fn sync_curve_editor(mut st State) {
+	if isnil(st.curve_ed) {
+		return
+	}
+	mut ed := st.curve_ed
+	ed.set_points(st.curve_pts[st.curve_ch])
+	ed.curve_color = curve_colors[st.curve_ch]
+	ed.clear_ghosts()
+	for c in 0 .. 4 {
+		if c != st.curve_ch && !vgui.curve_is_identity(st.curve_pts[c]) {
+			col := curve_colors[c]
+			ed.add_ghost(st.curve_pts[c], vgui.Color{col.r, col.g, col.b, 110})
+		}
+	}
+	update_curve_histogram(mut st)
+}
+
+// update_curve_histogram - фон редактора: гистограмма результата по
+// выбранному каналу (для RGB - среднее трёх), нормированная по максимуму.
+fn update_curve_histogram(mut st State) {
+	if isnil(st.curve_ed) || st.hist_r.len != 256 {
+		return
+	}
+	mut h := []f32{len: 256}
+	mut mx := f32(1)
+	for i in 0 .. 256 {
+		v := match st.curve_ch {
+			1 { f32(st.hist_r[i]) }
+			2 { f32(st.hist_g[i]) }
+			3 { f32(st.hist_b[i]) }
+			else { f32(st.hist_r[i] + st.hist_g[i] + st.hist_b[i]) / 3 }
+		}
+		h[i] = v
+		if v > mx {
+			mx = v
+		}
+	}
+	for i in 0 .. 256 {
+		h[i] /= mx
+	}
+	mut ed := st.curve_ed
+	ed.histogram = h
+}
+
+// reset_curves - все четыре кривые в диагональ (сброс, новый файл)
+fn reset_curves(mut st State) {
+	st.curve_pts = [][]vgui.CurvePoint{len: 4, init: identity_curve()}
+	curves_to_params(mut st)
+	sync_curve_editor(mut st)
+}
+
+// ── HSL ──
+
+const hsl_names = ['Красный', 'Оранжевый', 'Жёлтый', 'Зелёный', 'Голубой', 'Синий',
+	'Фиолетовый', 'Пурпурный']
+const hsl_label_colors = [vgui.Color{235, 105, 105, 255}, vgui.Color{238, 158, 80, 255},
+	vgui.Color{228, 206, 86, 255}, vgui.Color{112, 196, 102, 255},
+	vgui.Color{92, 204, 214, 255}, vgui.Color{104, 142, 238, 255},
+	vgui.Color{160, 116, 234, 255}, vgui.Color{220, 104, 206, 255}]
+const hsl_modes = ['Оттенок', 'Насыщенность', 'Яркость']
+
 // SectionRow - ряд секции аккордеона: виджет и его фиксированная высота
 struct SectionRow {
 	w &vgui.Widget
@@ -626,11 +732,13 @@ fn main() {
 	// расширит колонку - наездов на ползунок не будет.
 	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
 		'Контраст', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
-		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Качество JPEG'], 8)
+		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Качество JPEG',
+		'Оранжевый', 'Фиолетовый', 'Пурпурный'], 8)
 	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
 		'-4.00', '100'], 8)
 
 	mut st := &State{}
+	st.curve_pts = [][]vgui.CurvePoint{len: 4, init: identity_curve()}
 
 	// Холст превью скрыт до открытия файла - на его месте заглушка
 	mut cv := vgui.canvas(4, 3)
@@ -920,6 +1028,82 @@ fn main() {
 		eq_rows << slider_row(lb, mut sl, vl, 0.0, lbl_w, val_w)
 	}
 
+	// ── Кривые: кнопки каналов, редактор, подсказка ──
+	// Картинка пересчитывается при отпускании точки (on_release), как и
+	// у ползунков; кривые других каналов видны в редакторе призраками.
+	mut ed := vgui.curve_editor()
+	st.curve_ed = ed
+	ed.on_release = fn [mut st, mut cv, mut hist, mut ed] () {
+		st.curve_pts[st.curve_ch] = ed.points.clone()
+		curves_to_params(mut st)
+		apply_pipeline(mut st, mut cv, mut hist)
+	}
+	// Обработчик ставится на только что созданную кнопку. НЕ через
+	// `mut b := массив[c]; b.on_click = fn ...` - это ошибка компилятора V:
+	// замыкание, присвоенное так в цикле, указывает на чужой контекст
+	// (кнопки молча не работали). Стили - по индексу st.curve_btns[j].
+	mut ch_row := vgui.create_hbox_fill()
+	ch_row.set_spacing(6)
+	for c in 0 .. 4 {
+		mut b := vgui.button(curve_names[c])
+		b.style = if c == 0 { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.outline }
+		b.on_click = fn [mut st, c] () {
+			st.curve_ch = c
+			for j in 0 .. st.curve_btns.len {
+				st.curve_btns[j].style = if j == c {
+					vgui.ButtonStyle.accent
+				} else {
+					vgui.ButtonStyle.outline
+				}
+			}
+			sync_curve_editor(mut st)
+		}
+		st.curve_btns << b
+		ch_row.add(b, 1)
+	}
+	mut curve_reset := vgui.button('×')
+	curve_reset.style = .outline
+	curve_reset.on_click = fn [mut st, mut cv, mut hist] () {
+		st.curve_pts[st.curve_ch] = identity_curve()
+		curves_to_params(mut st)
+		sync_curve_editor(mut st)
+		apply_pipeline(mut st, mut cv, mut hist)
+	}
+	ch_row.add_fixed(curve_reset, 26)
+	mut curve_hint := vgui.label('Щелчок - точка, правая кнопка - удалить, двойной - сброс')
+	curve_hint.color = vgui.Color{130, 130, 136, 255}
+	curve_hint.font_size = 12
+	sync_curve_editor(mut st)
+
+	// ── HSL: вкладки «Оттенок / Насыщенность / Яркость», 8 диапазонов ──
+	mut hsl_tabs := vgui.tab_box()
+	for m in 0 .. 3 {
+		mut rows := []SectionRow{}
+		for i in 0 .. 8 {
+			mut lb := vgui.label(hsl_names[i])
+			lb.color = hsl_label_colors[i]
+			mut vl := value_label('0')
+			mut sl := vgui.slider_horizontal(-100, 100, 0)
+			sl.step = 1
+			sl.on_change = fn [mut st, mut cv, mut hist, mut vl, mut sl, m, i] (v f32) {
+				match m {
+					0 { st.params.hsl_hue[i] = v }
+					1 { st.params.hsl_sat[i] = v }
+					else { st.params.hsl_lum[i] = v }
+				}
+				vl.text = '${int(v)}'
+				if !sl.dragging {
+					apply_pipeline(mut st, mut cv, mut hist)
+				}
+			}
+			sl.on_release = tone_release
+			reset_sliders << sl
+			reset_defaults << 0.0
+			rows << SectionRow{slider_row(lb, mut sl, vl, 0.0, lbl_w, val_w), 26}
+		}
+		hsl_tabs.add_tab(hsl_modes[m], section(rows))
+	}
+
 	mut q_lb := vgui.label('Качество JPEG')
 	mut q_vl := value_label('92')
 	mut q_sl := vgui.slider_horizontal(50, 100, 92)
@@ -955,6 +1139,7 @@ fn main() {
 		// Новый файл - нейтральные параметры
 		st.suppress = true
 		st.params = pipeline.Params{}
+		reset_curves(mut st)
 		for i in 0 .. reset_sliders.len {
 			mut sl := reset_sliders[i]
 			sl.set_value(reset_defaults[i])
@@ -1017,6 +1202,7 @@ fn main() {
 	b_reset.on_click = fn [mut st, mut cv, mut hist, reset_sliders, reset_defaults] () {
 		st.suppress = true
 		st.params = pipeline.Params{}
+		reset_curves(mut st)
 		// «Сброс» тональный: камерная кривая, как и коррекция объектива,
 		// остаётся в положении своего чекбокса
 		if st.use_curve {
@@ -1111,6 +1297,15 @@ fn main() {
 		eq_items << SectionRow{row, 26}
 	}
 	acc.add_section('Тон-эквалайзер (EV)', section(eq_items))
+	acc.add_section('Кривые', section([
+		SectionRow{ch_row, 28},
+		SectionRow{ed, 300},
+		SectionRow{curve_hint, 16},
+	]))
+	// Высота вкладок: заголовок TabBox + 8 рядов с отступами секции
+	acc.add_section('HSL', section([
+		SectionRow{hsl_tabs, 32 + 8 * 26 + 7 * 6 + 16},
+	]))
 	acc.add_section('Шумодав и ореолы', section([
 		SectionRow{imp_row, 26},
 		SectionRow{nrl_row, 26},
