@@ -4,7 +4,7 @@ import os
 
 // linear16 - сырьё для собственного пайплайна: 16 бит, линейная гамма.
 fn test_develop_linear16() {
-	path := '/home/igor/Изображения/Передержка фото/IMG_0641.CR3'
+	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
 	if !os.exists(path) {
 		eprintln('нет тестового CR3, пропуск')
 		return

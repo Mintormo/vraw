@@ -2,7 +2,7 @@ module raw
 
 import os
 
-const sample = '/home/igor/Изображения/Передержка фото/IMG_0641.CR3'
+const sample = os.join_path(@VMODROOT, 'IMG_0991.CR3')
 
 // Основа отзывчивости GUI: один Developer проявляется повторно с разными
 // параметрами без повторных open/unpack, и bright реально влияет на результат.

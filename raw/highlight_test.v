@@ -5,7 +5,7 @@ import os
 // Режимы highlight (пересветы) должны реально менять данные
 // на передержанном кадре: клип vs смешение vs реконструкция.
 fn test_develop_highlight() {
-	path := '/home/igor/Изображения/Передержка фото/IMG_0641.CR3'
+	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
 	if !os.exists(path) {
 		eprintln('нет тестового CR3, пропуск')
 		return
