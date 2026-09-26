@@ -22,9 +22,17 @@ mut:
 }
 
 @[typedef]
+pub struct C.libraw_image_sizes_t {
+	width  u16 // видимый размер кадра до half-size, в ориентации сенсора
+	height u16
+	flip   int // поворот вывода: бит 4 - на 90° (ширина и высота меняются местами)
+}
+
+@[typedef]
 pub struct C.libraw_data_t {
 mut:
 	params C.libraw_output_params_t
+	sizes  C.libraw_image_sizes_t
 }
 
 @[typedef]
@@ -95,6 +103,10 @@ pub struct Developer {
 mut:
 	lr       &C.libraw_data_t = unsafe { nil }
 	unpacked bool
+	// Полный размер кадра в ориентации вывода - снимается в open():
+	// после half-проявки LibRaw держит в sizes уже уменьшенные значения
+	full_w int
+	full_h int
 pub:
 	path string
 }
@@ -121,9 +133,16 @@ pub fn open(path string) !&Developer {
 		C.libraw_close(lr)
 		return error('открытие «${path}»: ${err_text(code)}')
 	}
+	mut fw := int(lr.sizes.width)
+	mut fh := int(lr.sizes.height)
+	if lr.sizes.flip & 4 != 0 {
+		fw, fh = fh, fw
+	}
 	return &Developer{
-		lr:   lr
-		path: path
+		lr:     lr
+		path:   path
+		full_w: fw
+		full_h: fh
 	}
 }
 
@@ -166,13 +185,47 @@ pub fn (mut d Developer) develop(p DevParams) !DevImage {
 	if errc != 0 || isnil(img) {
 		return error('получение RGB-изображения: ${err_text(errc)}')
 	}
+	mut w := int(img.width)
+	mut h := int(img.height)
+	if p.half {
+		w, h = d.crop_half_edge(img)
+	}
 	return DevImage{
-		width:  int(img.width)
-		height: int(img.height)
+		width:  w
+		height: h
 		colors: int(img.colors)
 		bits:   int(img.bits)
 		img:    img
 	}
+}
+
+// crop_half_edge убирает неполные крайние столбец и строку half-size
+// проявки. Half-size собирает пиксель из ячейки Байера 2×2; при нечётном
+// размере кадра (у R8: 5999×3999) LibRaw округляет вверх, и последняя
+// ячейка неполная - в ней нет синего (B = 0) и занижен зелёный. На
+// превью это оранжевая полоса по правому и нижнему краю, а геометрия
+// объектива размазывает её на несколько пикселей. Режем до размера
+// «вниз» (полный / 2) прямо в буфере LibRaw: строки сдвигаются к началу
+// по возрастанию, новое смещение строки не больше старого - перекрытие
+// безопасно (memmove). Возвращает новые ширину и высоту.
+fn (d &Developer) crop_half_edge(img &C.libraw_processed_image_t) (int, int) {
+	w := int(img.width)
+	h := int(img.height)
+	nw := if d.full_w / 2 < w { d.full_w / 2 } else { w }
+	nh := if d.full_h / 2 < h { d.full_h / 2 } else { h }
+	if nw < 1 || nh < 1 {
+		return w, h
+	}
+	if nw != w {
+		bpp := int(img.colors) * int(img.bits) / 8
+		unsafe {
+			base := img.data
+			for y in 1 .. nh {
+				vmemmove(base + y * nw * bpp, base + y * w * bpp, nw * bpp)
+			}
+		}
+	}
+	return nw, nh
 }
 
 // Метаданные кадра для подбора профиля коррекции объектива (lensfun).

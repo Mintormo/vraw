@@ -596,15 +596,28 @@ fn show_viewer(mut cv vgui.Canvas, mut placeholder vgui.Stack) {
 	cv.visible = true
 }
 
+// SectionRow - ряд секции аккордеона: виджет и его фиксированная высота
+struct SectionRow {
+	w &vgui.Widget
+	h f32
+}
+
+// section собирает содержимое секции аккордеона: VBox из фиксированных
+// рядов (fit_content считает высоту секции по их сумме) с отступами.
+fn section(rows []SectionRow) &vgui.VBox {
+	mut v := vgui.create_vbox_fill()
+	v.set_spacing(6)
+	v.set_padding(8)
+	for r in rows {
+		v.add_fixed(r.w, r.h)
+	}
+	return v
+}
+
 fn main() {
 	mut app := vgui.create_app(theme: vgui.dark_theme())!
-	// Тема задаётся окну: create_app(theme) на окна не влияет
-	mut win := vgui.create_window(
-		title:  'vraw - проявка RAW'
-		width:  1280
-		height: 946
-		theme:  vgui.dark_theme()
-	)!
+	// Тема приложения: окно без своей темы получит её в add_window
+	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1280, height: 946)!
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
@@ -856,8 +869,6 @@ fn main() {
 	// «Тени/Света» как в RawTherapee: маска по РАЗМЫТОЙ люме (blur_luma),
 	// поэтому подъём теней сохраняет локальный контраст и не даёт плоской
 	// картинки, а приглушение светов не серит мелкие блики.
-	mut shl_title := vgui.label('Тени/Света')
-	shl_title.color = vgui.Color{150, 150, 150, 255}
 
 	mut hlt_lb := vgui.label('Света')
 	mut hlt_vl := value_label('0')
@@ -890,8 +901,6 @@ fn main() {
 	reset_defaults << 0.0
 
 	// Тон-эквалайзер: пять полос по яркости
-	mut eq_title := vgui.label('Тон-эквалайзер (EV)')
-	eq_title.color = vgui.Color{150, 150, 150, 255}
 	eq_names := ['Чёрные', 'Тени', 'Средние', 'Света', 'Белые']
 	mut eq_rows := []&vgui.HBox{}
 	for i in 0 .. 5 {
@@ -1064,8 +1073,6 @@ fn main() {
 	mut sat_row := slider_row(sat_lb, mut sat_sl, sat_vl, 1.0, lbl_w, val_w)
 	mut hlt_row := slider_row(hlt_lb, mut hlt_sl, hlt_vl, 0.0, lbl_w, val_w)
 	mut sht_row := slider_row(sht_lb, mut sht_sl, sht_vl, 0.0, lbl_w, val_w)
-	mut nr_title := vgui.label('Шумодав и ореолы')
-	nr_title.color = vgui.Color{150, 150, 150, 255}
 	mut imp_row := slider_row(imp_lb, mut imp_sl, imp_vl, 0.0, lbl_w, val_w)
 	mut nrl_row := slider_row(nrl_lb, mut nrl_sl, nrl_vl, 0.0, lbl_w, val_w)
 	mut nrc_row := slider_row(nrc_lb, mut nrc_sl, nrc_vl, 0.0, lbl_w, val_w)
@@ -1076,33 +1083,47 @@ fn main() {
 	// всё остальное (чекбоксы и ползунки) прокручивается в ScrollBox
 	// с тонким ползунком. Высота контента считается автоматически
 	// (scroll_box(0) суммирует add_fixed внутреннего VBox).
-	mut controls := vgui.create_vbox_fill()
-	controls.set_spacing(6)
-	controls.add_fixed(lens_cb, 26)
-	controls.add_fixed(lens_lb, 16)
-	controls.add_fixed(crv_cb, 26)
-	controls.add_fixed(hl_row, 26)
-	controls.add_fixed(exp_row, 26)
-	controls.add_fixed(sh_row, 26)
-	controls.add_fixed(con_row, 26)
-	controls.add_fixed(sat_row, 26)
-	controls.add_fixed(shl_title, 20)
-	controls.add_fixed(hlt_row, 26)
-	controls.add_fixed(sht_row, 26)
-	controls.add_fixed(eq_title, 20)
-	for mut row in eq_rows {
-		controls.add_fixed(row, 26)
+	// Инструменты сгруппированы в аккордеон: секции открываются
+	// независимо (multi), каждая высотой по содержимому (fit_content) -
+	// аккордеон целиком прокручивается в ScrollBox.
+	mut acc := vgui.accordion_multi()
+	acc.fit_content = true
+	acc.spacing = 4
+	acc.header_height = 30
+	acc.add_section_expanded('Коррекция', section([
+		SectionRow{lens_cb, 26},
+		SectionRow{lens_lb, 16},
+		SectionRow{crv_cb, 26},
+		SectionRow{hl_row, 26},
+	]))
+	acc.add_section_expanded('Экспозиция и тон', section([
+		SectionRow{exp_row, 26},
+		SectionRow{sh_row, 26},
+		SectionRow{con_row, 26},
+		SectionRow{sat_row, 26},
+	]))
+	acc.add_section('Тени/Света', section([
+		SectionRow{hlt_row, 26},
+		SectionRow{sht_row, 26},
+	]))
+	mut eq_items := []SectionRow{}
+	for row in eq_rows {
+		eq_items << SectionRow{row, 26}
 	}
-	controls.add_fixed(nr_title, 20)
-	controls.add_fixed(imp_row, 26)
-	controls.add_fixed(nrl_row, 26)
-	controls.add_fixed(nrc_row, 26)
-	controls.add_fixed(df_row, 26)
-	controls.add_fixed(q_row, 26)
+	acc.add_section('Тон-эквалайзер (EV)', section(eq_items))
+	acc.add_section('Шумодав и ореолы', section([
+		SectionRow{imp_row, 26},
+		SectionRow{nrl_row, 26},
+		SectionRow{nrc_row, 26},
+		SectionRow{df_row, 26},
+	]))
+	acc.add_section('Экспорт', section([
+		SectionRow{q_row, 26},
+	]))
 
 	mut scroll := vgui.scroll_box(0)
 	scroll.sb_width = 8
-	scroll.add(controls)
+	scroll.add(acc)
 
 	// Правая панель - свой фон и внутренние отступы; от области
 	// просмотра её отделяет тонкая вертикальная линия.
