@@ -37,12 +37,12 @@ fn test_denoise_luma() {
 
 	// Нулевая сила - буфер не тронут
 	mut same := src.clone()
-	denoise(&u16(same.data), w, h, 0, 0)
+	denoise(unsafe { &u16(same.data) }, w, h, 0, 0)
 	assert same == src
 
 	mean0, var0 := luma_stats(src, npix)
 	mut den := src.clone()
-	denoise(&u16(den.data), w, h, 100, 0)
+	denoise(unsafe { &u16(den.data) }, w, h, 100, 0)
 	mean1, var1 := luma_stats(den, npix)
 
 	// Дисперсия шума падает в разы, среднее сохраняется
@@ -77,7 +77,7 @@ fn test_denoise_edge_preserved() {
 		}
 	}
 	mut den := src.clone()
-	denoise(&u16(den.data), w, h, 100, 0)
+	denoise(unsafe { &u16(den.data) }, w, h, 100, 0)
 	// Средние по глубине половин (вдали от края)
 	mut dark := f64(0)
 	mut bright := f64(0)
@@ -113,7 +113,7 @@ fn test_denoise_chroma() {
 		sat0 += f64(if d < 0 { -d } else { d })
 	}
 	mut den := src.clone()
-	denoise(&u16(den.data), w, h, 0, 100)
+	denoise(unsafe { &u16(den.data) }, w, h, 0, 100)
 	mut sat1 := f64(0)
 	mut sum := f64(0)
 	for i in 0 .. npix {
@@ -161,11 +161,11 @@ fn test_impulse() {
 
 	// Нулевая сила - тождественность
 	mut same := src.clone()
-	impulse(&u16(same.data), w, h, 0)
+	impulse(unsafe { &u16(same.data) }, w, h, 0)
 	assert same == src
 
 	mut out := src.clone()
-	impulse(&u16(out.data), w, h, 60)
+	impulse(unsafe { &u16(out.data) }, w, h, 60)
 
 	// Выбросы вернулись к фону (20000 +- шум)
 	assert out[hot] > 15000 && out[hot] < 25000, 'горячий: ${out[hot]}'
@@ -229,11 +229,11 @@ fn test_defringe() {
 
 	// Нулевая сила - тождественность
 	mut same := src.clone()
-	defringe(&u16(same.data), w, h, 0)
+	defringe(unsafe { &u16(same.data) }, w, h, 0)
 	assert same == src
 
 	mut out := src.clone()
-	defringe(&u16(out.data), w, h, 100)
+	defringe(unsafe { &u16(out.data) }, w, h, 100)
 
 	// Кайма обесцветилась: |r-g| в её пикселях упал хотя бы вдвое
 	fi := (32 * w + w / 2) * 3

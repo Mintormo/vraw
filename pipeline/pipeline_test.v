@@ -18,7 +18,7 @@ fn test_pipeline_basics() {
 	// Нейтральные параметры: монотонно, серое остаётся серым,
 	// края на месте (0 -> 0, 65535 -> 255)
 	mut out := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ dither: false }, mut out, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut out, 4)
 	assert out[0] == 0
 	assert out[(npix - 1) * 4] == 255
 	for i in 0 .. npix {
@@ -32,25 +32,25 @@ fn test_pipeline_basics() {
 
 	// Экспозиция +1 EV делает средний тон светлее
 	mut brighter := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ exposure: 1.0, dither: false }, mut brighter, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ exposure: 1.0, dither: false }, mut brighter, 4)
 	assert brighter[128 * 4] > out[128 * 4]
 
 	// Проявка теней поднимает тёмное, но не трогает белое
 	mut lifted := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ shadows: 1.0, dither: false }, mut lifted, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ shadows: 1.0, dither: false }, mut lifted, 4)
 	assert lifted[16 * 4] > out[16 * 4]
 	assert lifted[(npix - 1) * 4] == out[(npix - 1) * 4]
 
 	// Контраст: тени темнее, света светлее, середина на месте (+-2)
 	mut contr := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ contrast: 1.0, dither: false }, mut contr, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ contrast: 1.0, dither: false }, mut contr, 4)
 	assert contr[32 * 4] < out[32 * 4]
 	assert contr[224 * 4] > out[224 * 4]
 
 	// Насыщенность 0 обесцвечивает цветной пиксель
 	col := [u16(50000), 20000, 10000]
 	mut cout := []u8{len: 3}
-	apply(&u16(col.data), nomask, 1, Params{ saturation: 0.0, dither: false }, mut cout, 3)
+	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ saturation: 0.0, dither: false }, mut cout, 3)
 	assert cout[0] == cout[1]
 	assert cout[1] == cout[2]
 
@@ -58,7 +58,7 @@ fn test_pipeline_basics() {
 	mut eqp := Params{ dither: false }
 	eqp.eq[2] = 1.0
 	mut eout := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, eqp, mut eout, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, eqp, mut eout, 4)
 	assert eout[128 * 4] > out[128 * 4]
 	assert eout[(npix - 1) * 4] == out[(npix - 1) * 4]
 }
@@ -78,7 +78,7 @@ fn test_camera_curve() {
 	nomask := &u16(unsafe { nil })
 
 	mut base := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ dither: false }, mut base, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut base, 4)
 
 	// Тождественная кривая - результат байт в байт как без кривой
 	mut ident := []f32{len: 256}
@@ -86,7 +86,7 @@ fn test_camera_curve() {
 		ident[i] = f32(i)
 	}
 	mut same := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ curve: ident, dither: false }, mut same, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ curve: ident, dither: false }, mut same, 4)
 	assert base == same
 
 	// Подсветляющая кривая (t -> 255*sqrt(t/255)): середина светлее, края на месте
@@ -95,7 +95,7 @@ fn test_camera_curve() {
 		lift[i] = 255.0 * math.sqrtf(f32(i) / 255.0)
 	}
 	mut up := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ curve: lift, dither: false }, mut up, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ curve: lift, dither: false }, mut up, 4)
 	assert up[(npix / 4) * 4] > base[(npix / 4) * 4]
 	assert up[0] == base[0]
 	assert up[(npix - 1) * 4] == base[(npix - 1) * 4]
@@ -110,7 +110,7 @@ fn test_camera_curve() {
 		ref_[i * 3 + 1] = u
 		ref_[i * 3 + 2] = u
 	}
-	curve := match_curve(&u16(src.data), npix, &u8(ref_.data), npix)
+	curve := match_curve(unsafe { &u16(src.data) }, npix, unsafe { &u8(ref_.data) }, npix)
 	assert curve.len == 256
 	for v in 1 .. 256 {
 		assert curve[v] >= curve[v - 1] // монотонность
@@ -147,23 +147,23 @@ fn test_shadows_highlights() {
 			src[i + 2] = v
 		}
 	}
-	mask := blur_luma(&u16(src.data), w, h)
+	mask := blur_luma(unsafe { &u16(src.data) }, w, h)
 	assert mask.len == npix
 	// Маска размыта: в глубине тёмной половины она темнее, чем в яркой
 	assert mask[(h / 2) * w + 8] < mask[(h / 2) * w + w - 8]
 
 	mut base := []u8{len: npix * 4}
-	apply(&u16(src.data), &u16(mask.data), npix, Params{ dither: false }, mut base, 4)
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ dither: false }, mut base, 4)
 
 	// Нулевые sh-параметры с маской = как без маски
 	mut nom := []u8{len: npix * 4}
-	apply(&u16(src.data), &u16(unsafe { nil }), npix, Params{ dither: false }, mut nom, 4)
+	apply(unsafe { &u16(src.data) }, &u16(unsafe { nil }), npix, Params{ dither: false }, mut nom, 4)
 	assert base == nom
 
 	// Подъём теней: тёмная половина светлее, яркая почти не тронута,
 	// перепад шахматки (локальный контраст) не схлопывается в ноль
 	mut sh := []u8{len: npix * 4}
-	apply(&u16(src.data), &u16(mask.data), npix, Params{ sh_shadows: 80, dither: false }, mut sh, 4)
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ sh_shadows: 80, dither: false }, mut sh, 4)
 	di := ((h / 2) * w + 8) * 4 // глубина тёмной половины
 	bi := ((h / 2) * w + w - 8) * 4 // глубина яркой половины
 	assert sh[di] > base[di]
@@ -173,7 +173,7 @@ fn test_shadows_highlights() {
 
 	// Приглушение светов: яркая половина темнее, тёмная почти не тронута
 	mut hl := []u8{len: npix * 4}
-	apply(&u16(src.data), &u16(mask.data), npix, Params{ sh_highlights: 80, dither: false }, mut hl, 4)
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ sh_highlights: 80, dither: false }, mut hl, 4)
 	assert hl[bi] < base[bi]
 	assert int(base[di]) - int(hl[di]) <= 3
 }
@@ -197,15 +197,15 @@ fn test_dither() {
 	// dither: false - округление без шума, детерминировано
 	mut nod1 := []u8{len: npix * 4}
 	mut nod2 := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ dither: false }, mut nod1, 4)
-	apply(&u16(src.data), nomask, npix, Params{ dither: false }, mut nod2, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut nod1, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut nod2, 4)
 	assert nod1 == nod2
 
 	// dither: true - тоже детерминировано (два прогона на одном входе совпадают)
 	mut d1 := []u8{len: npix * 4}
 	mut d2 := []u8{len: npix * 4}
-	apply(&u16(src.data), nomask, npix, Params{ dither: true }, mut d1, 4)
-	apply(&u16(src.data), nomask, npix, Params{ dither: true }, mut d2, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: true }, mut d1, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: true }, mut d2, 4)
 	assert d1 == d2
 
 	// Дизер разбивает ступени: дисперсия разностей соседних пикселей выше

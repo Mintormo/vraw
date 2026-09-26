@@ -16,7 +16,7 @@ fn test_vignetting_gain_profile() {
 	w := 600
 	h := 400
 	mut buf := []u16{len: w * h * 3, init: 2000}
-	assert c.vignetting(&u16(buf.data), w, h, 24.0, 5.6)
+	assert c.vignetting(unsafe { &u16(buf.data) }, w, h, 24.0, 5.6)
 
 	ci := ((h / 2) * w + w / 2) * 3
 	mid := ((h * 3 / 4) * w + w * 3 / 4) * 3 // ~половина радиуса
@@ -65,7 +65,7 @@ fn test_geometry_remap() {
 		}
 	}
 	orig := buf.clone()
-	assert c.geometry(&u16(buf.data), w, h, 24.0)
+	assert c.geometry(unsafe { &u16(buf.data) }, w, h, 24.0)
 
 	row := (h / 2) * w * 3
 	ci := row + (w / 2) * 3

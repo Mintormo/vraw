@@ -59,14 +59,15 @@ fn highlight_name(h int) string {
 }
 
 // apply_pipeline прогоняет превью через пайплайн в холст и обновляет
-// гистограмму. Вызывается на каждое движение любого ползунка, поэтому
-// никаких уведомлений отсюда - только картинка.
+// гистограмму. Вызывается при отпускании тонального ползунка и на каждое
+// одиночное изменение (колесо, клавиши, сброс), поэтому никаких
+// уведомлений отсюда - только картинка.
 fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if st.suppress || st.linear.len == 0 {
 		return
 	}
 	npix := st.pw * st.ph
-	pipeline.apply(&u16(st.linear.data), &u16(st.mask.data), npix, st.params, mut cv.pixels, 4)
+	pipeline.apply(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, npix, st.params, mut cv.pixels, 4)
 	cv.mark_dirty()
 	render_histogram(mut hist, cv.pixels)
 }
@@ -93,9 +94,9 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	// Коррекция объектива - статичное свойство кадра, поэтому применяется
 	// один раз к сырью, а не в пайплайне: ползунки остаются живыми.
 	if st.lens_corr && !isnil(st.corr) {
-		st.corr.vignetting(&u16(st.raw_linear.data), st.pw, st.ph, st.meta.focal, st.meta.aperture)
+		st.corr.vignetting(unsafe { &u16(st.raw_linear.data) }, st.pw, st.ph, st.meta.focal, st.meta.aperture)
 		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
-		st.corr.geometry(&u16(st.raw_linear.data), st.pw, st.ph, st.meta.focal)
+		st.corr.geometry(unsafe { &u16(st.raw_linear.data) }, st.pw, st.ph, st.meta.focal)
 	}
 
 	if resized {
@@ -124,19 +125,19 @@ fn prepare_linear(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	st.linear = st.raw_linear.clone()
 	// Импульсы - до шумодава: вейвлет размазал бы выброс по уровням
 	if st.nr_impulse > 0 {
-		pipeline.impulse(&u16(st.linear.data), st.pw, st.ph, st.nr_impulse)
+		pipeline.impulse(unsafe { &u16(st.linear.data) }, st.pw, st.ph, st.nr_impulse)
 	}
 	if st.nr_luma > 0 || st.nr_chroma > 0 {
-		pipeline.denoise(&u16(st.linear.data), st.pw, st.ph, st.nr_luma, st.nr_chroma)
+		pipeline.denoise(unsafe { &u16(st.linear.data) }, st.pw, st.ph, st.nr_luma, st.nr_chroma)
 	}
 	if st.defringe > 0 {
-		pipeline.defringe(&u16(st.linear.data), st.pw, st.ph, st.defringe)
+		pipeline.defringe(unsafe { &u16(st.linear.data) }, st.pw, st.ph, st.defringe)
 	}
 	st.nr_applied = [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]!
 
 	// Маска «Тени/Света» зависит только от сырья (после коррекции
 	// объектива и шумодава!), поэтому считается здесь, а не на каждый ползунок.
-	st.mask = pipeline.blur_luma(&u16(st.linear.data), st.pw, st.ph)
+	st.mask = pipeline.blur_luma(unsafe { &u16(st.linear.data) }, st.pw, st.ph)
 
 	apply_pipeline(mut st, mut cv, mut hist)
 }
@@ -206,7 +207,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (bool, string)) {
 	}
 	mask := pipeline.blur_luma(img.data_u16(), w, h)
 	mut rgb := []u8{len: w * h * 3}
-	pipeline.apply(img.data_u16(), &u16(mask.data), w * h, job.params, mut rgb, 3)
+	pipeline.apply(img.data_u16(), unsafe { &u16(mask.data) }, w * h, job.params, mut rgb, 3)
 	img.free()
 	stbi.stbi_write_jpg(job.dst, w, h, 3, rgb.data, job.quality) or {
 		report(mut app, on_done, false, 'Не удалось сохранить: ${err}')
@@ -334,7 +335,7 @@ fn setup_curve(mut st State, mut crv_cb vgui.CheckBox, mut cv vgui.Canvas, mut h
 		crv_cb.enabled = false
 		return
 	}
-	st.curve = pipeline.match_curve(&u16(st.linear.data), st.pw * st.ph, timg.data,
+	st.curve = pipeline.match_curve(unsafe { &u16(st.linear.data) }, st.pw * st.ph, timg.data,
 		timg.width * timg.height)
 	timg.free()
 	crv_cb.enabled = true
@@ -560,14 +561,25 @@ fn main() {
 	nrc_sl.on_release = nr_release
 	df_sl.on_release = nr_release
 
+	// Тональные ползунки: при перетаскивании обновляются только параметры
+	// и подпись, пайплайн (~50 мс на превью) - в on_release, чтобы драг
+	// не подтормаживал. Одиночные on_change (колесо, клавиши, «×», «Авто»)
+	// применяются сразу - dragging у них false.
+	tone_release := fn [mut st, mut cv, mut hist] (v f32) {
+		apply_pipeline(mut st, mut cv, mut hist)
+	}
+
 	mut exp_lb := vgui.label('Экспозиция')
 	mut exp_vl := value_label('0.00')
 	mut exp_sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-	exp_sl.on_change = fn [mut st, mut cv, mut hist, mut exp_vl] (v f32) {
+	exp_sl.on_change = fn [mut st, mut cv, mut hist, mut exp_vl, mut exp_sl] (v f32) {
 		st.params.exposure = v
 		exp_vl.text = '${v:.2f}'
-		apply_pipeline(mut st, mut cv, mut hist)
+		if !exp_sl.dragging {
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
 	}
+	exp_sl.on_release = tone_release
 	reset_sliders << exp_sl
 	reset_defaults << 0.0
 
@@ -585,33 +597,42 @@ fn main() {
 	mut sh_lb := vgui.label('Тени')
 	mut sh_vl := value_label('0.00')
 	mut sh_sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-	sh_sl.on_change = fn [mut st, mut cv, mut hist, mut sh_vl] (v f32) {
+	sh_sl.on_change = fn [mut st, mut cv, mut hist, mut sh_vl, mut sh_sl] (v f32) {
 		st.params.shadows = v
 		sh_vl.text = '${v:.2f}'
-		apply_pipeline(mut st, mut cv, mut hist)
+		if !sh_sl.dragging {
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
 	}
+	sh_sl.on_release = tone_release
 	reset_sliders << sh_sl
 	reset_defaults << 0.0
 
 	mut con_lb := vgui.label('Контраст')
 	mut con_vl := value_label('0.00')
 	mut con_sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-	con_sl.on_change = fn [mut st, mut cv, mut hist, mut con_vl] (v f32) {
+	con_sl.on_change = fn [mut st, mut cv, mut hist, mut con_vl, mut con_sl] (v f32) {
 		st.params.contrast = v
 		con_vl.text = '${v:.2f}'
-		apply_pipeline(mut st, mut cv, mut hist)
+		if !con_sl.dragging {
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
 	}
+	con_sl.on_release = tone_release
 	reset_sliders << con_sl
 	reset_defaults << 0.0
 
 	mut sat_lb := vgui.label('Насыщенность')
 	mut sat_vl := value_label('1.00')
 	mut sat_sl := vgui.slider_horizontal(0.0, 4.0, 1.0)
-	sat_sl.on_change = fn [mut st, mut cv, mut hist, mut sat_vl] (v f32) {
+	sat_sl.on_change = fn [mut st, mut cv, mut hist, mut sat_vl, mut sat_sl] (v f32) {
 		st.params.saturation = v
 		sat_vl.text = '${v:.2f}'
-		apply_pipeline(mut st, mut cv, mut hist)
+		if !sat_sl.dragging {
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
 	}
+	sat_sl.on_release = tone_release
 	reset_sliders << sat_sl
 	reset_defaults << 1.0
 
@@ -625,11 +646,14 @@ fn main() {
 	mut hlt_vl := value_label('0')
 	mut hlt_sl := vgui.slider_horizontal(0, 100, 0)
 	hlt_sl.step = 1
-	hlt_sl.on_change = fn [mut st, mut cv, mut hist, mut hlt_vl] (v f32) {
+	hlt_sl.on_change = fn [mut st, mut cv, mut hist, mut hlt_vl, mut hlt_sl] (v f32) {
 		st.params.sh_highlights = v
 		hlt_vl.text = '${int(v)}'
-		apply_pipeline(mut st, mut cv, mut hist)
+		if !hlt_sl.dragging {
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
 	}
+	hlt_sl.on_release = tone_release
 	reset_sliders << hlt_sl
 	reset_defaults << 0.0
 
@@ -637,11 +661,14 @@ fn main() {
 	mut sht_vl := value_label('0')
 	mut sht_sl := vgui.slider_horizontal(0, 100, 0)
 	sht_sl.step = 1
-	sht_sl.on_change = fn [mut st, mut cv, mut hist, mut sht_vl] (v f32) {
+	sht_sl.on_change = fn [mut st, mut cv, mut hist, mut sht_vl, mut sht_sl] (v f32) {
 		st.params.sh_shadows = v
 		sht_vl.text = '${int(v)}'
-		apply_pipeline(mut st, mut cv, mut hist)
+		if !sht_sl.dragging {
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
 	}
+	sht_sl.on_release = tone_release
 	reset_sliders << sht_sl
 	reset_defaults << 0.0
 
@@ -654,11 +681,14 @@ fn main() {
 		lb := vgui.label(eq_names[i])
 		mut vl := value_label('0.00')
 		mut sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-		sl.on_change = fn [mut st, mut cv, mut hist, mut vl, i] (v f32) {
+		sl.on_change = fn [mut st, mut cv, mut hist, mut vl, mut sl, i] (v f32) {
 			st.params.eq[i] = v
 			vl.text = '${v:.2f}'
-			apply_pipeline(mut st, mut cv, mut hist)
+			if !sl.dragging {
+				apply_pipeline(mut st, mut cv, mut hist)
+			}
 		}
+		sl.on_release = tone_release
 		reset_sliders << sl
 		reset_defaults << 0.0
 		eq_rows << slider_row(lb, mut sl, vl, 0.0, lbl_w, val_w)
