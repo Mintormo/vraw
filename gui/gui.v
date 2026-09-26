@@ -25,7 +25,8 @@ const raw_patterns = 'CR3;CR2;CRW;NEF;ARW;DNG;RAF;ORF;RW2;cr3;cr2;crw;nef;arw;dn
 struct State {
 mut:
 	dev          &raw.Developer = unsafe { nil }
-	raw_linear   []u16 // превью после LibRaw и коррекции объектива, ДО шумодава
+	dev_linear   []u16 // превью прямо из LibRaw, без коррекции объектива
+	raw_linear   []u16 // превью после коррекции объектива, ДО шумодава
 	linear       []u16 // линейное 16-битное RGB-превью (half-size), сырьё пайплайна
 	mask         []u16 // размытая люма превью - маска «Тени/Света» (pipeline.blur_luma)
 	pw           int   // размеры превью
@@ -46,6 +47,14 @@ mut:
 	defringe     f32 // подавление ореолов 0..100
 	nr_applied   [4]f32 = [f32(-1), -1, -1, -1]! // значения последней подготовки сырья
 	save_threads []thread // хендлы фоновых сохранений: wait после app.run()
+	// Подготовка сырья в фоне (prep_worker): не больше одного воркера.
+	// Запрос во время работы только меняет настройки - prep_done сверит
+	// их с применёнными и запустит ещё один проход.
+	file_gen     int  // номер открытого файла: результат старого файла отбрасывается
+	lens_dirty   bool // raw_linear устарел - нужна коррекция объектива из dev_linear
+	prep_running bool
+	prep_threads []thread
+	prep_done    fn (PrepResult) = unsafe { nil } // приём результата в главном потоке
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -73,8 +82,11 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 }
 
 // load_preview проявляет открытый RAW в линейное 16-битное превью
-// (единственный вызов LibRaw на файл) и применяет пайплайн.
-fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager) {
+// (LibRaw, ~0.1 с, в главном потоке) и запускает подготовку сырья:
+// при async - в фоне (смена пересветов), иначе сразу (открытие файла -
+// камерной кривой нужна готовая картинка; смена размера - холст и
+// буферы должны совпасть до первого apply).
+fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager, mut app vgui.App, async bool) {
 	if isnil(st.dev) {
 		return
 	}
@@ -84,20 +96,17 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	}
 	st.hl_developed = st.highlight
 	resized := img.width != st.pw || img.height != st.ph
+	if resized || !async {
+		// Воркер считает буфер старого размера - дождаться до смены pw/ph
+		wait_prep(mut st)
+	}
 	st.pw = img.width
 	st.ph = img.height
 	n := img.width * img.height * 3
-	st.raw_linear = []u16{len: n}
-	unsafe { vmemcpy(st.raw_linear.data, img.data_u16(), n * 2) }
+	st.dev_linear = []u16{len: n}
+	unsafe { vmemcpy(st.dev_linear.data, img.data_u16(), n * 2) }
 	img.free()
-
-	// Коррекция объектива - статичное свойство кадра, поэтому применяется
-	// один раз к сырью, а не в пайплайне: ползунки остаются живыми.
-	if st.lens_corr && !isnil(st.corr) {
-		st.corr.vignetting(unsafe { &u16(st.raw_linear.data) }, st.pw, st.ph, st.meta.focal, st.meta.aperture)
-		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
-		st.corr.geometry(unsafe { &u16(st.raw_linear.data) }, st.pw, st.ph, st.meta.focal)
-	}
+	st.lens_dirty = true
 
 	if resized {
 		// Холст под новый размер: тот же приём, что в Canvas.load_from_surface.
@@ -111,35 +120,141 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 		cv.fit_to_view()
 	}
 
-	prepare_linear(mut st, mut cv, mut hist)
+	if async && !resized {
+		request_prep(mut st, mut app, true)
+	} else {
+		take_prep(mut st, prep_compute(make_prep_job(mut st)))
+		apply_pipeline(mut st, mut cv, mut hist)
+	}
 }
 
-// prepare_linear готовит рабочее сырьё пайплайна из raw_linear: шумодав и
-// подавление ореолов (~1 с и ~0.5 с на превью при ненулевой силе), затем
-// маска «Тени/Света». Отдельно от load_preview, чтобы смена их ползунков
-// не гоняла LibRaw и коррекцию объектива заново.
-fn prepare_linear(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
-	if st.raw_linear.len == 0 {
-		return
-	}
-	st.linear = st.raw_linear.clone()
-	// Импульсы - до шумодава: вейвлет размазал бы выброс по уровням
-	if st.nr_impulse > 0 {
-		pipeline.impulse(unsafe { &u16(st.linear.data) }, st.pw, st.ph, st.nr_impulse)
-	}
-	if st.nr_luma > 0 || st.nr_chroma > 0 {
-		pipeline.denoise(unsafe { &u16(st.linear.data) }, st.pw, st.ph, st.nr_luma, st.nr_chroma)
-	}
-	if st.defringe > 0 {
-		pipeline.defringe(unsafe { &u16(st.linear.data) }, st.pw, st.ph, st.defringe)
-	}
-	st.nr_applied = [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]!
+// PrepJob - снимок для подготовки сырья: коррекция объектива (только при
+// redo_lens - src это выход LibRaw), импульсы, шумодав, ореолы, маска
+// «Тени/Света». src - собственная копия буфера. corr общий с GUI: его
+// освобождение (открытие другого файла, выход) сначала ждёт воркер
+// (wait_prep), а воркер одновременно работает только один.
+struct PrepJob {
+	gen       int
+	src       []u16
+	w         int
+	h         int
+	redo_lens bool
+	corr      &lens.Corrector = unsafe { nil } // nil - без коррекции
+	focal     f32
+	aperture  f32
+	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
+}
 
+struct PrepResult {
+	gen        int
+	raw_linear []u16 // после коррекции объектива; пусто, если коррекция не пересчитывалась
+	linear     []u16
+	mask       []u16
+	nr         [4]f32
+}
+
+// make_prep_job снимает параметры подготовки с State (главный поток)
+fn make_prep_job(mut st State) PrepJob {
+	redo := st.lens_dirty
+	st.lens_dirty = false
+	return PrepJob{
+		gen:       st.file_gen
+		src:       if redo { st.dev_linear.clone() } else { st.raw_linear.clone() }
+		w:         st.pw
+		h:         st.ph
+		redo_lens: redo
+		corr:      if st.lens_corr { st.corr } else { unsafe { nil } }
+		focal:     st.meta.focal
+		aperture:  st.meta.aperture
+		nr:        [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]!
+	}
+}
+
+// prep_compute - сама подготовка сырья, без обращений к State и vgui:
+// выполняется и в фоне (prep_worker), и напрямую (открытие файла).
+// Коррекция объектива ~0.6 с, импульсы ~1 с, шумодав ~1 с, ореолы ~0.5 с,
+// маска ~0.35 с на превью.
+fn prep_compute(job PrepJob) PrepResult {
+	buf := unsafe { &u16(job.src.data) }
+	if job.redo_lens && !isnil(job.corr) {
+		job.corr.vignetting(buf, job.w, job.h, job.focal, job.aperture)
+		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
+		job.corr.geometry(buf, job.w, job.h, job.focal)
+	}
+	// raw_linear - точка возврата для следующего пересчёта шумодава
+	raw_linear := if job.redo_lens { job.src.clone() } else { []u16{} }
+	// Импульсы - до шумодава: вейвлет размазал бы выброс по уровням
+	if job.nr[0] > 0 {
+		pipeline.impulse(buf, job.w, job.h, job.nr[0])
+	}
+	if job.nr[1] > 0 || job.nr[2] > 0 {
+		pipeline.denoise(buf, job.w, job.h, job.nr[1], job.nr[2])
+	}
+	if job.nr[3] > 0 {
+		pipeline.defringe(buf, job.w, job.h, job.nr[3])
+	}
 	// Маска «Тени/Света» зависит только от сырья (после коррекции
 	// объектива и шумодава!), поэтому считается здесь, а не на каждый ползунок.
-	st.mask = pipeline.blur_luma(unsafe { &u16(st.linear.data) }, st.pw, st.ph)
+	mask := pipeline.blur_luma(buf, job.w, job.h)
+	return PrepResult{
+		gen:        job.gen
+		raw_linear: raw_linear
+		linear:     job.src
+		mask:       mask
+		nr:         job.nr
+	}
+}
 
-	apply_pipeline(mut st, mut cv, mut hist)
+// take_prep принимает результат подготовки в State (главный поток).
+// Буферы передаются без копирования: воркер их больше не трогает.
+fn take_prep(mut st State, res PrepResult) {
+	if res.raw_linear.len > 0 {
+		st.raw_linear = res.raw_linear
+	}
+	st.linear = res.linear
+	st.mask = res.mask
+	st.nr_applied = res.nr
+}
+
+// prep_worker выполняется в spawn; результат уходит в главный поток
+// через app.post() (единственный потокобезопасный вход vgui).
+fn prep_worker(job PrepJob, mut app vgui.App, on_done fn (PrepResult)) {
+	res := prep_compute(job)
+	app.post(fn [on_done, res] () {
+		on_done(res)
+	})
+}
+
+// request_prep запускает подготовку сырья в фоне (коррекция объектива,
+// шумодав, ореолы) - окно не замирает. redo_lens - нужна коррекция
+// объектива заново (из dev_linear). Если воркер уже работает, запрос
+// откладывается: prep_done увидит изменившиеся настройки и запустит
+// один проход с последними значениями.
+fn request_prep(mut st State, mut app vgui.App, redo_lens bool) {
+	if redo_lens {
+		st.lens_dirty = true
+	}
+	if st.dev_linear.len == 0 {
+		return
+	}
+	if st.prep_running {
+		return
+	}
+	st.prep_running = true
+	job := make_prep_job(mut st)
+	st.prep_threads << spawn prep_worker(job, mut app, st.prep_done)
+}
+
+// wait_prep дожидается фонового воркера.
+// Нужна перед освобождением st.corr (воркер им пользуется) и перед
+// синхронной подготовкой. Результат дождавшегося воркера уже в очереди
+// app.post - его отбросит проверка file_gen/prep_running в prep_done.
+fn wait_prep(mut st State) {
+	for t in st.prep_threads {
+		t.wait()
+	}
+	st.prep_threads.clear()
+	st.prep_running = false
 }
 
 // SaveJob - всё, что нужно фоновому потоку сохранения, копиями по значению.
@@ -440,6 +555,22 @@ fn main() {
 	// Левый нижний угол - над превью, панель управления не перекрывается.
 	mut nm := vgui.notification_manager_at(.top_left)
 
+	// Приём результата фоновой подготовки сырья (главный поток, из
+	// app.post). Результат старого файла или уже дождавшегося воркера
+	// (wait_prep сбросил prep_running) отбрасывается.
+	st.prep_done = fn [mut st, mut cv, mut hist, mut app] (res PrepResult) {
+		if res.gen != st.file_gen || !st.prep_running {
+			return
+		}
+		wait_prep(mut st) // воркер уже отдал результат - join мгновенный
+		take_prep(mut st, res)
+		apply_pipeline(mut st, mut cv, mut hist)
+		if st.lens_dirty || st.nr_applied != [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]! {
+			// Пока воркер считал, настройки снова поменялись
+			request_prep(mut st, mut app, false)
+		}
+	}
+
 	// ── Ползунки пайплайна ──
 	// set_value вызывает on_change, поэтому сброс - это просто установка
 	// значений; st.suppress не даёт пайплайну запуститься 9 раз подряд.
@@ -447,13 +578,14 @@ fn main() {
 	mut reset_defaults := []f32{}
 
 	// Коррекция объектива (lensfun): применяется к линейному сырью до
-	// пайплайна, поэтому переключение = перепроявка превью (~0.1 с),
-	// как у пересветов. Подпись под чекбоксом - найденный профиль.
+	// пайплайна. Переключение пересчитывает сырьё из dev_linear (без
+	// LibRaw) в фоне, ~0.6 с + шумодав - окно не замирает.
+	// Подпись под чекбоксом - найденный профиль.
 	mut lens_cb := vgui.checkbox('Коррекция объектива')
 	lens_cb.checked = true
-	lens_cb.on_change = fn [mut st, mut cv, mut hist, mut nm] (v bool) {
+	lens_cb.on_change = fn [mut st, mut app] (v bool) {
 		st.lens_corr = v
-		load_preview(mut st, mut cv, mut hist, mut nm)
+		request_prep(mut st, mut app, true)
 	}
 	mut lens_lb := vgui.label('')
 	lens_lb.color = vgui.Color{150, 150, 150, 255}
@@ -480,7 +612,7 @@ fn main() {
 	mut hl_vl := value_label('клип')
 	mut hl_sl := vgui.slider_horizontal(0, 9, 0)
 	hl_sl.step = 1
-	hl_sl.on_change = fn [mut st, mut cv, mut hist, mut nm, mut hl_vl, mut hl_sl] (v f32) {
+	hl_sl.on_change = fn [mut st, mut cv, mut hist, mut nm, mut app, mut hl_vl, mut hl_sl] (v f32) {
 		st.highlight = int(v)
 		hl_vl.text = highlight_name(int(v))
 		if hl_sl.dragging {
@@ -488,73 +620,74 @@ fn main() {
 			// перепроявка в on_release
 			return
 		}
-		load_preview(mut st, mut cv, mut hist, mut nm)
+		load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
 	}
-	hl_sl.on_release = fn [mut st, mut cv, mut hist, mut nm] (v f32) {
+	hl_sl.on_release = fn [mut st, mut cv, mut hist, mut nm, mut app] (v f32) {
 		if st.highlight == st.hl_developed {
 			return
 		}
-		load_preview(mut st, mut cv, mut hist, mut nm)
+		load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
 	}
 
-	// Шумодав и ореолы - подготовка сырья (prepare_linear, ~1 с на превью),
-	// не тональный пайплайн: во время перетаскивания обновляется только
-	// подпись, пересчёт - при отпускании (как у пересветов). LibRaw и
-	// коррекция объектива при этом не перезапускаются - сырьё в raw_linear.
+	// Шумодав и ореолы - подготовка сырья (~1 с на превью, в фоне -
+	// request_prep), не тональный пайплайн: во время перетаскивания
+	// обновляется только подпись, пересчёт - при отпускании (как у
+	// пересветов). LibRaw и коррекция объектива при этом не
+	// перезапускаются - сырьё в raw_linear.
 	mut imp_lb := vgui.label('Импульсный')
 	mut imp_vl := value_label('0')
 	mut imp_sl := vgui.slider_horizontal(0, 100, 0)
 	imp_sl.step = 1
-	imp_sl.on_change = fn [mut st, mut cv, mut hist, mut imp_vl, mut imp_sl] (v f32) {
+	imp_sl.on_change = fn [mut st, mut app, mut imp_vl, mut imp_sl] (v f32) {
 		st.nr_impulse = v
 		imp_vl.text = '${int(v)}'
 		if imp_sl.dragging {
 			// Пересчёт ~1 с - при перетаскивании только подпись
 			return
 		}
-		prepare_linear(mut st, mut cv, mut hist)
+		request_prep(mut st, mut app, false)
 	}
 	mut nrl_lb := vgui.label('Яркостный')
 	mut nrl_vl := value_label('0')
 	mut nrl_sl := vgui.slider_horizontal(0, 100, 0)
 	nrl_sl.step = 1
-	nrl_sl.on_change = fn [mut st, mut cv, mut hist, mut nrl_vl, mut nrl_sl] (v f32) {
+	nrl_sl.on_change = fn [mut st, mut app, mut nrl_vl, mut nrl_sl] (v f32) {
 		st.nr_luma = v
 		nrl_vl.text = '${int(v)}'
 		if nrl_sl.dragging {
 			return
 		}
-		prepare_linear(mut st, mut cv, mut hist)
+		request_prep(mut st, mut app, false)
 	}
 	mut nrc_lb := vgui.label('Цветовой')
 	mut nrc_vl := value_label('0')
 	mut nrc_sl := vgui.slider_horizontal(0, 100, 0)
 	nrc_sl.step = 1
-	nrc_sl.on_change = fn [mut st, mut cv, mut hist, mut nrc_vl, mut nrc_sl] (v f32) {
+	nrc_sl.on_change = fn [mut st, mut app, mut nrc_vl, mut nrc_sl] (v f32) {
 		st.nr_chroma = v
 		nrc_vl.text = '${int(v)}'
 		if nrc_sl.dragging {
 			return
 		}
-		prepare_linear(mut st, mut cv, mut hist)
+		request_prep(mut st, mut app, false)
 	}
 	mut df_lb := vgui.label('Ореолы')
 	mut df_vl := value_label('0')
 	mut df_sl := vgui.slider_horizontal(0, 100, 0)
 	df_sl.step = 1
-	df_sl.on_change = fn [mut st, mut cv, mut hist, mut df_vl, mut df_sl] (v f32) {
+	df_sl.on_change = fn [mut st, mut app, mut df_vl, mut df_sl] (v f32) {
 		st.defringe = v
 		df_vl.text = '${int(v)}'
 		if df_sl.dragging {
 			return
 		}
-		prepare_linear(mut st, mut cv, mut hist)
+		request_prep(mut st, mut app, false)
 	}
-	nr_release := fn [mut st, mut cv, mut hist] (v f32) {
+	nr_release := fn [mut st, mut app] (v f32) {
 		if st.nr_applied == [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]! {
 			return
 		}
-		prepare_linear(mut st, mut cv, mut hist)
+		request_prep(mut st, mut app, false)
 	}
 	imp_sl.on_release = nr_release
 	nrl_sl.on_release = nr_release
@@ -720,6 +853,10 @@ fn main() {
 		if !isnil(st.dev) {
 			st.dev.close()
 		}
+		// Воркер пользуется st.corr - дождаться до его освобождения;
+		// его результат (старый кадр) отбросится по file_gen
+		wait_prep(mut st)
+		st.file_gen++
 		st.dev = nd
 		setup_corrector(mut st, mut lens_cb, mut lens_lb)
 		// Новый файл - нейтральные параметры
@@ -730,7 +867,7 @@ fn main() {
 			sl.set_value(reset_defaults[i])
 		}
 		st.suppress = false
-		load_preview(mut st, mut cv, mut hist, mut nm)
+		load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
 		setup_curve(mut st, mut crv_cb, mut cv, mut hist)
 		nm.show_info('${os.file_name(path)}: превью ${st.pw}x${st.ph}')
 	}
@@ -906,7 +1043,7 @@ fn main() {
 		if mut nd := raw.open(os.args[1]) {
 			st.dev = nd
 			setup_corrector(mut st, mut lens_cb, mut lens_lb)
-			load_preview(mut st, mut cv, mut hist, mut nm)
+			load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
 			setup_curve(mut st, mut crv_cb, mut cv, mut hist)
 			nm.show_info('${os.file_name(os.args[1])}: превью ${st.pw}x${st.ph}')
 		} else {
@@ -925,6 +1062,7 @@ fn main() {
 	if !isnil(st.dev) {
 		st.dev.close()
 	}
+	wait_prep(mut st) // воркер пользуется st.corr
 	if !isnil(st.corr) {
 		st.corr.free()
 	}
