@@ -1,7 +1,7 @@
 module main
 
 // Настройки программы между запусками: ~/.config/vraw/settings.json
-// (не путать с сайдкаром - там правки кадра). Сейчас: цвет области
+// (не путать с сайдкаром - там правки кадра): тема, цвет области
 // вокруг снимка и видимость ленты кадров. Пишутся при изменении.
 import os
 import json2
@@ -11,6 +11,7 @@ struct Settings {
 mut:
 	viewer_bg  string = 'dark' // ключ из bg_keys
 	strip_open bool   = true
+	theme      string = 'dark' // ключ из theme_keys (themes.v)
 }
 
 // Фон области просмотра вокруг снимка (меню «Вид - Фон вокруг снимка»).
@@ -37,6 +38,7 @@ fn load_settings() Settings {
 	return Settings{
 		viewer_bg:  bg_keys[bg_index(s.viewer_bg)]
 		strip_open: s.strip_open
+		theme:      theme_keys[theme_index(s.theme)]
 	}
 }
 

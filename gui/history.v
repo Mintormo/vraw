@@ -137,13 +137,11 @@ fn start_history(mut st State) {
 	refresh_history(mut st)
 }
 
-// Цвета строк истории: действующие правки и отменённые («будущее»,
-// куда можно вернуться) - приглушённо, как в Photoshop/Lightroom;
-// текущая запись - ярче и жирным (выделение списка может стоять на
-// другой строке: одиночный щелчок только выделяет)
-const hist_color = vgui.Color{200, 200, 204, 255}
-const hist_current_color = vgui.Color{245, 245, 248, 255}
-const hist_future_color = vgui.Color{110, 110, 116, 255}
+// Цвета строк истории - из палитры темы (themes.v): действующие правки -
+// обычным текстом, отменённые («будущее», куда можно вернуться) -
+// приглушённо, как в Photoshop/Lightroom; текущая запись - ярче и жирным
+// (выделение списка может стоять на другой строке: одиночный щелчок
+// только выделяет)
 
 // refresh_history перестраивает список: строка на запись, текущая
 // жирная и выделена, отменённые - серые; список прокручивается к текущей.
@@ -156,11 +154,11 @@ fn refresh_history(mut st State) {
 	for i, e in st.history {
 		mut l := vgui.label('${i + 1}. ${e.name}')
 		l.color = if i == st.hist_pos {
-			hist_current_color
+			st.pal.text
 		} else if i < st.hist_pos {
-			hist_color
+			st.pal.secondary
 		} else {
-			hist_future_color
+			st.pal.disabled
 		}
 		if i == st.hist_pos {
 			l.font_style = .bold

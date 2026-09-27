@@ -41,16 +41,12 @@ const strip_name_h = f32(18)
 // миниатюра заезжала на рамку - отсечение vgui расширено на 1 px наружу,
 // а поле почти целиком занято самой рамкой и кольцом фокуса
 const strip_pad = f32(8)
-// Поле панели ленты (strip_box: полоса + лента на тёмном фоне viewer_bg)
+// Поле панели ленты (strip_box: полоса + лента на фоне палитры pal.viewer)
 const strip_box_pad = f32(8)
 const thumb_bg = vgui.Color{30, 30, 33, 255}
 // Отметка «кадр изменён» (есть сайдкар) - кружок в правом верхнем углу
 const mark_color = vgui.Color{240, 160, 60, 255}
 const mark_ring = vgui.Color{20, 20, 22, 255}
-// Подпись миниатюры; у редактируемого кадра - ярче и жирным (выделение
-// ленты может стоять на другом: одиночный щелчок только выделяет)
-const strip_name_color = vgui.Color{170, 170, 176, 255}
-const strip_current_color = vgui.Color{245, 245, 248, 255}
 
 // Frame - кадр папки в ленте
 struct Frame {
@@ -260,7 +256,7 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 		mut name := vgui.label(os.file_name(p))
 		name.align = .center
 		name.font_size = 12
-		name.color = strip_name_color
+		name.color = st.pal.secondary
 		mut cell := vgui.create_vbox_fill()
 		cell.set_spacing(4)
 		cell.add(cv, 1)
@@ -373,7 +369,9 @@ fn sync_strip(mut st State) {
 		}
 		mut l := f.name
 		cur := i == st.frame_idx
-		l.color = if cur { strip_current_color } else { strip_name_color }
+		// У редактируемого - ярче и жирным (выделение ленты может стоять
+		// на другом: одиночный щелчок только выделяет); цвета - из темы
+		l.color = if cur { st.pal.text } else { st.pal.secondary }
 		l.font_style = if cur { vgui.FontStyle.bold } else { vgui.FontStyle.regular }
 	}
 	center_strip(mut st)

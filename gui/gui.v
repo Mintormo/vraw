@@ -111,6 +111,14 @@ mut:
 	m_strip  &vgui.MenuItem = unsafe { nil }
 	m_bg     []&vgui.MenuItem
 	holder   &Placeholder = unsafe { nil } // заглушка области снимка
+	// Тема (themes.v): палитра vraw, пункты меню, виджеты со своими
+	// цветами - их перекрашивает paint_ui при смене темы
+	pal              Palette
+	m_theme          []&vgui.MenuItem
+	right            &vgui.VBox = unsafe { nil }
+	hint_labels      []&vgui.Label
+	secondary_labels []&vgui.Label
+	hsl_labels       []&vgui.Label
 	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
 }
 
@@ -640,12 +648,9 @@ fn edit_row(mut st State, mut s EditSlider, lw f32, vw f32) &vgui.HBox {
 	return slider_row(mut st, s.lb, mut s.sl, s.vl, s.def, lw, vw)
 }
 
-// Цвета оформления (тёмная тема): область просмотра темнее панели
-// инструментов. viewer_bg - фон панели ленты; фон вокруг снимка
-// выбирается в меню «Вид» (bg_colors, settings.v), по умолчанию такой же.
+// Цвет холста до первого кадра (он скрыт заглушкой) и запасной фон
+// области снимка. Цвета интерфейса - из палитры темы (themes.v).
 const viewer_bg = vgui.Color{22, 22, 24, 255}
-const panel_bg = vgui.Color{37, 37, 38, 255}
-const divider_color = vgui.Color{58, 58, 62, 255}
 
 // Placeholder - заглушка области просмотра, пока кадр не открыт: мягкий
 // радиальный градиент в цветах темы приложения и по центру значок диафрагмы
@@ -847,11 +852,11 @@ fn sync_curve_editor(mut st State) {
 	}
 	mut ed := st.curve_ed
 	ed.set_points(st.edit.curve_pts[st.curve_ch])
-	ed.curve_color = curve_colors[st.curve_ch]
+	ed.curve_color = st.pal.hue(curve_colors[st.curve_ch])
 	ed.clear_ghosts()
 	for c in 0 .. 4 {
 		if c != st.curve_ch && !vgui.curve_is_identity(st.edit.curve_pts[c]) {
-			col := curve_colors[c]
+			col := st.pal.hue(curve_colors[c])
 			ed.add_ghost(st.edit.curve_pts[c], vgui.Color{col.r, col.g, col.b, 110})
 		}
 	}
@@ -914,8 +919,11 @@ fn section(rows []SectionRow) &vgui.VBox {
 }
 
 fn main() {
-	// Тема приложения; из неё же - цвета заглушки области просмотра
-	theme := vgui.dark_theme()
+	// Настройки прошлого запуска: тема, фон вокруг снимка, лента
+	settings := load_settings()
+	// Тема приложения (меняется в меню «Вид - Тема»); из неё же -
+	// палитра vraw и цвета заглушки
+	theme := theme_by_key(settings.theme)
 	mut app := vgui.create_app(theme: theme)!
 	// Тема приложения: окно без своей темы получит её в add_window
 	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1280, height: 946)!
@@ -933,6 +941,8 @@ fn main() {
 		'-4.00', '100'], 8)
 
 	mut st := &State{}
+	st.settings = settings
+	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = lens.load_db() or { unsafe { nil } }
 	st.edit = neutral_edit()
@@ -941,7 +951,6 @@ fn main() {
 	mut cv := vgui.canvas(4, 3)
 	cv.fill(viewer_bg)
 	cv.visible = false
-	st.settings = load_settings()
 	st.strip_open = st.settings.strip_open
 	mut ph := make_placeholder(theme)
 	st.holder = ph
@@ -1023,7 +1032,7 @@ fn main() {
 	}
 	st.lens_cb = lens_cb
 	mut lens_lb := vgui.label('')
-	lens_lb.color = vgui.Color{150, 150, 150, 255}
+	st.secondary_labels << lens_lb
 
 	// Камерная кривая: тональная кривая, подогнанная под встроенный JPEG
 	// камеры (как «Автоопределение тоновой кривой» в RawTherapee). Без неё
@@ -1278,7 +1287,7 @@ fn main() {
 	}
 	ch_row.add_fixed(curve_reset, 26)
 	mut curve_hint := vgui.label('Щелчок - точка, правая кнопка - удалить, двойной - сброс')
-	curve_hint.color = vgui.Color{130, 130, 136, 255}
+	st.hint_labels << curve_hint
 	curve_hint.font_size = 12
 	sync_curve_editor(mut st)
 
@@ -1310,7 +1319,7 @@ fn main() {
 				fx:     tone_fx
 			})
 			mut lb := s.lb
-			lb.color = hsl_label_colors[i]
+			st.hsl_labels << lb // цвет диапазона, под тему - paint_ui
 			rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w), 26}
 		}
 		hsl_tabs.add_tab(hsl_modes[m], section(rows))
@@ -1333,7 +1342,7 @@ fn main() {
 	}
 	st.hist_lb = hist_lb
 	mut hist_hint := vgui.label('Двойной щелчок - перейти, Ctrl+Z / Ctrl+Shift+Z')
-	hist_hint.color = vgui.Color{130, 130, 136, 255}
+	st.hint_labels << hist_hint
 	hist_hint.font_size = 12
 	// Ctrl+Z / Ctrl+Shift+Z - пункты меню «Правка» (сочетания обрабатывает
 	// меню); Ctrl+Y - дополнительно, горячей клавишей окна
@@ -1519,7 +1528,7 @@ fn main() {
 	}
 	st.strip = strip
 	mut strip_info := vgui.label('')
-	strip_info.color = vgui.Color{150, 150, 156, 255}
+	st.secondary_labels << strip_info
 	st.strip_info = strip_info
 	mut strip_toggle := vgui.button('Скрыть ленту')
 	strip_toggle.style = .outline
@@ -1736,8 +1745,18 @@ fn main() {
 		st.m_bg << it
 		m_bg.add(it)
 	}
+	// Тема оформления: все темы vgui, пункты-флажки как переключатель
+	mut m_themes := vgui.menu_submenu('Тема')
+	for i in 0 .. theme_keys.len {
+		mut it := vgui.menu_checkbox(theme_names[i], theme_keys[i] == st.settings.theme)
+		it.on_toggle = fn [mut st, mut app, i] (v bool) {
+			apply_theme(mut st, mut app, i)
+		}
+		st.m_theme << it
+		m_themes.add(it)
+	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, vgui.menu_separator(), m_strip,
-		m_bg])
+		m_bg, m_themes])
 
 	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
@@ -1830,7 +1849,7 @@ fn main() {
 	mut right := vgui.create_vbox_fill()
 	right.set_spacing(6)
 	right.set_padding(10)
-	right.set_bg(panel_bg)
+	st.right = right
 	right.add_fixed(hist, 120)
 	right.add(scroll, 1)
 
@@ -1848,14 +1867,12 @@ fn main() {
 	// Область просмотра - снимок и под ним лента кадров папки
 	// (layout_strip, когда открыт файл или папка)
 	mut viewer := vgui.create_vbox_fill()
-	viewer.set_bg(viewer_bg)
 	viewer.add(view_area, 1)
 	st.viewer = viewer
 	// Высота ленты - вертикальным сплиттером; после перетаскивания ячейки
 	// подстраиваются под новую высоту
 	mut vsplit := vgui.splitter_vertical()
 	vsplit.bar_size = 3
-	vsplit.bar_color = divider_color
 	vsplit.min_first = 200
 	vsplit.min_second = strip_bar_h + 80 + 2 * strip_box_pad
 	// Стартовая высота ленты ~strip_pane_h при высоте окна 946 (минус меню)
@@ -1868,14 +1885,12 @@ fn main() {
 	mut strip_box := vgui.create_vbox_fill()
 	strip_box.set_spacing(4)
 	strip_box.set_padding(strip_box_pad)
-	strip_box.set_bg(viewer_bg)
 	st.strip_box = strip_box
 
 	// Просмотр | панель инструментов - горизонтальный сплиттер: ширину
 	// панели можно менять (по умолчанию 440 при ширине окна 1280)
 	mut top := vgui.splitter_horizontal()
 	top.bar_size = 3
-	top.bar_color = divider_color
 	top.min_first = 400
 	top.min_second = 360
 	top.ratio = (1280 - 3 - 440) / f32(1280 - 3)
@@ -1894,6 +1909,8 @@ fn main() {
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).
+	// Свои цвета vraw по палитре темы (фоны панелей, разделители, подписи)
+	paint_ui(mut st, theme)
 	// Всплывающие подсказки кнопок-значков - поверх рабочей области
 	for t in st.tips {
 		win.add_widget(t)
