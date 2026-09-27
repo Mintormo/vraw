@@ -24,7 +24,7 @@ import stbi
 import vgui
 import raw
 import lens
-import pipeline
+import develop
 
 struct LoadJob {
 	gen       int
@@ -167,19 +167,10 @@ fn quick_preview(mut d raw.Developer, job LoadJob) ?LoadPreview {
 	}
 }
 
-// camera_curve - камерная кривая кадра: встроенный полный JPEG +
-// гистограммное сопоставление с нейтральной проявкой (pipeline.match_curve,
-// приём «Автоопределение тоновой кривой» RT). Именно полный JPEG, не
-// thumb_min: у CR3 превью 1620x1080 обработано иначе (на IMG_0817 его
-// света кончаются на 223 из 255 - кривая вышла бы с тусклыми светами).
-// Пустой массив - встроенного JPEG нет.
+// camera_curve - камерная кривая кадра по нейтральной проявке превью
+// (develop.match_camera - общий с CLI расчёт; пусто - встроенного JPEG нет)
 fn camera_curve(mut d raw.Developer, linear []u16, npix int) []f32 {
-	tj := d.thumb() or { return []f32{} }
-	mut timg := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return []f32{} }
-	defer {
-		timg.free()
-	}
-	return pipeline.match_curve(unsafe { &u16(linear.data) }, npix, timg.data, timg.width * timg.height)
+	return develop.match_camera(mut d, unsafe { &u16(linear.data) }, npix)
 }
 
 // free_load - закрыть LibRaw отброшенного результата загрузки (профиль

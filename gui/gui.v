@@ -19,6 +19,7 @@ import vgui
 import raw
 import lens
 import pipeline
+import develop
 
 const raw_patterns = 'CR3;CR2;CRW;NEF;ARW;DNG;RAF;ORF;RW2;cr3;cr2;crw;nef;arw;dng;raf;orf;rw2'
 
@@ -322,17 +323,12 @@ fn wait_prep(mut st State) {
 // открыть другой файл (st.dev сменится), поэтому воркер открывает свой.
 // Профиль объектива ищет в общей базе lensfun (db, только чтение).
 struct SaveJob {
-	src        string
-	dst        string
-	db         &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
-	highlight  int
-	lens_corr  bool
-	nr_impulse f32
-	nr_luma    f32
-	nr_chroma  f32
-	defringe   f32
-	params     pipeline.Params
-	quality    int
+	src       string
+	dst       string
+	db        &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
+	settings  develop.Settings // настройки кадра - как в сайдкаре
+	cam_curve []f32            // камерная кривая, с которой кадр показан в окне
+	quality   int
 }
 
 // report доставляет результат из фонового потока в главный:
@@ -350,47 +346,19 @@ fn report(mut app vgui.App, on_done fn (bool, string), ok bool, msg string) {
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (bool, string)) {
 	sw := time.new_stopwatch()
-	mut d := raw.open(job.src) or {
+	// Та же проявка, что у CLI по сайдкару (develop.full) - экспорт из
+	// окна и `vraw файл.CR3` дают одинаковый JPEG
+	img := develop.full(job.src, job.settings, cam_curve: job.cam_curve, db: job.db) or {
 		report(mut app, on_done, false, 'Ошибка проявки: ${err.msg()}')
 		return
 	}
-	defer {
-		d.close()
-	}
-	mut img := d.develop(linear16: true, highlight: job.highlight) or {
-		report(mut app, on_done, false, 'Ошибка проявки: ${err.msg()}')
-		return
-	}
-	w := img.width
-	h := img.height
-	if job.lens_corr {
-		m := d.meta()
-		c := job.db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
-		if !isnil(c) {
-			c.vignetting(img.data_u16(), w, h, m.focal, m.aperture)
-			c.geometry(img.data_u16(), w, h, m.focal)
-		}
-	}
-	if job.nr_impulse > 0 {
-		pipeline.impulse(img.data_u16(), w, h, job.nr_impulse)
-	}
-	if job.nr_luma > 0 || job.nr_chroma > 0 {
-		pipeline.denoise(img.data_u16(), w, h, job.nr_luma, job.nr_chroma)
-	}
-	if job.defringe > 0 {
-		pipeline.defringe(img.data_u16(), w, h, job.defringe)
-	}
-	mask := pipeline.blur_luma(img.data_u16(), w, h)
-	mut rgb := []u8{len: w * h * 3}
-	pipeline.apply(img.data_u16(), unsafe { &u16(mask.data) }, w * h, job.params, mut rgb, 3)
-	img.free()
-	stbi.stbi_write_jpg(job.dst, w, h, 3, rgb.data, job.quality) or {
+	stbi.stbi_write_jpg(job.dst, img.width, img.height, 3, img.rgb.data, job.quality) or {
 		report(mut app, on_done, false, 'Не удалось сохранить: ${err}')
 		return
 	}
 	size_mb := f64(os.file_size(job.dst)) / 1024 / 1024
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	report(mut app, on_done, true, 'Сохранено: ${job.dst} (${w}x${h}, ${size_mb:.1f} МБ, качество ${job.quality}, ${sec:.1f} с)')
+	report(mut app, on_done, true, 'Сохранено: ${job.dst} (${img.width}x${img.height}, ${size_mb:.1f} МБ, качество ${job.quality}, ${sec:.1f} с)')
 }
 
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
@@ -825,15 +793,10 @@ fn identity_curve() []vgui.CurvePoint {
 
 // tone_lut - кривая редактора (0..1) как таблица пайплайна: 256 узлов тон
 // 0..255 -> тон 0..255; тождественная - пустой массив (кривой нет).
+// Считает develop.tone_lut - тот же сплайн, что у редактора vgui (сверяет
+// тест), общий с CLI: проявка не зависит от vgui.
 fn tone_lut(pts []vgui.CurvePoint) []f32 {
-	if vgui.curve_is_identity(pts) {
-		return []f32{}
-	}
-	mut l := vgui.curve_lut(pts, 256)
-	for i in 0 .. 256 {
-		l[i] *= 255.0
-	}
-	return l
+	return develop.tone_lut(dev_points(pts))
 }
 
 // curves_to_params переносит точки всех четырёх кривых в Params
@@ -1655,17 +1618,12 @@ fn main() {
 		}
 		// Снимок всего нужного по значению: воркер не трогает st после спавна
 		job := SaveJob{
-			src:        st.dev.path
-			dst:        path
-			db:         st.lens_db
-			highlight:  st.edit.highlight
-			lens_corr:  st.edit.lens_corr && !isnil(st.corr)
-			nr_impulse: st.edit.nr[0]
-			nr_luma:    st.edit.nr[1]
-			nr_chroma:  st.edit.nr[2]
-			defringe:   st.edit.nr[3]
-			params:     st.edit.params
-			quality:    st.quality
+			src:       st.dev.path
+			dst:       path
+			db:        st.lens_db
+			settings:  side_state(st.edit)
+			cam_curve: st.curve.clone()
+			quality:   st.quality
 		}
 		m_export.enabled = false
 		nm.show_info('Проявляю в полном размере (в фоне)...')
@@ -1935,9 +1893,10 @@ fn main() {
 	wait_prep(mut st) // воркер пользуется профилем из st.lens_db
 	wait_thumbs(mut st)
 	wait_loads(mut st)
-	for t in st.save_threads {
-		t.wait() // сохранение ищет профиль в общей базе
-	}
+	// Потоки сохранения уже дождались выше (повторный wait того же потока
+	// роняет программу: «V thread join failed»); база lensfun, которой они
+	// пользуются, освобождается только после них
+	st.save_threads.clear()
 	if !isnil(st.lens_db) {
 		st.lens_db.free()
 	}

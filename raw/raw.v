@@ -275,12 +275,19 @@ pub fn (d &Developer) meta() Meta {
 	}
 }
 
-// thumb - встроенное в RAW превью камеры как поток байт JPEG (Canon кладёт
-// полноразмерный JPEG с камерной обработкой). Копия, буфер LibRaw
-// освобождается внутри. Проявка не нужна, достаточно open().
+// thumb - самое большое встроенное в RAW превью камеры как поток байт JPEG
+// (Canon кладёт полноразмерный JPEG с камерной обработкой). Копия, буфер
+// LibRaw освобождается внутри. Проявка не нужна, достаточно open().
+// Превью выбирается явно (thumb_min с огромным порогом): голый
+// libraw_unpack_thumb после unpack_thumb_ex отдаёт ПОСЛЕДНЕЕ выбранное
+// превью - после thumb_min(1000) это был бы 1620x1080, а не полный JPEG
+// (так GUI строил камерную кривую не по тому превью).
 pub fn (mut d Developer) thumb() ![]u8 {
 	if isnil(d.lr) {
 		return error('файл не открыт')
+	}
+	if d.lr.thumbs_list.thumbcount > 0 {
+		return d.thumb_min(1 << 30)
 	}
 	code := C.libraw_unpack_thumb(d.lr)
 	if code != 0 {

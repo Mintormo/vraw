@@ -55,3 +55,26 @@ fn test_thumb_min_after_develop() {
 	assert im2.width > 0
 	im2.free()
 }
+
+// Порядок вызовов фонового загрузчика GUI: маленькое превью, проявка,
+// затем полный JPEG для камерной кривой - thumb() обязан отдать полный,
+// а не последнее выбранное превью (1620x1080)
+fn test_thumb_after_thumb_min_and_develop() {
+	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
+	if !os.exists(path) {
+		return
+	}
+	mut d := open(path)!
+	defer {
+		d.close()
+	}
+	small := d.thumb_min(1000)!
+	mut im := d.develop(half: true, linear16: true)!
+	im.free()
+	full := d.thumb()!
+	assert full.len > 1_000_000
+	assert full.len > small.len * 3
+	mut img := stbi.load_from_memory(full.data, full.len, desired_channels: 3)!
+	assert img.width == 6000
+	img.free()
+}

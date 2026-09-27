@@ -5,6 +5,7 @@ module main
 // пустом State сразу выходят - проверяются только снимки и записи.
 import os
 import vgui
+import develop
 
 // new_state - State с двумя ползунками (экспозиция, яркостный шумодав)
 // и списком истории, как в main; открыт «файл» (запись «Открыт файл»).
@@ -195,7 +196,7 @@ fn test_no_history_without_file() {
 fn side_tmp(name string) string {
 	dir := os.join_path(os.temp_dir(), 'vraw_sidecar_test')
 	os.mkdir_all(dir) or {}
-	path := os.join_path(dir, name + sidecar_ext)
+	path := os.join_path(dir, name + develop.sidecar_ext)
 	os.rm(path) or {}
 	return path
 }
@@ -383,4 +384,42 @@ fn test_make_thumb_real() {
 	assert pix.len == thumb_w * thumb_h * 4
 	// Кадр 3:2 заполняет буфер 3:2 целиком - полей нет, угол не фон
 	assert pixel(pix, thumb_w, 0, 0) != [thumb_bg.r, thumb_bg.g, thumb_bg.b]
+}
+
+// ── Кривые: develop (проявка GUI и CLI) = vgui (редактор) ──
+
+fn test_curve_lut_matches_vgui() {
+	sets := [
+		[vgui.CurvePoint{0, 0}, vgui.CurvePoint{1, 1}],
+		[vgui.CurvePoint{0, 0}, vgui.CurvePoint{0.5, 0.7}, vgui.CurvePoint{1, 1}],
+		[vgui.CurvePoint{0, 0.1}, vgui.CurvePoint{0.25, 0.2}, vgui.CurvePoint{0.5, 0.5},
+			vgui.CurvePoint{0.75, 0.85}, vgui.CurvePoint{1, 0.95}],
+		[vgui.CurvePoint{0, 1}, vgui.CurvePoint{0.4, 0.4}, vgui.CurvePoint{0.6, 0.45},
+			vgui.CurvePoint{1, 0}],
+		[vgui.CurvePoint{0, 0}, vgui.CurvePoint{0.3, 0.3}, vgui.CurvePoint{0.31, 0.9},
+			vgui.CurvePoint{1, 1}],
+	]
+	for pts in sets {
+		a := vgui.curve_lut(pts, 256)
+		b := develop.curve_lut(dev_points(pts), 256)
+		assert a == b
+		assert vgui.curve_is_identity(pts) == develop.is_identity(dev_points(pts))
+	}
+}
+
+// Сайдкар несёт камерную кривую кадра (для CLI)
+fn test_sidecar_camera_curve() {
+	mut st, mut exp, _ := new_state()
+	st.curve = []f32{len: 256, init: f32(index) * 0.9}
+	st.edit = with_derived(st.edit, st.curve)
+	st.history = st.history.map(HistEntry{
+		name:  it.name
+		key:   it.key
+		state: with_derived(it.state, st.curve)
+	})
+	st.side_path = side_tmp('camcurve')
+	drag(mut exp, 0.3)
+	f := develop.load(st.side_path)!
+	assert f.camera_curve == st.curve
+	assert f.state.exposure == f32(0.3)
 }
