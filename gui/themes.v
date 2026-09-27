@@ -11,10 +11,11 @@ module main
 import vgui
 
 const theme_keys = ['dark', 'light', 'monokai', 'win10', 'win10_dark', 'win11', 'win11_dark',
-	'breeze', 'breeze_dark', 'adwaita', 'adwaita_dark']
+	'breeze', 'breeze_dark', 'adwaita', 'adwaita_dark', 'macos', 'macos_dark', 'mac_aqua',
+	'mac_platinum']
 const theme_names = ['Тёмная', 'Светлая', 'Monokai', 'Windows 10', 'Windows 10 тёмная',
 	'Windows 11', 'Windows 11 тёмная', 'KDE Breeze', 'KDE Breeze тёмная', 'GNOME Adwaita',
-	'GNOME Adwaita тёмная']
+	'GNOME Adwaita тёмная', 'macOS', 'macOS тёмная', 'Mac OS X Aqua', 'Mac OS 9 Platinum']
 
 fn theme_index(key string) int {
 	i := theme_keys.index(key)
@@ -33,6 +34,10 @@ fn theme_by_key(key string) vgui.Theme {
 		'breeze_dark' { vgui.kde_breeze_dark_theme() }
 		'adwaita' { vgui.gtk_adwaita_theme() }
 		'adwaita_dark' { vgui.gtk_adwaita_dark_theme() }
+		'macos' { vgui.macos_theme() }
+		'macos_dark' { vgui.macos_dark_theme() }
+		'mac_aqua' { vgui.mac_os_x_aqua_theme() }
+		'mac_platinum' { vgui.mac_os_9_platinum_theme() }
 		else { vgui.dark_theme() }
 	}
 }

@@ -334,8 +334,9 @@ sqrt-каналам, u = r−y, v = b−y (декорреляция, не кол
   серый 118 / белый — флажки как переключатель, `set_viewer_bg`) и
   подменю «Тема» (см. «Темы»).
   Флажок меню vgui сам переключает `checked` перед `on_toggle`.
-- **Темы** (`gui/themes.v`): все 11 тем vgui (тёмная, светлая, Monokai,
-  Windows 10/11 и тёмные, KDE Breeze и тёмная, GNOME Adwaita и тёмная) —
+- **Темы** (`gui/themes.v`): все 15 тем vgui (тёмная, светлая, Monokai,
+  Windows 10/11 и тёмные, KDE Breeze и тёмная, GNOME Adwaita и тёмная,
+  macOS и тёмная, Mac OS X Aqua, Mac OS 9 Platinum) —
   меню «Вид — Тема» (флажки как переключатель), ключ в настройках.
   Смена на лету — `apply_theme`: `app.set_theme` (окно без явной темы
   перекрашивается само) + `paint_ui` — свои цвета vraw из палитры
