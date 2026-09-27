@@ -11,3 +11,7 @@
 
 # Кэш
 /.cache/
+
+# Сайдкары правок vraw (рядом с RAW)
+*.vraw.json
+*.vraw.json.tmp

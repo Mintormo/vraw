@@ -123,6 +123,7 @@ fn record(mut st State, key string, name string, merge bool) {
 	}
 	st.hist_ms = now
 	refresh_history(mut st)
+	sync_sidecar(mut st)
 }
 
 // start_history - новая история файла: одна запись «Открыт файл»
@@ -178,7 +179,7 @@ fn set_edit(mut st State, e EditState) {
 		sl.set_value(b.get(&e))
 	}
 	st.suppress = false
-	st.edit = e.clone()
+	st.edit = with_derived(e, st.curve)
 	if !isnil(st.lens_cb) {
 		mut cb := st.lens_cb
 		cb.set_checked(e.lens_corr)
@@ -187,8 +188,6 @@ fn set_edit(mut st State, e EditState) {
 		mut cb := st.crv_cb
 		cb.set_checked(e.use_curve)
 	}
-	st.edit.params.curve = if e.use_curve { st.curve.clone() } else { []f32{} }
-	curves_to_params(mut st)
 	sync_curve_editor(mut st)
 }
 
@@ -224,4 +223,5 @@ fn goto_history(mut st State, idx int, mut cv vgui.Canvas, mut hist vgui.Canvas,
 	st.hist_ms = 0 // после перехода шаги не склеиваются с чужой записью
 	restore_edit(mut st, st.history[idx].state, mut cv, mut hist, mut nm, mut app)
 	refresh_history(mut st)
+	sync_sidecar(mut st)
 }

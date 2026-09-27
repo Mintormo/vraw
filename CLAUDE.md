@@ -31,7 +31,7 @@ cd ~/projects/vraw
 ~/soft/v/v -prod .                                        # CLI -> ./vraw
 ~/soft/v/v -prod -cc gcc -enable-globals gui/ -o vraw-gui # GUI -> ./vraw-gui
 ~/soft/v/v test raw/ lens/ pipeline/                # тесты
-~/soft/v/v -cc gcc -enable-globals test gui/         # тесты истории правок GUI
+~/soft/v/v -cc gcc -enable-globals test gui/         # тесты истории и сайдкара GUI
 ```
 
 - GUI собирается ТОЛЬКО с `-cc gcc -enable-globals` (требование vgui).
@@ -101,6 +101,12 @@ CLI (`main.v`) — отдельный быстрый конвертер клас
   или присваивать по индексу (`arr[c].on_click = ..`).
 - `goto` — ключевое слово V (функцию так не назвать); в `_test.v` все
   функции с префиксом `test_` считаются тестами — хелперы называть иначе.
+  Каждый `_test.v` компилируется отдельно: хелперы из одного тестового
+  файла в другом не видны.
+- Модуль `json` в этой V устарел (warning) — использовать `json2`:
+  `json2.encode(v, prettify: true)`, `json2.decode[T](text)!`. Типа `!?T`
+  в V нет. Поля структуры, в которые пишем (`f.history << ..`), —
+  под `mut:`.
 - vgui `ListBox`: строки-виджеты (`add_row_widgets`) в вертикальном
   списке рисуются только при наличии колонок, а `add_column` включает
   заголовок — после него `show_header = false`.

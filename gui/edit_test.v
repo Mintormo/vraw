@@ -1,8 +1,9 @@
 module main
 
-// Логика истории правок без окна: виджеты vgui создаются и работают без
+// Логика истории правок и сайдкара без окна: виджеты vgui создаются и работают без
 // App, а пересчёты (apply_pipeline, load_preview, request_prep) при
 // пустом State сразу выходят - проверяются только снимки и записи.
+import os
 import vgui
 
 // new_state - State с двумя ползунками (экспозиция, яркостный шумодав)
@@ -187,4 +188,105 @@ fn test_no_history_without_file() {
 	st.edit = neutral_edit()
 	record(mut st, 'x', 'x', false)
 	assert st.history.len == 0
+}
+
+// ── Сайдкар ──
+
+fn side_tmp(name string) string {
+	dir := os.join_path(os.temp_dir(), 'vraw_sidecar_test')
+	os.mkdir_all(dir) or {}
+	path := os.join_path(dir, name + sidecar_ext)
+	os.rm(path) or {}
+	return path
+}
+
+fn test_no_file_without_edits() {
+	mut st, _, _ := new_state()
+	st.side_path = side_tmp('noedit')
+	sync_sidecar(mut st)
+	assert !os.exists(st.side_path)
+	loaded := load_sidecar(st.side_path)!
+	assert loaded.history.len == 0
+}
+
+fn test_roundtrip() {
+	mut st, mut exp, mut nrl := new_state()
+	st.side_path = side_tmp('roundtrip')
+	drag(mut exp, 0.75)
+	assert os.exists(st.side_path) // записан после первой же правки
+	drag(mut nrl, 35)
+	st.edit.curve_pts[2] = [vgui.CurvePoint{0, 0.1}, vgui.CurvePoint{0.4, 0.5},
+		vgui.CurvePoint{1, 1}]
+	st.edit.params.hsl_sat[3] = -40
+	st.edit.params.eq[4] = 1.5
+	st.edit.highlight = 5
+	st.edit.lens_corr = false
+	curves_to_params(mut st)
+	record(mut st, 'mix', 'Разное', false)
+	jump(mut st, 2) // откат - позиция тоже в файле
+	assert !os.exists(st.side_path + '.tmp')
+
+	text := os.read_file(st.side_path)!
+	assert text.contains('"app": "vraw"')
+	assert text.contains('Шумодав: яркостный 35')
+	loaded := load_sidecar(st.side_path)!
+	assert loaded.current == 2
+	assert loaded.history.map(it.name) == ['Открыт файл', 'Экспозиция +0.75',
+		'Шумодав: яркостный 35', 'Разное']
+	// Снимки совпадают с исходными (с производными полями - как в живом State)
+	for i, h in loaded.history {
+		assert with_derived(h.state, st.curve) == st.history[i].state
+	}
+	last := loaded.history[3].state
+	assert last.curve_pts[2].len == 3
+	assert last.params.hsl_sat[3] == -40
+	assert last.params.eq[4] == 1.5
+	assert last.highlight == 5
+	assert !last.lens_corr
+	assert last.nr[1] == 35
+	assert last.params.exposure == 0.75
+}
+
+fn test_loaded_history_no_spurious_record() {
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('reload')
+	drag(mut exp, 1.25)
+	loaded := load_sidecar(st.side_path)!
+
+	// «Повторное открытие»: история из файла, как в open_file
+	mut st2, mut exp2, _ := new_state()
+	st2.history = loaded.history.map(HistEntry{
+		name:  it.name
+		key:   it.key
+		state: with_derived(it.state, st2.curve)
+	})
+	st2.hist_pos = loaded.current
+	jump(mut st2, 0)
+	jump(mut st2, 1)
+	assert exp2.value == 1.25
+	// Отпускание без изменения - не правка (снимки из файла сравнимы с живым)
+	exp2.on_release(1.25)
+	assert st2.history.len == 2
+}
+
+fn test_broken_files() {
+	path := side_tmp('broken')
+	os.write_file(path, '{ не json')!
+	if _ := load_sidecar(path) {
+		assert false, 'испорченный JSON принят'
+	}
+	os.write_file(path, '{"app": "other", "version": 1, "current": 0, "history": []}')!
+	if _ := load_sidecar(path) {
+		assert false, 'чужой файл принят'
+	}
+	// Неверные размеры массивов - ошибка, а не выход за границы
+	mut st, mut exp, _ := new_state()
+	st.side_path = path
+	os.rm(path)!
+	drag(mut exp, 0.5)
+	text := os.read_file(path)!
+	os.write_file(path, text.replace('"nr": [', '"nr": [1, '))!
+	if _ := load_sidecar(path) {
+		assert false, 'неверный размер nr принят'
+	}
 }

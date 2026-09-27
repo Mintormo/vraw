@@ -70,6 +70,11 @@ mut:
 	lens_cb &vgui.CheckBox = unsafe { nil }
 	crv_cb  &vgui.CheckBox = unsafe { nil }
 	hist_lb &vgui.ListBox  = unsafe { nil }
+	nm      &vgui.NotificationManager = unsafe { nil }
+	// Сайдкар правок (sidecar.v): путь (пусто - не писать), ошибка записи
+	// уже показана (не повторять на каждую правку)
+	side_path string
+	side_err  bool
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -840,6 +845,7 @@ fn main() {
 	// ПОСЛЕ корневого контейнера - рисуется поверх, события получает первым.
 	// Левый нижний угол - над превью, панель управления не перекрывается.
 	mut nm := vgui.notification_manager_at(.top_left)
+	st.nm = nm
 
 	// Приём результата фоновой подготовки сырья (главный поток, из
 	// app.post). Результат старого файла или уже дождавшегося воркера
@@ -1243,12 +1249,45 @@ fn main() {
 		st.dev = nd
 		setup_corrector(mut st, mut lens_cb, mut lens_lb)
 		st.curve = []f32{} // камерная кривая старого кадра не нужна
-		set_edit(mut st, neutral_edit())
+		// Правки из сайдкара: пересветы и объектив - сразу в синхронную
+		// проявку превью, шумодав - потом в фоне (restore_edit), чтобы
+		// открытие не замирало на секунды
+		st.side_path = sidecar_path(path)
+		st.side_err = false
+		mut side_msg := ''
+		side := load_sidecar(st.side_path) or {
+			side_msg = ', правки не прочитаны (${err.msg()})'
+			LoadedSidecar{}
+		}
+		mut first := neutral_edit()
+		if side.history.len > 0 {
+			first = side.history[side.current].state.clone()
+			first.nr = [f32(0), 0, 0, 0]!
+		}
+		set_edit(mut st, first)
 		load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
 		setup_curve(mut st, mut crv_cb, mut cv, mut hist)
 		show_viewer(mut cv, mut placeholder)
-		start_history(mut st)
-		nm.show_info('${os.file_name(path)}: превью ${st.pw}x${st.ph}')
+		if side.history.len > 0 {
+			// Снимкам из файла - производные поля по кривой этого кадра
+			st.history = side.history.map(HistEntry{
+				name:  it.name
+				key:   it.key
+				state: with_derived(it.state, st.curve)
+			})
+			st.hist_pos = side.current
+			st.hist_ms = 0
+			restore_edit(mut st, st.history[st.hist_pos].state, mut cv, mut hist, mut nm, mut app)
+			refresh_history(mut st)
+			side_msg = ', правки восстановлены'
+		} else {
+			start_history(mut st)
+		}
+		if side_msg.starts_with(', правки не') {
+			nm.show_warning('${os.file_name(path)}: превью ${st.pw}x${st.ph}${side_msg}')
+		} else {
+			nm.show_info('${os.file_name(path)}: превью ${st.pw}x${st.ph}${side_msg}')
+		}
 	}
 
 	mut b_open := vgui.button('Открыть RAW...')
