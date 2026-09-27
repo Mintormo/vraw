@@ -116,6 +116,10 @@ CLI (`main.v`) — отдельный быстрый конвертер клас
 - **`VBox.remove`/`HBox.remove` в vgui не работают** (сравнивают voidptr
   интерфейса, всегда false): убирать виджет — пересборкой контейнера
   (`clear()` + `add`). `Splitter` вторую панель не сворачивает.
+- vgui кнопки со значком: `icon_name` = имя Lucide (шрифт встроен),
+  `style = .flat`; `Button.tooltip` НЕ рисуется — подсказка отдельным
+  виджетом `vgui.tooltip(text).attach(b)`, добавленным в окно после
+  корня (в vraw — `icon_button`, `st.tips`).
 - vgui меню: `menu_bar()` + `add_menu`; сочетания клавиш — поле
   `shortcut` пункта, обрабатывает сам MenuBar (не дублировать
   `bind_hotkey`); флажок меню сам переключает `checked` перед

@@ -111,6 +111,7 @@ mut:
 	m_strip  &vgui.MenuItem = unsafe { nil }
 	m_bg     []&vgui.MenuItem
 	holder   &Placeholder = unsafe { nil } // заглушка области снимка
+	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -493,14 +494,35 @@ fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
 	}
 }
 
+// icon_button - плоская кнопка со значком Lucide (встроен в vgui) и
+// всплывающей подсказкой. Подсказка - отдельный виджет vgui.Tooltip:
+// копится в st.tips, в окно добавляется после корневого контейнера
+// (рисуется поверх всего). Button.tooltip в vgui не рисуется.
+fn icon_button(mut st State, icon string, tip string) &vgui.Button {
+	mut b := vgui.button('')
+	b.icon_name = icon
+	b.icon_size = 15
+	b.style = .flat
+	if tip.len > 0 {
+		mut t := vgui.tooltip(tip)
+		t.attach(b)
+		st.tips << t
+	}
+	return b
+}
+
+// reset_button - сброс одного параметра: значок «вернуть назад»
+fn reset_button(mut st State, tip string) &vgui.Button {
+	return icon_button(mut st, 'rotate-ccw', tip)
+}
+
 // slider_row собирает стандартный ряд панели: подпись, ползунок, значение
 // справа от ползунка и кнопка сброса этого параметра. set_value сам вызывает
 // on_change ползунка, поэтому кнопке достаточно вернуть значение по умолчанию.
 // Ширины колонок подписи/значения общие на всю панель - считаются в main
 // через column_width, чтобы колонки рядов были выровнены.
-fn slider_row(lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32) &vgui.HBox {
-	mut b := vgui.button('×')
-	b.style = .outline
+fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32) &vgui.HBox {
+	mut b := reset_button(mut st, 'Сбросить')
 	b.on_click = fn [mut sl, def] () {
 		sl.set_value(def)
 	}
@@ -614,8 +636,8 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 }
 
 // edit_row - стандартный ряд панели (slider_row) для ползунка edit_slider
-fn edit_row(mut s EditSlider, lw f32, vw f32) &vgui.HBox {
-	return slider_row(s.lb, mut s.sl, s.vl, s.def, lw, vw)
+fn edit_row(mut st State, mut s EditSlider, lw f32, vw f32) &vgui.HBox {
+	return slider_row(mut st, s.lb, mut s.sl, s.vl, s.def, lw, vw)
 }
 
 // Цвета оформления (тёмная тема): область просмотра темнее панели
@@ -1110,8 +1132,7 @@ fn main() {
 	// on_change ползунка: параметры, подпись, пайплайн и запись в историю
 	// (под своим названием - hist_label) обновятся штатно.
 	mut exp_sl := exp.sl
-	mut b_autoexp := vgui.button('Авто')
-	b_autoexp.style = .outline
+	mut b_autoexp := icon_button(mut st, 'wand-sparkles', 'Авто-экспозиция')
 	b_autoexp.on_click = fn [mut st, mut exp_sl] () {
 		if st.linear.len == 0 {
 			return
@@ -1209,7 +1230,7 @@ fn main() {
 			}
 			fx:    tone_fx
 		})
-		eq_rows << edit_row(mut s, lbl_w, val_w)
+		eq_rows << edit_row(mut st, mut s, lbl_w, val_w)
 	}
 
 	// ── Кривые: кнопки каналов, редактор, подсказка ──
@@ -1246,8 +1267,7 @@ fn main() {
 		st.curve_btns << b
 		ch_row.add(b, 1)
 	}
-	mut curve_reset := vgui.button('×')
-	curve_reset.style = .outline
+	mut curve_reset := reset_button(mut st, 'Сбросить кривую канала')
 	curve_reset.on_click = fn [mut st, mut cv, mut hist] () {
 		st.edit.curve_pts[st.curve_ch] = identity_curve()
 		curves_to_params(mut st)
@@ -1291,7 +1311,7 @@ fn main() {
 			})
 			mut lb := s.lb
 			lb.color = hsl_label_colors[i]
-			rows << SectionRow{edit_row(mut s, lbl_w, val_w), 26}
+			rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w), 26}
 		}
 		hsl_tabs.add_tab(hsl_modes[m], section(rows))
 	}
@@ -1645,7 +1665,7 @@ fn main() {
 
 	// «Сброс» тональный: пересветы, коррекция объектива, камерная кривая
 	// и шумодав остаются как есть. Это обычная правка - запись в истории,
-	// отменяется Ctrl+Z. Кнопка на панели и пункт меню «Правка».
+	// отменяется Ctrl+Z. Пункт меню «Правка - Сбросить тон».
 	reset_tone := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
 		mut e := st.edit.clone()
 		e.params = pipeline.Params{}
@@ -1653,9 +1673,6 @@ fn main() {
 		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
 		record(mut st, 'reset', 'Сброс', false)
 	}
-	mut b_reset := vgui.button('Сброс')
-	b_reset.style = .outline
-	b_reset.on_click = reset_tone
 
 	// ── Меню вверху окна ──
 	// Сочетания клавиш пунктов обрабатывает само меню (MenuBar)
@@ -1681,6 +1698,7 @@ fn main() {
 	m_redo.shortcut = 'Ctrl+Shift+Z'
 	m_redo.on_click = redo
 	mut m_reset := vgui.menu_action('Сбросить тон')
+	m_reset.shortcut = 'Ctrl+Shift+R'
 	m_reset.on_click = reset_tone
 	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_reset])
 
@@ -1721,11 +1739,10 @@ fn main() {
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, vgui.menu_separator(), m_strip,
 		m_bg])
 
-	mut hl_row := edit_row(mut hl, lbl_w, val_w)
+	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
 	// между значением и сбросом.
-	mut b_expreset := vgui.button('×')
-	b_expreset.style = .outline
+	mut b_expreset := reset_button(mut st, 'Сбросить')
 	b_expreset.on_click = fn [mut exp_sl] () {
 		exp_sl.set_value(0.0)
 	}
@@ -1734,18 +1751,18 @@ fn main() {
 	exp_row.add_fixed(exp.lb, lbl_w)
 	exp_row.add(exp_sl, 1)
 	exp_row.add_fixed(exp.vl, val_w)
-	exp_row.add_fixed(b_autoexp, 52)
+	exp_row.add_fixed(b_autoexp, 26)
 	exp_row.add_fixed(b_expreset, 26)
-	mut sh_row := edit_row(mut sh, lbl_w, val_w)
-	mut con_row := edit_row(mut con, lbl_w, val_w)
-	mut sat_row := edit_row(mut sat, lbl_w, val_w)
-	mut hlt_row := edit_row(mut hlt, lbl_w, val_w)
-	mut sht_row := edit_row(mut sht, lbl_w, val_w)
-	mut imp_row := edit_row(mut imp, lbl_w, val_w)
-	mut nrl_row := edit_row(mut nrl, lbl_w, val_w)
-	mut nrc_row := edit_row(mut nrc, lbl_w, val_w)
-	mut df_row := edit_row(mut df, lbl_w, val_w)
-	mut q_row := slider_row(q_lb, mut q_sl, q_vl, 92.0, lbl_w, val_w)
+	mut sh_row := edit_row(mut st, mut sh, lbl_w, val_w)
+	mut con_row := edit_row(mut st, mut con, lbl_w, val_w)
+	mut sat_row := edit_row(mut st, mut sat, lbl_w, val_w)
+	mut hlt_row := edit_row(mut st, mut hlt, lbl_w, val_w)
+	mut sht_row := edit_row(mut st, mut sht, lbl_w, val_w)
+	mut imp_row := edit_row(mut st, mut imp, lbl_w, val_w)
+	mut nrl_row := edit_row(mut st, mut nrl, lbl_w, val_w)
+	mut nrc_row := edit_row(mut st, mut nrc, lbl_w, val_w)
+	mut df_row := edit_row(mut st, mut df, lbl_w, val_w)
+	mut q_row := slider_row(mut st, q_lb, mut q_sl, q_vl, 92.0, lbl_w, val_w)
 
 	// Гистограмма и кнопки файлов закреплены сверху, кнопки вида - снизу;
 	// всё остальное (чекбоксы и ползунки) прокручивается в ScrollBox
@@ -1808,15 +1825,14 @@ fn main() {
 	scroll.add(acc)
 
 	// Правая панель - свой фон и внутренние отступы: гистограмма сверху,
-	// инструменты в прокрутке, «Сброс» снизу. Открытие, экспорт и масштаб -
-	// в меню вверху окна.
+	// инструменты в прокрутке. Открытие, экспорт, масштаб и «Сбросить
+	// тон» - в меню вверху окна.
 	mut right := vgui.create_vbox_fill()
 	right.set_spacing(6)
 	right.set_padding(10)
 	right.set_bg(panel_bg)
 	right.add_fixed(hist, 120)
 	right.add(scroll, 1)
-	right.add_fixed(b_reset, 30)
 
 	// Область снимка: фон, выбранный в меню «Вид», картинка с отступом от
 	// краёв. Холст и заглушка лежат друг на друге в Stack, видим один.
@@ -1878,6 +1894,10 @@ fn main() {
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).
+	// Всплывающие подсказки кнопок-значков - поверх рабочей области
+	for t in st.tips {
+		win.add_widget(t)
+	}
 	win.add_widget(nm)
 	app.add_window(win)
 
