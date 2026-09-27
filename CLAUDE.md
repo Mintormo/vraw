@@ -31,6 +31,7 @@ cd ~/projects/vraw
 ~/soft/v/v -prod .                                        # CLI -> ./vraw
 ~/soft/v/v -prod -cc gcc -enable-globals gui/ -o vraw-gui # GUI -> ./vraw-gui
 ~/soft/v/v test raw/ lens/ pipeline/                # тесты
+~/soft/v/v -cc gcc -enable-globals test gui/         # тесты истории правок GUI
 ```
 
 - GUI собирается ТОЛЬКО с `-cc gcc -enable-globals` (требование vgui).
@@ -98,6 +99,11 @@ CLI (`main.v`) — отдельный быстрый конвертер клас
   (кнопки каналов кривых молча не работали). Обход: ставить обработчик на
   только что созданный объект (`mut b := vgui.button(..); b.on_click = ..`)
   или присваивать по индексу (`arr[c].on_click = ..`).
+- `goto` — ключевое слово V (функцию так не назвать); в `_test.v` все
+  функции с префиксом `test_` считаются тестами — хелперы называть иначе.
+- vgui `ListBox`: строки-виджеты (`add_row_widgets`) в вертикальном
+  списке рисуются только при наличии колонок, а `add_column` включает
+  заголовок — после него `show_header = false`.
 - `@[params]`-структуры дают именованные вызовы `develop(half: true)`.
 - Приведение `&u16(buf.data)` (voidptr → указатель) — только в `unsafe`,
   иначе warning: писать `unsafe { &u16(buf.data) }`. Сборка и тесты сейчас

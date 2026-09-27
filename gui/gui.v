@@ -31,20 +31,15 @@ mut:
 	mask         []u16 // размытая люма превью - маска «Тени/Света» (pipeline.blur_luma)
 	pw           int   // размеры превью
 	ph           int
-	params       pipeline.Params
+	edit         EditState // все настройки правки кадра (history.v)
 	quality      int = 92
-	highlight    int // режим пересветов LibRaw (0..9), меняется - нужна перепроявка
 	hl_developed int = -1 // режим пересветов последней проявки (не проявлять зря)
-	suppress     bool     // true = не применять пайплайн (пакетный сброс ползунков)
+	// true = пакетная установка виджетов (откат истории, сброс, новый файл):
+	// on_change только пишут настройки - без пересчётов и записей в историю
+	suppress bool
 	meta         raw.Meta // метаданные открытого кадра (для профиля объектива)
 	corr         &lens.Corrector = unsafe { nil } // профиль lensfun или nil
-	lens_corr    bool            = true           // чекбокс «Коррекция объектива» включён
 	curve        []f32 // камерная кривая кадра (match_curve), пустая - нет превью
-	use_curve    bool = true // чекбокс «Камерная кривая» включён
-	nr_impulse   f32 // подавление импульсного шума 0..100
-	nr_luma      f32 // шумодав: яркостный 0..100
-	nr_chroma    f32 // шумодав: цветовой 0..100
-	defringe     f32 // подавление ореолов 0..100
 	nr_applied   [4]f32 = [f32(-1), -1, -1, -1]! // значения последней подготовки сырья
 	save_threads []thread // хендлы фоновых сохранений: wait после app.run()
 	// Подготовка сырья в фоне (prep_worker): не больше одного воркера.
@@ -55,9 +50,8 @@ mut:
 	prep_running bool
 	prep_threads []thread
 	prep_done    fn (PrepResult) = unsafe { nil } // приём результата в главном потоке
-	// Тональные кривые: опорные точки на канал (0 - RGB, 1..3 - R, G, B),
-	// редактор показывает выбранный (curve_ch), остальные - призраками
-	curve_pts [][]vgui.CurvePoint
+	// Тональные кривые: точки - в edit.curve_pts, редактор показывает
+	// выбранный канал (curve_ch), остальные - призраками
 	curve_ch  int
 	curve_ed  &vgui.CurveEditor = unsafe { nil }
 	curve_btns []&vgui.Button // кнопки RGB/R/G/B, активная - стиль accent
@@ -65,6 +59,17 @@ mut:
 	hist_r []u32
 	hist_g []u32
 	hist_b []u32
+	// История правок (history.v): записи, текущая, время последней записи
+	// для склейки шагов (0 - не склеивать), особое название следующей записи
+	history    []HistEntry
+	hist_pos   int
+	hist_ms    i64
+	hist_label string
+	// Виджеты, которые выставляет откат истории (set_edit)
+	binds   []SliderBind
+	lens_cb &vgui.CheckBox = unsafe { nil }
+	crv_cb  &vgui.CheckBox = unsafe { nil }
+	hist_lb &vgui.ListBox  = unsafe { nil }
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -86,7 +91,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		return
 	}
 	npix := st.pw * st.ph
-	pipeline.apply(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, npix, st.params, mut cv.pixels, 4)
+	pipeline.apply(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, npix, st.edit.params, mut cv.pixels, 4)
 	cv.mark_dirty()
 	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
 	update_curve_histogram(mut st)
@@ -101,11 +106,11 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	if isnil(st.dev) {
 		return
 	}
-	mut img := st.dev.develop(half: true, linear16: true, highlight: st.highlight) or {
+	mut img := st.dev.develop(half: true, linear16: true, highlight: st.edit.highlight) or {
 		nm.show_error('Ошибка проявки: ${err.msg()}')
 		return
 	}
-	st.hl_developed = st.highlight
+	st.hl_developed = st.edit.highlight
 	resized := img.width != st.pw || img.height != st.ph
 	if resized || !async {
 		// Воркер считает буфер старого размера - дождаться до смены pw/ph
@@ -174,10 +179,10 @@ fn make_prep_job(mut st State) PrepJob {
 		w:         st.pw
 		h:         st.ph
 		redo_lens: redo
-		corr:      if st.lens_corr { st.corr } else { unsafe { nil } }
+		corr:      if st.edit.lens_corr { st.corr } else { unsafe { nil } }
 		focal:     st.meta.focal
 		aperture:  st.meta.aperture
-		nr:        [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]!
+		nr:        st.edit.nr
 	}
 }
 
@@ -449,7 +454,7 @@ fn auto_exposure_ev(linear []u16, npix int) f32 {
 // или коррекции объектива её практически не меняет.
 fn setup_curve(mut st State, mut crv_cb vgui.CheckBox, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	st.curve = []f32{}
-	st.params.curve = []f32{}
+	st.edit.params.curve = []f32{}
 	if st.linear.len == 0 {
 		crv_cb.enabled = false
 		return
@@ -466,8 +471,8 @@ fn setup_curve(mut st State, mut crv_cb vgui.CheckBox, mut cv vgui.Canvas, mut h
 		timg.width * timg.height)
 	timg.free()
 	crv_cb.enabled = true
-	if st.use_curve {
-		st.params.curve = st.curve.clone()
+	if st.edit.use_curve {
+		st.edit.params.curve = st.curve.clone()
 		apply_pipeline(mut st, mut cv, mut hist)
 	}
 }
@@ -531,6 +536,89 @@ fn value_label(text string) &vgui.Label {
 	mut l := vgui.label(text)
 	l.align = .right
 	return l
+}
+
+// SliderCfg - описание ползунка настройки кадра для edit_slider
+struct SliderCfg {
+	label  string // подпись ряда
+	hname  string // название в истории (пусто - как подпись); оно же ключ склейки
+	min    f32
+	max    f32
+	def    f32
+	digits int  = 2    // знаков после запятой в значении; 0 - целые, step 1
+	signed bool = true // в истории со знаком: «Экспозиция +0.70»
+	show   fn (f32) string         = unsafe { nil } // своя подпись значения (пересветы)
+	get    fn (&EditState) f32     = unsafe { nil } // значение в снимке (откат)
+	set    fn (mut e EditState, v f32) = unsafe { nil } // запись значения в st.edit
+	fx     fn ()                   = unsafe { nil } // пересчёт после завершённой правки
+}
+
+// EditSlider - собранный ползунок: подпись, ползунок, значение
+struct EditSlider {
+mut:
+	lb  &vgui.Label  = unsafe { nil }
+	sl  &vgui.Slider = unsafe { nil }
+	vl  &vgui.Label  = unsafe { nil }
+	def f32
+}
+
+fn slider_text(cfg SliderCfg, v f32) string {
+	if !isnil(cfg.show) {
+		return cfg.show(v)
+	}
+	return if cfg.digits == 0 { '${int(v)}' } else { '${v:.2f}' }
+}
+
+fn slider_hist_text(cfg SliderCfg, v f32) string {
+	if !isnil(cfg.show) {
+		return cfg.show(v)
+	}
+	return if cfg.signed { fmt_signed(v, cfg.digits) } else { slider_text(cfg, v) }
+}
+
+// edit_slider собирает ползунок настройки кадра по единому паттерну
+// (паттерн «Пересветов»): при перетаскивании on_change пишет только
+// значение (cfg.set -> st.edit) и подпись, пересчёт cfg.fx и запись в
+// историю - в on_release. Одиночные on_change (колесо, клавиши, «×»)
+// пересчитывают сразу и пишут в историю со склейкой шагов. Под
+// st.suppress (откат, сброс, новый файл) - только значение и подпись.
+// Ползунок регистрируется в st.binds: откат выставит его по снимку.
+fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
+	lb := vgui.label(cfg.label)
+	mut vl := value_label(slider_text(cfg, cfg.def))
+	mut sl := vgui.slider_horizontal(cfg.min, cfg.max, cfg.def)
+	if cfg.digits == 0 {
+		sl.step = 1
+	}
+	key := if cfg.hname.len > 0 { cfg.hname } else { cfg.label }
+	sl.on_change = fn [mut st, mut vl, mut sl, cfg, key] (v f32) {
+		cfg.set(mut st.edit, v)
+		vl.text = slider_text(cfg, v)
+		if st.suppress || sl.dragging {
+			return
+		}
+		cfg.fx()
+		record(mut st, key, '${key} ${slider_hist_text(cfg, v)}', true)
+	}
+	sl.on_release = fn [mut st, cfg, key] (v f32) {
+		cfg.fx()
+		record(mut st, key, '${key} ${slider_hist_text(cfg, v)}', false)
+	}
+	st.binds << SliderBind{
+		sl:  sl
+		get: cfg.get
+	}
+	return EditSlider{
+		lb:  lb
+		sl:  sl
+		vl:  vl
+		def: cfg.def
+	}
+}
+
+// edit_row - стандартный ряд панели (slider_row) для ползунка edit_slider
+fn edit_row(mut s EditSlider, lw f32, vw f32) &vgui.HBox {
+	return slider_row(s.lb, mut s.sl, s.vl, s.def, lw, vw)
 }
 
 // Цвета оформления (тёмная тема): область просмотра темнее панели
@@ -633,10 +721,10 @@ fn tone_lut(pts []vgui.CurvePoint) []f32 {
 
 // curves_to_params переносит точки всех четырёх кривых в Params
 fn curves_to_params(mut st State) {
-	st.params.tc_rgb = tone_lut(st.curve_pts[0])
-	st.params.tc_r = tone_lut(st.curve_pts[1])
-	st.params.tc_g = tone_lut(st.curve_pts[2])
-	st.params.tc_b = tone_lut(st.curve_pts[3])
+	st.edit.params.tc_rgb = tone_lut(st.edit.curve_pts[0])
+	st.edit.params.tc_r = tone_lut(st.edit.curve_pts[1])
+	st.edit.params.tc_g = tone_lut(st.edit.curve_pts[2])
+	st.edit.params.tc_b = tone_lut(st.edit.curve_pts[3])
 }
 
 // sync_curve_editor показывает в редакторе кривую выбранного канала его
@@ -646,13 +734,13 @@ fn sync_curve_editor(mut st State) {
 		return
 	}
 	mut ed := st.curve_ed
-	ed.set_points(st.curve_pts[st.curve_ch])
+	ed.set_points(st.edit.curve_pts[st.curve_ch])
 	ed.curve_color = curve_colors[st.curve_ch]
 	ed.clear_ghosts()
 	for c in 0 .. 4 {
-		if c != st.curve_ch && !vgui.curve_is_identity(st.curve_pts[c]) {
+		if c != st.curve_ch && !vgui.curve_is_identity(st.edit.curve_pts[c]) {
 			col := curve_colors[c]
-			ed.add_ghost(st.curve_pts[c], vgui.Color{col.r, col.g, col.b, 110})
+			ed.add_ghost(st.edit.curve_pts[c], vgui.Color{col.r, col.g, col.b, 110})
 		}
 	}
 	update_curve_histogram(mut st)
@@ -683,13 +771,6 @@ fn update_curve_histogram(mut st State) {
 	}
 	mut ed := st.curve_ed
 	ed.histogram = h
-}
-
-// reset_curves - все четыре кривые в диагональ (сброс, новый файл)
-fn reset_curves(mut st State) {
-	st.curve_pts = [][]vgui.CurvePoint{len: 4, init: identity_curve()}
-	curves_to_params(mut st)
-	sync_curve_editor(mut st)
 }
 
 // ── HSL ──
@@ -738,7 +819,7 @@ fn main() {
 		'-4.00', '100'], 8)
 
 	mut st := &State{}
-	st.curve_pts = [][]vgui.CurvePoint{len: 4, init: identity_curve()}
+	st.edit = neutral_edit()
 
 	// Холст превью скрыт до открытия файла - на его месте заглушка
 	mut cv := vgui.canvas(4, 3)
@@ -770,17 +851,36 @@ fn main() {
 		wait_prep(mut st) // воркер уже отдал результат - join мгновенный
 		take_prep(mut st, res)
 		apply_pipeline(mut st, mut cv, mut hist)
-		if st.lens_dirty || st.nr_applied != [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]! {
+		if st.lens_dirty || st.nr_applied != st.edit.nr {
 			// Пока воркер считал, настройки снова поменялись
 			request_prep(mut st, mut app, false)
 		}
 	}
 
-	// ── Ползунки пайплайна ──
-	// set_value вызывает on_change, поэтому сброс - это просто установка
-	// значений; st.suppress не даёт пайплайну запуститься 9 раз подряд.
-	mut reset_sliders := []&vgui.Slider{}
-	mut reset_defaults := []f32{}
+	// ── Ползунки и чекбоксы правки ──
+	// Все настройки кадра живут в st.edit (снимок для истории). Ползунки
+	// собирает edit_slider; fx - пересчёт по виду настройки: тон -
+	// apply_pipeline (~60 мс), подготовка сырья - фоновый request_prep,
+	// пересветы - перепроявка превью.
+	tone_fx := fn [mut st, mut cv, mut hist] () {
+		apply_pipeline(mut st, mut cv, mut hist)
+	}
+	// Шумодав и ореолы - подготовка сырья (~1 с на превью, в фоне): LibRaw
+	// и коррекция объектива не перезапускаются - сырьё в raw_linear.
+	// Отпускание на уже применённом значении ничего не пересчитывает.
+	prep_fx := fn [mut st, mut app] () {
+		if st.nr_applied != st.edit.nr {
+			request_prep(mut st, mut app, false)
+		}
+	}
+	// Пересветы - параметр LibRaw, не пайплайна: перепроявка превью
+	// (~0.1 с в главном потоке, коррекция и шумодав - в фоне), зум
+	// сохраняется. На том же режиме не перепроявляется.
+	hl_fx := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+		if st.edit.highlight != st.hl_developed {
+			load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
+		}
+	}
 
 	// Коррекция объектива (lensfun): применяется к линейному сырью до
 	// пайплайна. Переключение пересчитывает сырьё из dev_linear (без
@@ -789,9 +889,11 @@ fn main() {
 	mut lens_cb := vgui.checkbox('Коррекция объектива')
 	lens_cb.checked = true
 	lens_cb.on_change = fn [mut st, mut app] (v bool) {
-		st.lens_corr = v
+		st.edit.lens_corr = v
 		request_prep(mut st, mut app, true)
+		record(mut st, 'lens', 'Коррекция объектива: ${on_off(v)}', false)
 	}
+	st.lens_cb = lens_cb
 	mut lens_lb := vgui.label('')
 	lens_lb.color = vgui.Color{150, 150, 150, 255}
 
@@ -803,229 +905,205 @@ fn main() {
 	mut crv_cb := vgui.checkbox('Камерная кривая (как JPEG)')
 	crv_cb.checked = true
 	crv_cb.on_change = fn [mut st, mut cv, mut hist] (v bool) {
-		st.use_curve = v
-		st.params.curve = if v { st.curve.clone() } else { []f32{} }
+		st.edit.use_curve = v
+		st.edit.params.curve = if v { st.curve.clone() } else { []f32{} }
 		apply_pipeline(mut st, mut cv, mut hist)
+		record(mut st, 'camcurve', 'Камерная кривая: ${on_off(v)}', false)
 	}
+	st.crv_cb = crv_cb
 
-	// Пересветы - параметр LibRaw, не пайплайна: смена значения
-	// перепроявляет превью (~0.1 с), зум при этом сохраняется.
-	// Перепроявка дорогая, поэтому во время перетаскивания обновляется
-	// только подпись, проявка - в on_release. Одиночные on_change
-	// (колесо, клавиши, кнопка сброса) проявляют сразу - они редкие.
-	mut hl_lb := vgui.label('Пересветы')
-	mut hl_vl := value_label('клип')
-	mut hl_sl := vgui.slider_horizontal(0, 9, 0)
-	hl_sl.step = 1
-	hl_sl.on_change = fn [mut st, mut cv, mut hist, mut nm, mut app, mut hl_vl, mut hl_sl] (v f32) {
-		st.highlight = int(v)
-		hl_vl.text = highlight_name(int(v))
-		if hl_sl.dragging {
-			// Проявка дорогая - при перетаскивании только подпись,
-			// перепроявка в on_release
-			return
+	mut hl := edit_slider(mut st, SliderCfg{
+		label:  'Пересветы'
+		hname:  'Пересветы:'
+		max:    9
+		digits: 0
+		show:   fn (v f32) string {
+			return highlight_name(int(v))
 		}
-		load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
-	}
-	hl_sl.on_release = fn [mut st, mut cv, mut hist, mut nm, mut app] (v f32) {
-		if st.highlight == st.hl_developed {
-			return
+		get:    fn (e &EditState) f32 {
+			return e.highlight
 		}
-		load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
-	}
+		set:    fn (mut e EditState, v f32) {
+			e.highlight = int(v)
+		}
+		fx:     hl_fx
+	})
 
-	// Шумодав и ореолы - подготовка сырья (~1 с на превью, в фоне -
-	// request_prep), не тональный пайплайн: во время перетаскивания
-	// обновляется только подпись, пересчёт - при отпускании (как у
-	// пересветов). LibRaw и коррекция объектива при этом не
-	// перезапускаются - сырьё в raw_linear.
-	mut imp_lb := vgui.label('Импульсный')
-	mut imp_vl := value_label('0')
-	mut imp_sl := vgui.slider_horizontal(0, 100, 0)
-	imp_sl.step = 1
-	imp_sl.on_change = fn [mut st, mut app, mut imp_vl, mut imp_sl] (v f32) {
-		st.nr_impulse = v
-		imp_vl.text = '${int(v)}'
-		if imp_sl.dragging {
-			// Пересчёт ~1 с - при перетаскивании только подпись
-			return
+	// Шумодав и ореолы: в «Сброс» не входят (подготовка сырья, не тон)
+	mut imp := edit_slider(mut st, SliderCfg{
+		label:  'Импульсный'
+		hname:  'Импульсный шум'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.nr[0]
 		}
-		request_prep(mut st, mut app, false)
-	}
-	mut nrl_lb := vgui.label('Яркостный')
-	mut nrl_vl := value_label('0')
-	mut nrl_sl := vgui.slider_horizontal(0, 100, 0)
-	nrl_sl.step = 1
-	nrl_sl.on_change = fn [mut st, mut app, mut nrl_vl, mut nrl_sl] (v f32) {
-		st.nr_luma = v
-		nrl_vl.text = '${int(v)}'
-		if nrl_sl.dragging {
-			return
+		set:    fn (mut e EditState, v f32) {
+			e.nr[0] = v
 		}
-		request_prep(mut st, mut app, false)
-	}
-	mut nrc_lb := vgui.label('Цветовой')
-	mut nrc_vl := value_label('0')
-	mut nrc_sl := vgui.slider_horizontal(0, 100, 0)
-	nrc_sl.step = 1
-	nrc_sl.on_change = fn [mut st, mut app, mut nrc_vl, mut nrc_sl] (v f32) {
-		st.nr_chroma = v
-		nrc_vl.text = '${int(v)}'
-		if nrc_sl.dragging {
-			return
+		fx:     prep_fx
+	})
+	mut nrl := edit_slider(mut st, SliderCfg{
+		label:  'Яркостный'
+		hname:  'Шумодав: яркостный'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.nr[1]
 		}
-		request_prep(mut st, mut app, false)
-	}
-	mut df_lb := vgui.label('Ореолы')
-	mut df_vl := value_label('0')
-	mut df_sl := vgui.slider_horizontal(0, 100, 0)
-	df_sl.step = 1
-	df_sl.on_change = fn [mut st, mut app, mut df_vl, mut df_sl] (v f32) {
-		st.defringe = v
-		df_vl.text = '${int(v)}'
-		if df_sl.dragging {
-			return
+		set:    fn (mut e EditState, v f32) {
+			e.nr[1] = v
 		}
-		request_prep(mut st, mut app, false)
-	}
-	nr_release := fn [mut st, mut app] (v f32) {
-		if st.nr_applied == [st.nr_impulse, st.nr_luma, st.nr_chroma, st.defringe]! {
-			return
+		fx:     prep_fx
+	})
+	mut nrc := edit_slider(mut st, SliderCfg{
+		label:  'Цветовой'
+		hname:  'Шумодав: цветовой'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.nr[2]
 		}
-		request_prep(mut st, mut app, false)
-	}
-	imp_sl.on_release = nr_release
-	nrl_sl.on_release = nr_release
-	nrc_sl.on_release = nr_release
-	df_sl.on_release = nr_release
+		set:    fn (mut e EditState, v f32) {
+			e.nr[2] = v
+		}
+		fx:     prep_fx
+	})
+	mut df := edit_slider(mut st, SliderCfg{
+		label:  'Ореолы'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.nr[3]
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.nr[3] = v
+		}
+		fx:     prep_fx
+	})
 
-	// Тональные ползунки: при перетаскивании обновляются только параметры
-	// и подпись, пайплайн (~50 мс на превью) - в on_release, чтобы драг
-	// не подтормаживал. Одиночные on_change (колесо, клавиши, «×», «Авто»)
-	// применяются сразу - dragging у них false.
-	tone_release := fn [mut st, mut cv, mut hist] (v f32) {
-		apply_pipeline(mut st, mut cv, mut hist)
-	}
-
-	mut exp_lb := vgui.label('Экспозиция')
-	mut exp_vl := value_label('0.00')
-	mut exp_sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-	exp_sl.on_change = fn [mut st, mut cv, mut hist, mut exp_vl, mut exp_sl] (v f32) {
-		st.params.exposure = v
-		exp_vl.text = '${v:.2f}'
-		if !exp_sl.dragging {
-			apply_pipeline(mut st, mut cv, mut hist)
+	// Тональные ползунки: пайплайн (~60 мс на превью) - по отпусканию,
+	// чтобы драг не подтормаживал; при перетаскивании только подпись.
+	mut exp := edit_slider(mut st, SliderCfg{
+		label: 'Экспозиция'
+		min:   -4
+		max:   4
+		get:   fn (e &EditState) f32 {
+			return e.params.exposure
 		}
-	}
-	exp_sl.on_release = tone_release
-	reset_sliders << exp_sl
-	reset_defaults << 0.0
-
+		set:   fn (mut e EditState, v f32) {
+			e.params.exposure = v
+		}
+		fx:    tone_fx
+	})
 	// «Авто» - экспозиция по гистограмме превью. set_value сам вызовет
-	// on_change ползунка: параметры, подпись и пайплайн обновятся штатно.
+	// on_change ползунка: параметры, подпись, пайплайн и запись в историю
+	// (под своим названием - hist_label) обновятся штатно.
+	mut exp_sl := exp.sl
 	mut b_autoexp := vgui.button('Авто')
 	b_autoexp.style = .outline
 	b_autoexp.on_click = fn [mut st, mut exp_sl] () {
 		if st.linear.len == 0 {
 			return
 		}
-		exp_sl.set_value(auto_exposure_ev(st.linear, st.pw * st.ph))
+		ev := auto_exposure_ev(st.linear, st.pw * st.ph)
+		st.hist_label = 'Авто-экспозиция ${fmt_signed(ev, 2)}'
+		exp_sl.set_value(ev)
+		st.hist_label = ''
 	}
 
-	mut sh_lb := vgui.label('Тени')
-	mut sh_vl := value_label('0.00')
-	mut sh_sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-	sh_sl.on_change = fn [mut st, mut cv, mut hist, mut sh_vl, mut sh_sl] (v f32) {
-		st.params.shadows = v
-		sh_vl.text = '${v:.2f}'
-		if !sh_sl.dragging {
-			apply_pipeline(mut st, mut cv, mut hist)
+	mut sh := edit_slider(mut st, SliderCfg{
+		label: 'Тени'
+		min:   -4
+		max:   4
+		get:   fn (e &EditState) f32 {
+			return e.params.shadows
 		}
-	}
-	sh_sl.on_release = tone_release
-	reset_sliders << sh_sl
-	reset_defaults << 0.0
-
-	mut con_lb := vgui.label('Контраст')
-	mut con_vl := value_label('0.00')
-	mut con_sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-	con_sl.on_change = fn [mut st, mut cv, mut hist, mut con_vl, mut con_sl] (v f32) {
-		st.params.contrast = v
-		con_vl.text = '${v:.2f}'
-		if !con_sl.dragging {
-			apply_pipeline(mut st, mut cv, mut hist)
+		set:   fn (mut e EditState, v f32) {
+			e.params.shadows = v
 		}
-	}
-	con_sl.on_release = tone_release
-	reset_sliders << con_sl
-	reset_defaults << 0.0
-
-	mut sat_lb := vgui.label('Насыщенность')
-	mut sat_vl := value_label('1.00')
-	mut sat_sl := vgui.slider_horizontal(0.0, 4.0, 1.0)
-	sat_sl.on_change = fn [mut st, mut cv, mut hist, mut sat_vl, mut sat_sl] (v f32) {
-		st.params.saturation = v
-		sat_vl.text = '${v:.2f}'
-		if !sat_sl.dragging {
-			apply_pipeline(mut st, mut cv, mut hist)
+		fx:    tone_fx
+	})
+	mut con := edit_slider(mut st, SliderCfg{
+		label: 'Контраст'
+		min:   -4
+		max:   4
+		get:   fn (e &EditState) f32 {
+			return e.params.contrast
 		}
-	}
-	sat_sl.on_release = tone_release
-	reset_sliders << sat_sl
-	reset_defaults << 1.0
+		set:   fn (mut e EditState, v f32) {
+			e.params.contrast = v
+		}
+		fx:    tone_fx
+	})
+	mut sat := edit_slider(mut st, SliderCfg{
+		label:  'Насыщенность'
+		max:    4
+		def:    1
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.saturation
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.saturation = v
+		}
+		fx:     tone_fx
+	})
 
 	// «Тени/Света» как в RawTherapee: маска по РАЗМЫТОЙ люме (blur_luma),
 	// поэтому подъём теней сохраняет локальный контраст и не даёт плоской
 	// картинки, а приглушение светов не серит мелкие блики.
-
-	mut hlt_lb := vgui.label('Света')
-	mut hlt_vl := value_label('0')
-	mut hlt_sl := vgui.slider_horizontal(0, 100, 0)
-	hlt_sl.step = 1
-	hlt_sl.on_change = fn [mut st, mut cv, mut hist, mut hlt_vl, mut hlt_sl] (v f32) {
-		st.params.sh_highlights = v
-		hlt_vl.text = '${int(v)}'
-		if !hlt_sl.dragging {
-			apply_pipeline(mut st, mut cv, mut hist)
+	mut hlt := edit_slider(mut st, SliderCfg{
+		label:  'Света'
+		hname:  'Тени/Света: света'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sh_highlights
 		}
-	}
-	hlt_sl.on_release = tone_release
-	reset_sliders << hlt_sl
-	reset_defaults << 0.0
-
-	mut sht_lb := vgui.label('Тени')
-	mut sht_vl := value_label('0')
-	mut sht_sl := vgui.slider_horizontal(0, 100, 0)
-	sht_sl.step = 1
-	sht_sl.on_change = fn [mut st, mut cv, mut hist, mut sht_vl, mut sht_sl] (v f32) {
-		st.params.sh_shadows = v
-		sht_vl.text = '${int(v)}'
-		if !sht_sl.dragging {
-			apply_pipeline(mut st, mut cv, mut hist)
+		set:    fn (mut e EditState, v f32) {
+			e.params.sh_highlights = v
 		}
-	}
-	sht_sl.on_release = tone_release
-	reset_sliders << sht_sl
-	reset_defaults << 0.0
+		fx:     tone_fx
+	})
+	mut sht := edit_slider(mut st, SliderCfg{
+		label:  'Тени'
+		hname:  'Тени/Света: тени'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sh_shadows
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sh_shadows = v
+		}
+		fx:     tone_fx
+	})
 
 	// Тон-эквалайзер: пять полос по яркости
 	eq_names := ['Чёрные', 'Тени', 'Средние', 'Света', 'Белые']
 	mut eq_rows := []&vgui.HBox{}
 	for i in 0 .. 5 {
-		lb := vgui.label(eq_names[i])
-		mut vl := value_label('0.00')
-		mut sl := vgui.slider_horizontal(-4.0, 4.0, 0.0)
-		sl.on_change = fn [mut st, mut cv, mut hist, mut vl, mut sl, i] (v f32) {
-			st.params.eq[i] = v
-			vl.text = '${v:.2f}'
-			if !sl.dragging {
-				apply_pipeline(mut st, mut cv, mut hist)
+		mut s := edit_slider(mut st, SliderCfg{
+			label: eq_names[i]
+			hname: 'Эквалайзер: ${eq_names[i]}'
+			min:   -4
+			max:   4
+			get:   fn [i] (e &EditState) f32 {
+				return e.params.eq[i]
 			}
-		}
-		sl.on_release = tone_release
-		reset_sliders << sl
-		reset_defaults << 0.0
-		eq_rows << slider_row(lb, mut sl, vl, 0.0, lbl_w, val_w)
+			set:   fn [i] (mut e EditState, v f32) {
+				e.params.eq[i] = v
+			}
+			fx:    tone_fx
+		})
+		eq_rows << edit_row(mut s, lbl_w, val_w)
 	}
 
 	// ── Кривые: кнопки каналов, редактор, подсказка ──
@@ -1034,9 +1112,10 @@ fn main() {
 	mut ed := vgui.curve_editor()
 	st.curve_ed = ed
 	ed.on_release = fn [mut st, mut cv, mut hist, mut ed] () {
-		st.curve_pts[st.curve_ch] = ed.points.clone()
+		st.edit.curve_pts[st.curve_ch] = ed.points.clone()
 		curves_to_params(mut st)
 		apply_pipeline(mut st, mut cv, mut hist)
+		record(mut st, 'curve${st.curve_ch}', 'Кривая ${curve_names[st.curve_ch]}', false)
 	}
 	// Обработчик ставится на только что созданную кнопку. НЕ через
 	// `mut b := массив[c]; b.on_click = fn ...` - это ошибка компилятора V:
@@ -1064,10 +1143,12 @@ fn main() {
 	mut curve_reset := vgui.button('×')
 	curve_reset.style = .outline
 	curve_reset.on_click = fn [mut st, mut cv, mut hist] () {
-		st.curve_pts[st.curve_ch] = identity_curve()
+		st.edit.curve_pts[st.curve_ch] = identity_curve()
 		curves_to_params(mut st)
 		sync_curve_editor(mut st)
 		apply_pipeline(mut st, mut cv, mut hist)
+		record(mut st, 'curve${st.curve_ch}', 'Кривая ${curve_names[st.curve_ch]}: сброс',
+			false)
 	}
 	ch_row.add_fixed(curve_reset, 26)
 	mut curve_hint := vgui.label('Щелчок - точка, правая кнопка - удалить, двойной - сброс')
@@ -1080,29 +1161,60 @@ fn main() {
 	for m in 0 .. 3 {
 		mut rows := []SectionRow{}
 		for i in 0 .. 8 {
-			mut lb := vgui.label(hsl_names[i])
+			mut s := edit_slider(mut st, SliderCfg{
+				label:  hsl_names[i]
+				hname:  'HSL ${hsl_modes[m].to_lower()}: ${hsl_names[i]}'
+				min:    -100
+				max:    100
+				digits: 0
+				get:    fn [m, i] (e &EditState) f32 {
+					return match m {
+						0 { e.params.hsl_hue[i] }
+						1 { e.params.hsl_sat[i] }
+						else { e.params.hsl_lum[i] }
+					}
+				}
+				set:    fn [m, i] (mut e EditState, v f32) {
+					match m {
+						0 { e.params.hsl_hue[i] = v }
+						1 { e.params.hsl_sat[i] = v }
+						else { e.params.hsl_lum[i] = v }
+					}
+				}
+				fx:     tone_fx
+			})
+			mut lb := s.lb
 			lb.color = hsl_label_colors[i]
-			mut vl := value_label('0')
-			mut sl := vgui.slider_horizontal(-100, 100, 0)
-			sl.step = 1
-			sl.on_change = fn [mut st, mut cv, mut hist, mut vl, mut sl, m, i] (v f32) {
-				match m {
-					0 { st.params.hsl_hue[i] = v }
-					1 { st.params.hsl_sat[i] = v }
-					else { st.params.hsl_lum[i] = v }
-				}
-				vl.text = '${int(v)}'
-				if !sl.dragging {
-					apply_pipeline(mut st, mut cv, mut hist)
-				}
-			}
-			sl.on_release = tone_release
-			reset_sliders << sl
-			reset_defaults << 0.0
-			rows << SectionRow{slider_row(lb, mut sl, vl, 0.0, lbl_w, val_w), 26}
+			rows << SectionRow{edit_row(mut s, lbl_w, val_w), 26}
 		}
 		hsl_tabs.add_tab(hsl_modes[m], section(rows))
 	}
+
+	// ── История правок: список, текущая запись выделена ──
+	// Щелчок (или стрелки в списке) - откат к записи, более поздняя -
+	// возврат вперёд; новая правка после отката отрезает «будущее».
+	mut hist_lb := vgui.list_box()
+	hist_lb.item_height = 22
+	// Одна колонка без заголовка: строки - цветные подписи (отменённые
+	// правки серые), а ячейки-виджеты вертикальный список рисует только
+	// по колонкам
+	hist_lb.add_column('', 360)
+	hist_lb.show_header = false // add_column включает заголовок
+	hist_lb.on_select = fn [mut st, mut cv, mut hist, mut nm, mut app] (idx int, text string) {
+		goto_history(mut st, idx, mut cv, mut hist, mut nm, mut app)
+	}
+	st.hist_lb = hist_lb
+	mut hist_hint := vgui.label('Ctrl+Z - отменить, Ctrl+Shift+Z - вернуть')
+	hist_hint.color = vgui.Color{130, 130, 136, 255}
+	hist_hint.font_size = 12
+	win.bind_hotkey('Ctrl+Z', fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+		goto_history(mut st, st.hist_pos - 1, mut cv, mut hist, mut nm, mut app)
+	})
+	redo := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+		goto_history(mut st, st.hist_pos + 1, mut cv, mut hist, mut nm, mut app)
+	}
+	win.bind_hotkey('Ctrl+Shift+Z', redo)
+	win.bind_hotkey('Ctrl+Y', redo)
 
 	mut q_lb := vgui.label('Качество JPEG')
 	mut q_vl := value_label('92')
@@ -1114,15 +1226,9 @@ fn main() {
 	}
 
 	// ── Кнопки ──
-	mut b_open := vgui.button('Открыть RAW...')
-	b_open.on_click = fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, mut placeholder, win, reset_sliders, reset_defaults] () {
-		path := vgui.native_open_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
-			filter_names:    ['RAW-файлы', 'Все файлы']
-			filter_patterns: [raw_patterns, '*']
-		})
-		if path.len == 0 {
-			return
-		}
+	// Открытие файла (кнопка и аргумент командной строки): новый кадр -
+	// нейтральные настройки и новая история с записью «Открыт файл».
+	open_file := fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, mut placeholder] (path string) {
 		mut nd := raw.open(path) or {
 			nm.show_error('Ошибка: ${err.msg()}')
 			return
@@ -1136,19 +1242,24 @@ fn main() {
 		st.file_gen++
 		st.dev = nd
 		setup_corrector(mut st, mut lens_cb, mut lens_lb)
-		// Новый файл - нейтральные параметры
-		st.suppress = true
-		st.params = pipeline.Params{}
-		reset_curves(mut st)
-		for i in 0 .. reset_sliders.len {
-			mut sl := reset_sliders[i]
-			sl.set_value(reset_defaults[i])
-		}
-		st.suppress = false
+		st.curve = []f32{} // камерная кривая старого кадра не нужна
+		set_edit(mut st, neutral_edit())
 		load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
 		setup_curve(mut st, mut crv_cb, mut cv, mut hist)
 		show_viewer(mut cv, mut placeholder)
+		start_history(mut st)
 		nm.show_info('${os.file_name(path)}: превью ${st.pw}x${st.ph}')
+	}
+
+	mut b_open := vgui.button('Открыть RAW...')
+	b_open.on_click = fn [mut app, win, open_file] () {
+		path := vgui.native_open_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
+			filter_names:    ['RAW-файлы', 'Все файлы']
+			filter_patterns: [raw_patterns, '*']
+		})
+		if path.len > 0 {
+			open_file(path)
+		}
 	}
 
 	// Сохранение - в фоновом потоке (полный кадр с коррекцией ~3.5 с,
@@ -1183,13 +1294,13 @@ fn main() {
 		job := SaveJob{
 			src:        st.dev.path
 			dst:        path
-			highlight:  st.highlight
-			lens_corr:  st.lens_corr && !isnil(st.corr)
-			nr_impulse: st.nr_impulse
-			nr_luma:    st.nr_luma
-			nr_chroma:  st.nr_chroma
-			defringe:   st.defringe
-			params:     st.params
+			highlight:  st.edit.highlight
+			lens_corr:  st.edit.lens_corr && !isnil(st.corr)
+			nr_impulse: st.edit.nr[0]
+			nr_luma:    st.edit.nr[1]
+			nr_chroma:  st.edit.nr[2]
+			defringe:   st.edit.nr[3]
+			params:     st.edit.params
 			quality:    st.quality
 		}
 		b_save.enabled = false
@@ -1197,23 +1308,17 @@ fn main() {
 		st.save_threads << spawn save_worker(job, mut app, save_done)
 	}
 
+	// «Сброс» тональный: пересветы, коррекция объектива, камерная кривая
+	// и шумодав остаются как есть. Это обычная правка - запись в истории,
+	// отменяется Ctrl+Z.
 	mut b_reset := vgui.button('Сброс')
 	b_reset.style = .outline
-	b_reset.on_click = fn [mut st, mut cv, mut hist, reset_sliders, reset_defaults] () {
-		st.suppress = true
-		st.params = pipeline.Params{}
-		reset_curves(mut st)
-		// «Сброс» тональный: камерная кривая, как и коррекция объектива,
-		// остаётся в положении своего чекбокса
-		if st.use_curve {
-			st.params.curve = st.curve.clone()
-		}
-		for i in 0 .. reset_sliders.len {
-			mut sl := reset_sliders[i]
-			sl.set_value(reset_defaults[i])
-		}
-		st.suppress = false
-		apply_pipeline(mut st, mut cv, mut hist)
+	b_reset.on_click = fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+		mut e := st.edit.clone()
+		e.params = pipeline.Params{}
+		e.curve_pts = neutral_edit().curve_pts
+		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
+		record(mut st, 'reset', 'Сброс', false)
 	}
 
 	mut b_fit := vgui.button('Вписать')
@@ -1239,7 +1344,7 @@ fn main() {
 	view_row.add(b_100, 1)
 	view_row.add(b_reset, 1)
 
-	mut hl_row := slider_row(hl_lb, mut hl_sl, hl_vl, 0.0, lbl_w, val_w)
+	mut hl_row := edit_row(mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
 	// между значением и сбросом.
 	mut b_expreset := vgui.button('×')
@@ -1249,20 +1354,20 @@ fn main() {
 	}
 	mut exp_row := vgui.create_hbox_fill()
 	exp_row.set_spacing(6)
-	exp_row.add_fixed(exp_lb, lbl_w)
+	exp_row.add_fixed(exp.lb, lbl_w)
 	exp_row.add(exp_sl, 1)
-	exp_row.add_fixed(exp_vl, val_w)
+	exp_row.add_fixed(exp.vl, val_w)
 	exp_row.add_fixed(b_autoexp, 52)
 	exp_row.add_fixed(b_expreset, 26)
-	mut sh_row := slider_row(sh_lb, mut sh_sl, sh_vl, 0.0, lbl_w, val_w)
-	mut con_row := slider_row(con_lb, mut con_sl, con_vl, 0.0, lbl_w, val_w)
-	mut sat_row := slider_row(sat_lb, mut sat_sl, sat_vl, 1.0, lbl_w, val_w)
-	mut hlt_row := slider_row(hlt_lb, mut hlt_sl, hlt_vl, 0.0, lbl_w, val_w)
-	mut sht_row := slider_row(sht_lb, mut sht_sl, sht_vl, 0.0, lbl_w, val_w)
-	mut imp_row := slider_row(imp_lb, mut imp_sl, imp_vl, 0.0, lbl_w, val_w)
-	mut nrl_row := slider_row(nrl_lb, mut nrl_sl, nrl_vl, 0.0, lbl_w, val_w)
-	mut nrc_row := slider_row(nrc_lb, mut nrc_sl, nrc_vl, 0.0, lbl_w, val_w)
-	mut df_row := slider_row(df_lb, mut df_sl, df_vl, 0.0, lbl_w, val_w)
+	mut sh_row := edit_row(mut sh, lbl_w, val_w)
+	mut con_row := edit_row(mut con, lbl_w, val_w)
+	mut sat_row := edit_row(mut sat, lbl_w, val_w)
+	mut hlt_row := edit_row(mut hlt, lbl_w, val_w)
+	mut sht_row := edit_row(mut sht, lbl_w, val_w)
+	mut imp_row := edit_row(mut imp, lbl_w, val_w)
+	mut nrl_row := edit_row(mut nrl, lbl_w, val_w)
+	mut nrc_row := edit_row(mut nrc, lbl_w, val_w)
+	mut df_row := edit_row(mut df, lbl_w, val_w)
 	mut q_row := slider_row(q_lb, mut q_sl, q_vl, 92.0, lbl_w, val_w)
 
 	// Гистограмма и кнопки файлов закреплены сверху, кнопки вида - снизу;
@@ -1315,6 +1420,11 @@ fn main() {
 	acc.add_section('Экспорт', section([
 		SectionRow{q_row, 26},
 	]))
+	// История - последней секцией, открыта: 8 строк списка и подсказка
+	acc.add_section_expanded('История', section([
+		SectionRow{hist_lb, 8 * 22 + 8},
+		SectionRow{hist_hint, 16},
+	]))
 
 	mut scroll := vgui.scroll_box(0)
 	scroll.sb_width = 8
@@ -1358,16 +1468,7 @@ fn main() {
 
 	// Путь к RAW можно передать аргументом: vraw-gui файл.CR3
 	if os.args.len > 1 && os.exists(os.args[1]) {
-		if mut nd := raw.open(os.args[1]) {
-			st.dev = nd
-			setup_corrector(mut st, mut lens_cb, mut lens_lb)
-			load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
-			setup_curve(mut st, mut crv_cb, mut cv, mut hist)
-			show_viewer(mut cv, mut placeholder)
-			nm.show_info('${os.file_name(os.args[1])}: превью ${st.pw}x${st.ph}')
-		} else {
-			nm.show_error('Ошибка: не удалось открыть ${os.args[1]}')
-		}
+		open_file(os.args[1])
 	}
 
 	app.run()
