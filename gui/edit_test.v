@@ -290,3 +290,97 @@ fn test_broken_files() {
 		assert false, 'неверный размер nr принят'
 	}
 }
+
+// ── Браузер папки ──
+
+fn test_thumb_order() {
+	assert thumb_order(0, 0) == []int{}
+	assert thumb_order(1, 0) == [0]
+	assert thumb_order(5, 2) == [2, 3, 1, 4, 0]
+	assert thumb_order(4, 0) == [0, 1, 2, 3]
+	assert thumb_order(4, 3) == [3, 2, 1, 0]
+	assert thumb_order(3, -1) == [0, 1, 2] // кадр не найден - с начала
+}
+
+fn test_scan_folder() {
+	dir := os.join_path(os.temp_dir(), 'vraw_scan_test')
+	os.rmdir_all(dir) or {}
+	os.mkdir_all(os.join_path(dir, 'sub.CR3'))! // папка с «RAW»-именем - не кадр
+	for n in ['b.CR3', 'a.cr3', 'c.NEF', 'x.jpg', 'a.cr3.vraw.json'] {
+		os.write_file(os.join_path(dir, n), '')!
+	}
+	got := scan_folder(dir).map(os.file_name(it))
+	assert got == ['a.cr3', 'b.CR3', 'c.NEF']
+	os.rmdir_all(dir) or {}
+}
+
+// pixel - цвет точки (x, y) RGBA-буфера ширины w
+fn pixel(buf []u8, w int, x int, y int) []u8 {
+	k := (y * w + x) * 4
+	return buf[k..k + 3]
+}
+
+// Источник 4x2: левая половина красная, правая синяя, верхний левый
+// пиксель - белый (метка ориентации)
+fn sample_src() []u8 {
+	mut s := []u8{len: 4 * 2 * 3}
+	for y in 0 .. 2 {
+		for x in 0 .. 4 {
+			k := (y * 4 + x) * 3
+			if x < 2 {
+				s[k] = 200
+			} else {
+				s[k + 2] = 200
+			}
+		}
+	}
+	s[0], s[1], s[2] = 255, 255, 255
+	return s
+}
+
+fn test_fit_thumb_plain_and_letterbox() {
+	// 4x2 в буфер 8x8: масштаб 2, картинка 8x4 по центру (поля сверху/снизу)
+	out := fit_thumb(sample_src(), 4, 2, 0, 8, 8)
+	assert out.len == 8 * 8 * 4
+	assert pixel(out, 8, 0, 0) == [thumb_bg.r, thumb_bg.g, thumb_bg.b] // поле
+	assert pixel(out, 8, 0, 2) == [u8(255), 255, 255] // метка - левый верх картинки
+	assert pixel(out, 8, 7, 5) == [u8(0), 0, 200] // правая половина синяя
+	assert out[3] == 255 // альфа
+}
+
+fn test_fit_thumb_rotations() {
+	// 180°: метка уходит в правый нижний угол картинки
+	r3 := fit_thumb(sample_src(), 4, 2, 3, 4, 2)
+	assert pixel(r3, 4, 3, 1) == [u8(255), 255, 255]
+	assert pixel(r3, 4, 0, 0) == [u8(0), 0, 200]
+	// 90° по часовой (flip 6): картинка 2x4, метка - правый верх,
+	// красная (левая) половина источника - сверху
+	r6 := fit_thumb(sample_src(), 4, 2, 6, 2, 4)
+	assert pixel(r6, 2, 1, 0) == [u8(255), 255, 255]
+	assert pixel(r6, 2, 0, 1) == [u8(200), 0, 0]
+	assert pixel(r6, 2, 0, 3) == [u8(0), 0, 200]
+	// 90° против часовой (flip 5): метка - левый низ, красное - снизу
+	r5 := fit_thumb(sample_src(), 4, 2, 5, 2, 4)
+	assert pixel(r5, 2, 0, 3) == [u8(255), 255, 255]
+	assert pixel(r5, 2, 1, 2) == [u8(200), 0, 0]
+	assert pixel(r5, 2, 1, 0) == [u8(0), 0, 200]
+}
+
+fn test_fit_thumb_downscale_averages() {
+	// 4x2 -> 2x1: каждый пиксель - среднее блока 2x2
+	out := fit_thumb(sample_src(), 4, 2, 0, 2, 1)
+	// левый блок: белый + 3 красных = (255+600)/4, 255/4, 255/4
+	assert pixel(out, 2, 0, 0) == [u8(213), 63, 63]
+	assert pixel(out, 2, 1, 0) == [u8(0), 0, 200]
+}
+
+fn test_make_thumb_real() {
+	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
+	if !os.exists(path) {
+		return
+	}
+	pix := make_thumb(path)!
+	assert pix.len == thumb_w * thumb_h * 4
+	// Кадр 3:2 заполняет буфер 3:2 целиком - полей нет, угол не фон
+	assert pixel(pix, thumb_w, 0, 0) != [thumb_bg.r, thumb_bg.g, thumb_bg.b]
+}

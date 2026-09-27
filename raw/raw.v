@@ -28,11 +28,27 @@ pub struct C.libraw_image_sizes_t {
 	flip   int // поворот вывода: бит 4 - на 90° (ширина и высота меняются местами)
 }
 
+// Встроенные превью файла (у CR3 их три: 160x120, 1620x1080 и полное;
+// у полного размер в списке 0x0 - неизвестен до извлечения)
+@[typedef]
+pub struct C.libraw_thumbnail_item_t {
+	twidth  u16
+	theight u16
+	tlength u32
+}
+
+@[typedef]
+pub struct C.libraw_thumbnail_list_t {
+	thumbcount int
+	thumblist  [8]C.libraw_thumbnail_item_t
+}
+
 @[typedef]
 pub struct C.libraw_data_t {
 mut:
-	params C.libraw_output_params_t
-	sizes  C.libraw_image_sizes_t
+	params      C.libraw_output_params_t
+	sizes       C.libraw_image_sizes_t
+	thumbs_list C.libraw_thumbnail_list_t
 }
 
 @[typedef]
@@ -73,8 +89,12 @@ fn C.libraw_get_iparams(lr &C.libraw_data_t) &C.libraw_iparams_t
 fn C.libraw_get_lensinfo(lr &C.libraw_data_t) &C.libraw_lensinfo_t
 fn C.libraw_get_imgother(lr &C.libraw_data_t) &C.libraw_imgother_t
 fn C.libraw_unpack_thumb(lr &C.libraw_data_t) int
+fn C.libraw_unpack_thumb_ex(lr &C.libraw_data_t, idx int) int
 fn C.libraw_dcraw_make_mem_thumb(lr &C.libraw_data_t, errc &int) &C.libraw_processed_image_t
 fn C.libraw_strerror(errorcode int) &char
+
+// LIBRAW_OUT_OF_ORDER_CALL - вызов не в том состоянии конвейера
+const libraw_out_of_order_call = -4
 
 fn err_text(code int) string {
 	return unsafe { cstring_to_vstring(&char(C.libraw_strerror(code))) }
@@ -266,6 +286,77 @@ pub fn (mut d Developer) thumb() ![]u8 {
 	if code != 0 {
 		return error('извлечение превью: ${err_text(code)}')
 	}
+	return d.thumb_jpeg()
+}
+
+// thumb_min - самое маленькое встроенное превью, у которого длинная
+// сторона не меньше min_side (JPEG). Для миниатюр и камерной кривой не
+// нужно декодировать полный JPEG 24 Мп (~0.85 с): у CR3 есть 1620x1080
+// (~15 мс) и 160x120. Превью с неизвестным размером (0x0 - у CR3 это
+// полный JPEG) считается самым большим. Без списка превью - thumb().
+pub fn (mut d Developer) thumb_min(min_side int) ![]u8 {
+	if isnil(d.lr) {
+		return error('файл не открыт')
+	}
+	tl := d.lr.thumbs_list
+	mut best := -1
+	mut best_side := 0
+	for i in 0 .. tl.thumbcount {
+		if i >= 8 {
+			break
+		}
+		it := tl.thumblist[i]
+		mut side := int(it.twidth)
+		if int(it.theight) > side {
+			side = int(it.theight)
+		}
+		if side == 0 {
+			side = 1 << 30 // размер неизвестен - полный кадр
+		}
+		// Лучший - наименьший из достаточных; пока достаточного нет - наибольший
+		better := if best < 0 {
+			true
+		} else if best_side >= min_side {
+			side >= min_side && side < best_side
+		} else {
+			side > best_side
+		}
+		if better {
+			best = i
+			best_side = side
+		}
+	}
+	if best < 0 {
+		return d.thumb()
+	}
+	code := C.libraw_unpack_thumb_ex(d.lr, best)
+	if code == libraw_out_of_order_call {
+		// unpack_thumb_ex после dcraw_process LibRaw 0.21 запрещает (обычный
+		// unpack_thumb - нет): превью - вторым хендлом, открытие ~1-6 мс
+		mut t := open(d.path)!
+		defer {
+			t.close()
+		}
+		return t.thumb_min(min_side)
+	}
+	if code != 0 {
+		return error('извлечение превью: ${err_text(code)}')
+	}
+	return d.thumb_jpeg()
+}
+
+// flip - ориентация кадра (EXIF через LibRaw): 0 - как есть, 3 - 180°,
+// 5 - 90° против часовой, 6 - 90° по часовой. Встроенные превью лежат
+// в ориентации сенсора - поворачивать их по flip.
+pub fn (d &Developer) flip() int {
+	if isnil(d.lr) {
+		return 0
+	}
+	return d.lr.sizes.flip
+}
+
+// thumb_jpeg - копия распакованного превью (после unpack_thumb[_ex])
+fn (mut d Developer) thumb_jpeg() ![]u8 {
 	errc := 0
 	img := C.libraw_dcraw_make_mem_thumb(d.lr, &errc)
 	if errc != 0 || isnil(img) {

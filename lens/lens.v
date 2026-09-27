@@ -81,7 +81,7 @@ fn C.lf_modifier_get_auto_scale(m &C.lfModifier, reverse int) f32
 @[heap]
 pub struct Corrector {
 mut:
-	db   &C.lfDatabase = unsafe { nil }
+	db   &C.lfDatabase = unsafe { nil } // своя база (lens.find); nil - общая (Database.find)
 	cam  &C.lfCamera   = unsafe { nil }
 	lens &C.lfLens     = unsafe { nil }
 	crop f32
@@ -100,47 +100,82 @@ fn find_camera(db &C.lfDatabase, maker string, model string) &C.lfCamera {
 	return cam
 }
 
-// find ищет профиль по строкам из EXIF (производитель и модель камеры,
-// модель объектива). none - камеры или объектива нет в базе lensfun.
-pub fn find(cam_maker string, cam_model string, lens_model string) ?&Corrector {
-	if lens_model.len == 0 {
-		return none
-	}
+// Database - база профилей lensfun. Загрузка ~115 мс (XML всех профилей),
+// поиск в загруженной - сотые доли мс, база за время работы не меняется:
+// GUI грузит её один раз за запуск (load_db) и ищет профили через
+// db.find. Поиск и коррекция только читают базу, поэтому одну базу
+// можно использовать из нескольких потоков (загрузка кадра, сохранение).
+@[heap]
+pub struct Database {
+mut:
+	db &C.lfDatabase = unsafe { nil }
+}
+
+// load_db загружает базу lensfun (системная + обновления в
+// ~/.local/share/lensfun). Освобождение - free(), после всех Corrector.
+pub fn load_db() !&Database {
 	db := C.lf_db_new()
 	if isnil(db) {
-		return none
+		return error('не удалось создать базу lensfun')
 	}
 	C.lf_db_load(db)
+	return &Database{
+		db: db
+	}
+}
 
+pub fn (mut d Database) free() {
+	if !isnil(d.db) {
+		C.lf_db_destroy(d.db)
+		d.db = unsafe { nil }
+	}
+}
+
+// find ищет профиль по строкам из EXIF (производитель и модель камеры,
+// модель объектива) в загруженной базе. none - камеры или объектива нет.
+// Corrector ссылается на базу и её не освобождает: база должна жить
+// дольше него.
+pub fn (d &Database) find(cam_maker string, cam_model string, lens_model string) ?&Corrector {
+	if isnil(d) || isnil(d.db) || lens_model.len == 0 {
+		return none
+	}
 	// LibRaw отдаёт make='Canon', model='EOS R8', а в базе lensfun модель
 	// полная ('Canon EOS R8') - матчеру нужно, чтобы запрос покрывал её
 	// целиком, поэтому вторая попытка с приклеенным производителем
 	// (тот же приём у darktable).
-	mut cam := find_camera(db, cam_maker, cam_model)
+	mut cam := find_camera(d.db, cam_maker, cam_model)
 	if isnil(cam) {
-		cam = find_camera(db, cam_maker, '${cam_maker} ${cam_model}')
+		cam = find_camera(d.db, cam_maker, '${cam_maker} ${cam_model}')
 	}
 	if isnil(cam) {
-		C.lf_db_destroy(db)
 		return none
 	}
-
-	lenses := C.lf_db_find_lenses_hd(db, cam, unsafe { nil }, lens_model.str, 0)
+	lenses := C.lf_db_find_lenses_hd(d.db, cam, unsafe { nil }, lens_model.str, 0)
 	if isnil(lenses) || isnil(unsafe { lenses[0] }) {
 		C.lf_free(lenses)
-		C.lf_db_destroy(db)
 		return none
 	}
 	lf_lens := unsafe { &C.lfLens(lenses[0]) }
 	C.lf_free(lenses)
-
 	return &Corrector{
-		db:        db
 		cam:       cam
 		lens:      lf_lens
 		crop:      cam.CropFactor
 		lens_name: unsafe { cstring_to_vstring(lf_lens.Model) }
 	}
+}
+
+// find - разовый поиск со своей базой (тесты, одиночные вызовы): база
+// загружается заново (~115 мс) и принадлежит Corrector - освобождается
+// его free(). В GUI - load_db один раз и db.find.
+pub fn find(cam_maker string, cam_model string, lens_model string) ?&Corrector {
+	mut d := load_db() or { return none }
+	mut c := d.find(cam_maker, cam_model, lens_model) or {
+		d.free()
+		return none
+	}
+	c.db = d.db // Corrector владеет базой
+	return c
 }
 
 // vignetting компенсирует виньетирование в линейном RGB-буфере u16
@@ -350,11 +385,13 @@ fn border_overflow(m &C.lfModifier, w int, h int) f32 {
 	return worst
 }
 
+// free освобождает базу, если Corrector ею владеет (lens.find); профиль
+// из общей базы (Database.find) база не теряет - освобождать нечего.
 pub fn (mut c Corrector) free() {
 	if !isnil(c.db) {
 		C.lf_db_destroy(c.db)
 		c.db = unsafe { nil }
-		c.cam = unsafe { nil }
-		c.lens = unsafe { nil }
 	}
+	c.cam = unsafe { nil }
+	c.lens = unsafe { nil }
 }

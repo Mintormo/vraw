@@ -138,12 +138,15 @@ fn start_history(mut st State) {
 }
 
 // Цвета строк истории: действующие правки и отменённые («будущее»,
-// куда можно вернуться) - приглушённо, как в Photoshop/Lightroom
-const hist_color = vgui.Color{220, 220, 224, 255}
+// куда можно вернуться) - приглушённо, как в Photoshop/Lightroom;
+// текущая запись - ярче и жирным (выделение списка может стоять на
+// другой строке: одиночный щелчок только выделяет)
+const hist_color = vgui.Color{200, 200, 204, 255}
+const hist_current_color = vgui.Color{245, 245, 248, 255}
 const hist_future_color = vgui.Color{110, 110, 116, 255}
 
 // refresh_history перестраивает список: строка на запись, текущая
-// выделена, отменённые - серые; список прокручивается к текущей.
+// жирная и выделена, отменённые - серые; список прокручивается к текущей.
 fn refresh_history(mut st State) {
 	if isnil(st.hist_lb) {
 		return
@@ -152,7 +155,16 @@ fn refresh_history(mut st State) {
 	lb.clear()
 	for i, e in st.history {
 		mut l := vgui.label('${i + 1}. ${e.name}')
-		l.color = if i <= st.hist_pos { hist_color } else { hist_future_color }
+		l.color = if i == st.hist_pos {
+			hist_current_color
+		} else if i < st.hist_pos {
+			hist_color
+		} else {
+			hist_future_color
+		}
+		if i == st.hist_pos {
+			l.font_style = .bold
+		}
 		lb.add_row_widgets([l])
 	}
 	lb.set_selected(st.hist_pos)
@@ -209,7 +221,8 @@ fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Can
 	apply_pipeline(mut st, mut cv, mut hist)
 }
 
-// goto_history - переход к записи idx (клик по списку, Ctrl+Z / Ctrl+Shift+Z).
+// goto_history - переход к записи idx (двойной щелчок или Enter в списке,
+// Ctrl+Z / Ctrl+Shift+Z).
 // Записи не удаляются: можно вернуться вперёд, пока не сделана новая правка.
 fn goto_history(mut st State, idx int, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager, mut app vgui.App) {
 	if idx < 0 || idx >= st.history.len {

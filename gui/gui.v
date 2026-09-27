@@ -38,6 +38,9 @@ mut:
 	// on_change только пишут настройки - без пересчётов и записей в историю
 	suppress bool
 	meta         raw.Meta // метаданные открытого кадра (для профиля объектива)
+	// База lensfun - загружается один раз за запуск (~115 мс), профили
+	// кадров (corr) ссылаются на неё; nil - база не загрузилась
+	lens_db      &lens.Database  = unsafe { nil }
 	corr         &lens.Corrector = unsafe { nil } // профиль lensfun или nil
 	curve        []f32 // камерная кривая кадра (match_curve), пустая - нет превью
 	nr_applied   [4]f32 = [f32(-1), -1, -1, -1]! // значения последней подготовки сырья
@@ -75,6 +78,33 @@ mut:
 	// уже показана (не повторять на каждую правку)
 	side_path string
 	side_err  bool
+	// Браузер папки (browser.v): кадры папки открытого файла, текущий,
+	// лента и полоса над ней, фоновый воркер миниатюр
+	folder        string
+	frames        []Frame
+	frame_idx     int = -1
+	viewer        &vgui.VBox     = unsafe { nil } // область просмотра (пересобирается)
+	view_stack    &vgui.Stack    = unsafe { nil } // холст превью + заглушка
+	vsplit        &vgui.Splitter = unsafe { nil } // просмотр | лента
+	hsplit        &vgui.Splitter = unsafe { nil } // просмотр | панель
+	strip_box     &vgui.VBox     = unsafe { nil } // полоса + лента
+	strip         &vgui.ListBox  = unsafe { nil }
+	strip_bar     &vgui.HBox     = unsafe { nil }
+	strip_info    &vgui.Label    = unsafe { nil }
+	strip_toggle  &vgui.Button   = unsafe { nil }
+	strip_open    bool           = true
+	thumb_gen     int
+	thumb_stop    &StopFlag = unsafe { nil }
+	thumb_threads []thread
+	thumb_done    fn (ThumbResult) = unsafe { nil }
+	// Фоновая загрузка кадра (loader.v): идёт ли, флаг отмены, потоки,
+	// предупреждение о сайдкаре для показа по окончании
+	loading      bool
+	load_stop    &StopFlag = unsafe { nil }
+	load_threads []thread
+	load_msg     string
+	on_load_pv   fn (LoadPreview) = unsafe { nil }
+	on_load_done fn (LoadResult)  = unsafe { nil }
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -102,11 +132,11 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	update_curve_histogram(mut st)
 }
 
-// load_preview проявляет открытый RAW в линейное 16-битное превью
-// (LibRaw, ~0.1 с, в главном потоке) и запускает подготовку сырья:
-// при async - в фоне (смена пересветов), иначе сразу (открытие файла -
-// камерной кривой нужна готовая картинка; смена размера - холст и
-// буферы должны совпасть до первого apply).
+// load_preview перепроявляет открытый RAW в линейное 16-битное превью
+// (LibRaw, ~0.1 с, в главном потоке) - смена режима пересветов - и
+// запускает подготовку сырья: при async - в фоне, иначе сразу (смена
+// размера - холст и буферы должны совпасть до первого apply). Открытие
+// файла идёт другим путём - фоновой загрузкой (loader.v).
 fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager, mut app vgui.App, async bool) {
 	if isnil(st.dev) {
 		return
@@ -130,15 +160,9 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	st.lens_dirty = true
 
 	if resized {
-		// Холст под новый размер: тот же приём, что в Canvas.load_from_surface.
 		// При перепроявке того же файла (смена режима пересветов) размер
-		// не меняется - зум и панораму не сбрасываем.
-		cv.width = st.pw
-		cv.height = st.ph
-		cv.pixels = []u8{len: st.pw * st.ph * 4}
-		cv.destroy_texture()
-		cv.dirty = true
-		cv.fit_to_view()
+		// не меняется - зум и панораму не сбрасываем
+		set_canvas_size(mut cv, st.pw, st.ph)
 	}
 
 	if async && !resized {
@@ -151,9 +175,9 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 
 // PrepJob - снимок для подготовки сырья: коррекция объектива (только при
 // redo_lens - src это выход LibRaw), импульсы, шумодав, ореолы, маска
-// «Тени/Света». src - собственная копия буфера. corr общий с GUI: его
-// освобождение (открытие другого файла, выход) сначала ждёт воркер
-// (wait_prep), а воркер одновременно работает только один.
+// «Тени/Света». src - собственная копия буфера. corr - профиль из общей
+// базы lensfun (st.lens_db живёт до выхода, после wait_prep), только
+// чтение; воркер одновременно работает только один.
 struct PrepJob {
 	gen       int
 	src       []u16
@@ -267,8 +291,8 @@ fn request_prep(mut st State, mut app vgui.App, redo_lens bool) {
 }
 
 // wait_prep дожидается фонового воркера.
-// Нужна перед освобождением st.corr (воркер им пользуется) и перед
-// синхронной подготовкой. Результат дождавшегося воркера уже в очереди
+// Нужна перед синхронной подготовкой и на выходе (до освобождения базы
+// lensfun). Результат дождавшегося воркера уже в очереди
 // app.post - его отбросит проверка file_gen/prep_running в prep_done.
 fn wait_prep(mut st State) {
 	for t in st.prep_threads {
@@ -279,12 +303,13 @@ fn wait_prep(mut st State) {
 }
 
 // SaveJob - всё, что нужно фоновому потоку сохранения, копиями по значению.
-// Поток НЕ делит с GUI ни LibRaw-хендл, ни Corrector: пока он работает,
-// пользователь может открыть другой файл (st.dev/st.corr сменятся или
-// освободятся), поэтому воркер открывает свои.
+// Поток НЕ делит с GUI LibRaw-хендл: пока он работает, пользователь может
+// открыть другой файл (st.dev сменится), поэтому воркер открывает свой.
+// Профиль объектива ищет в общей базе lensfun (db, только чтение).
 struct SaveJob {
 	src        string
 	dst        string
+	db         &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
 	highlight  int
 	lens_corr  bool
 	nr_impulse f32
@@ -325,11 +350,10 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (bool, string)) {
 	h := img.height
 	if job.lens_corr {
 		m := d.meta()
-		mut c := lens.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
+		c := job.db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
 		if !isnil(c) {
 			c.vignetting(img.data_u16(), w, h, m.focal, m.aperture)
 			c.geometry(img.data_u16(), w, h, m.focal)
-			c.free()
 		}
 	}
 	if job.nr_impulse > 0 {
@@ -451,53 +475,15 @@ fn auto_exposure_ev(linear []u16, npix int) f32 {
 	return ev
 }
 
-// setup_curve строит камерную кривую только что открытого файла: встроенный
-// JPEG камеры + гистограммное сопоставление с нейтральной проявкой
-// (pipeline.match_curve, приём «Автоопределение тоновой кривой» RT).
-// Вызывается ПОСЛЕ load_preview (нужно линейное превью) и только при
-// открытии файла: кривая - статичное свойство кадра, смена пересветов
-// или коррекции объектива её практически не меняет.
-fn setup_curve(mut st State, mut crv_cb vgui.CheckBox, mut cv vgui.Canvas, mut hist vgui.Canvas) {
-	st.curve = []f32{}
-	st.edit.params.curve = []f32{}
-	if st.linear.len == 0 {
-		crv_cb.enabled = false
-		return
-	}
-	tj := st.dev.thumb() or {
-		crv_cb.enabled = false
-		return
-	}
-	mut timg := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or {
-		crv_cb.enabled = false
-		return
-	}
-	st.curve = pipeline.match_curve(unsafe { &u16(st.linear.data) }, st.pw * st.ph, timg.data,
-		timg.width * timg.height)
-	timg.free()
-	crv_cb.enabled = true
-	if st.edit.use_curve {
-		st.edit.params.curve = st.curve.clone()
-		apply_pipeline(mut st, mut cv, mut hist)
-	}
-}
-
-// setup_corrector ищет профиль lensfun для только что открытого файла
-// и обновляет чекбокс коррекции: имя профиля в подписи-пояснении,
-// недоступность чекбокса, если профиля нет.
-fn setup_corrector(mut st State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
-	if !isnil(st.corr) {
-		st.corr.free()
-		st.corr = unsafe { nil }
-	}
-	st.meta = st.dev.meta()
-	if c := lens.find(st.meta.cam_make, st.meta.cam_model, st.meta.lens) {
-		st.corr = c
-		lens_lb.text = c.lens_name
-		lens_cb.enabled = true
-	} else {
+// show_lens - подпись и доступность чекбокса «Коррекция объектива» по
+// найденному профилю (после загрузки кадра, load_done)
+fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
+	if isnil(st.corr) {
 		lens_lb.text = 'профиль объектива не найден'
 		lens_cb.enabled = false
+	} else {
+		lens_lb.text = st.corr.lens_name
+		lens_cb.enabled = true
 	}
 }
 
@@ -824,6 +810,8 @@ fn main() {
 		'-4.00', '100'], 8)
 
 	mut st := &State{}
+	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
+	st.lens_db = lens.load_db() or { unsafe { nil } }
 	st.edit = neutral_edit()
 
 	// Холст превью скрыт до открытия файла - на его месте заглушка
@@ -850,15 +838,22 @@ fn main() {
 	// Приём результата фоновой подготовки сырья (главный поток, из
 	// app.post). Результат старого файла или уже дождавшегося воркера
 	// (wait_prep сбросил prep_running) отбрасывается.
+	// Результат старого кадра (переключились, пока воркер считал) не
+	// применяется, но воркер освобождается: новому кадру может быть нужна
+	// своя подготовка (шумодав из сайдкара), а профиль объектива
+	// прежнего кадра теперь можно освободить.
 	st.prep_done = fn [mut st, mut cv, mut hist, mut app] (res PrepResult) {
-		if res.gen != st.file_gen || !st.prep_running {
+		if !st.prep_running {
 			return
 		}
 		wait_prep(mut st) // воркер уже отдал результат - join мгновенный
-		take_prep(mut st, res)
-		apply_pipeline(mut st, mut cv, mut hist)
-		if st.lens_dirty || st.nr_applied != st.edit.nr {
-			// Пока воркер считал, настройки снова поменялись
+		if res.gen == st.file_gen {
+			take_prep(mut st, res)
+			apply_pipeline(mut st, mut cv, mut hist)
+		}
+		if st.dev_linear.len > 0 && (st.lens_dirty || st.nr_applied != st.edit.nr) {
+			// Пока воркер считал, настройки снова поменялись (или это
+			// был старый кадр)
 			request_prep(mut st, mut app, false)
 		}
 	}
@@ -1206,11 +1201,13 @@ fn main() {
 	// по колонкам
 	hist_lb.add_column('', 360)
 	hist_lb.show_header = false // add_column включает заголовок
-	hist_lb.on_select = fn [mut st, mut cv, mut hist, mut nm, mut app] (idx int, text string) {
+	// Одиночный щелчок (и стрелки) только выделяет запись; переход -
+	// двойным щелчком или Enter (on_dbl_click зовётся на оба)
+	hist_lb.on_dbl_click = fn [mut st, mut cv, mut hist, mut nm, mut app] (idx int, text string) {
 		goto_history(mut st, idx, mut cv, mut hist, mut nm, mut app)
 	}
 	st.hist_lb = hist_lb
-	mut hist_hint := vgui.label('Ctrl+Z - отменить, Ctrl+Shift+Z - вернуть')
+	mut hist_hint := vgui.label('Двойной щелчок - перейти, Ctrl+Z / Ctrl+Shift+Z')
 	hist_hint.color = vgui.Color{130, 130, 136, 255}
 	hist_hint.font_size = 12
 	win.bind_hotkey('Ctrl+Z', fn [mut st, mut cv, mut hist, mut nm, mut app] () {
@@ -1231,64 +1228,197 @@ fn main() {
 		q_vl.text = '${int(v)}'
 	}
 
-	// ── Кнопки ──
-	// Открытие файла (кнопка и аргумент командной строки): новый кадр -
-	// нейтральные настройки и новая история с записью «Открыт файл».
-	open_file := fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, mut placeholder] (path string) {
+	// ── Открытие файла (кнопка, аргумент, лента) ──
+	// Быстрая часть - здесь, в главном потоке: файл, настройки и история
+	// из сайдкара, лента. Проявка, коррекция и камерная кривая - в фоне
+	// (load_worker), кадр сразу виден по встроенному превью камеры.
+	open_file := fn [mut st, mut cv, mut nm, mut app, mut lens_cb, mut lens_lb] (path_arg string) {
+		// Полный путь: по нему лента ищет кадр и узнаёт смену папки
+		path := os.real_path(path_arg)
 		mut nd := raw.open(path) or {
 			nm.show_error('Ошибка: ${err.msg()}')
 			return
 		}
+		// Незаконченная загрузка прежнего кадра отменяется; её dev/corr
+		// освободит on_load_done, увидев старый file_gen
+		if !isnil(st.load_stop) {
+			mut ls := st.load_stop
+			ls.stop = true
+		}
 		if !isnil(st.dev) {
 			st.dev.close()
+			st.dev = unsafe { nil }
 		}
-		// Воркер пользуется st.corr - дождаться до его освобождения;
-		// его результат (старый кадр) отбросится по file_gen
-		wait_prep(mut st)
+		// Профиль - из общей базы: фоновая подготовка может ещё держать
+		// указатель, освобождать нечего, просто забываем
+		st.corr = unsafe { nil }
 		st.file_gen++
-		st.dev = nd
-		setup_corrector(mut st, mut lens_cb, mut lens_lb)
-		st.curve = []f32{} // камерная кривая старого кадра не нужна
-		// Правки из сайдкара: пересветы и объектив - сразу в синхронную
-		// проявку превью, шумодав - потом в фоне (restore_edit), чтобы
-		// открытие не замирало на секунды
+		st.loading = true
+		st.dev_linear = []u16{}
+		st.raw_linear = []u16{}
+		st.linear = []u16{}
+		st.mask = []u16{}
+		st.curve = []f32{}
+		st.lens_dirty = false
+		lens_lb.text = 'поиск профиля объектива...'
+		lens_cb.enabled = false
+		// Правки и история из сайдкара (производные поля снимков - по
+		// камерной кривой - заполнит on_load_done)
 		st.side_path = sidecar_path(path)
 		st.side_err = false
-		mut side_msg := ''
+		st.load_msg = ''
 		side := load_sidecar(st.side_path) or {
-			side_msg = ', правки не прочитаны (${err.msg()})'
+			st.load_msg = '${os.file_name(path)}: правки не прочитаны (${err.msg()})'
 			LoadedSidecar{}
 		}
-		mut first := neutral_edit()
 		if side.history.len > 0 {
-			first = side.history[side.current].state.clone()
-			first.nr = [f32(0), 0, 0, 0]!
-		}
-		set_edit(mut st, first)
-		load_preview(mut st, mut cv, mut hist, mut nm, mut app, false)
-		setup_curve(mut st, mut crv_cb, mut cv, mut hist)
-		show_viewer(mut cv, mut placeholder)
-		if side.history.len > 0 {
-			// Снимкам из файла - производные поля по кривой этого кадра
-			st.history = side.history.map(HistEntry{
-				name:  it.name
-				key:   it.key
-				state: with_derived(it.state, st.curve)
-			})
+			set_edit(mut st, side.history[side.current].state)
+			st.history = side.history.clone()
 			st.hist_pos = side.current
 			st.hist_ms = 0
-			restore_edit(mut st, st.history[st.hist_pos].state, mut cv, mut hist, mut nm, mut app)
 			refresh_history(mut st)
-			side_msg = ', правки восстановлены'
 		} else {
+			set_edit(mut st, neutral_edit())
 			start_history(mut st)
 		}
-		if side_msg.starts_with(', правки не') {
-			nm.show_warning('${os.file_name(path)}: превью ${st.pw}x${st.ph}${side_msg}')
-		} else {
-			nm.show_info('${os.file_name(path)}: превью ${st.pw}x${st.ph}${side_msg}')
+		show_frame(mut st, path, mut app)
+		stop := &StopFlag{}
+		st.load_stop = stop
+		// Холст с картинкой - превью впишется в него (зум сохранится, если
+		// кадр того же размера); пустой холст (4x3) - по размеру превью
+		has_img := cv.width * cv.height > 12
+		job := LoadJob{
+			gen:       st.file_gen
+			dev:       nd
+			db:        st.lens_db
+			highlight: st.edit.highlight
+			lens_corr: st.edit.lens_corr
+			tw:        if has_img { cv.width } else { 0 }
+			th:        if has_img { cv.height } else { 0 }
+			stop:      stop
+		}
+		st.load_threads << spawn load_worker(job, mut app, st.on_load_pv, st.on_load_done)
+	}
+
+	// Быстрое превью загрузки: на холст (и гистограмму), пока кадр
+	// проявляется
+	st.on_load_pv = fn [mut st, mut cv, mut hist, mut placeholder] (pv LoadPreview) {
+		if pv.gen != st.file_gen || !st.loading {
+			return
+		}
+		if pv.w != cv.width || pv.h != cv.height {
+			set_canvas_size(mut cv, pv.w, pv.h)
+		}
+		cv.pixels = pv.pix
+		cv.mark_dirty()
+		render_histogram(mut hist, cv.pixels)
+		show_viewer(mut cv, mut placeholder)
+	}
+
+	// Итог загрузки: хендлы и буферы - в State, затем досчитать то, что
+	// изменили за время загрузки (как restore_edit), и apply
+	st.on_load_done = fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, mut placeholder] (res LoadResult) {
+		if res.gen != st.file_gen {
+			free_load(res) // отменённая загрузка прежнего кадра
+			return
+		}
+		st.loading = false
+		if res.err.len > 0 {
+			free_load(res)
+			nm.show_error(res.err)
+			return
+		}
+		st.dev = res.dev
+		st.meta = res.meta
+		st.corr = res.corr
+		show_lens(st, mut lens_cb, mut lens_lb)
+		st.hl_developed = res.highlight
+		if res.w != cv.width || res.h != cv.height {
+			set_canvas_size(mut cv, res.w, res.h)
+		}
+		st.pw = res.w
+		st.ph = res.h
+		st.dev_linear = res.dev_linear
+		st.raw_linear = res.raw_linear
+		st.linear = res.linear
+		st.mask = res.mask
+		st.nr_applied = [f32(0), 0, 0, 0]!
+		st.lens_dirty = false
+		st.curve = res.curve
+		crv_cb.enabled = st.curve.len > 0
+		// Производные поля снимков - по камерной кривой этого кадра
+		st.edit = with_derived(st.edit, st.curve)
+		st.history = st.history.map(HistEntry{
+			name:  it.name
+			key:   it.key
+			state: with_derived(it.state, st.curve)
+		})
+		show_viewer(mut cv, mut placeholder)
+		// Что поменяли за время загрузки (и шумодав из сайдкара)
+		if st.edit.highlight != st.hl_developed {
+			load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
+		} else if st.edit.lens_corr != res.lens_corr {
+			request_prep(mut st, mut app, true)
+		} else if st.nr_applied != st.edit.nr {
+			request_prep(mut st, mut app, false)
+		}
+		apply_pipeline(mut st, mut cv, mut hist)
+		if st.load_msg.len > 0 {
+			nm.show_warning(st.load_msg)
 		}
 	}
+
+	// ── Лента кадров папки (browser.v) ──
+	// Переход к кадру: правки текущего уже в его сайдкаре (пишется после
+	// каждой правки), следующий открывается со своими. Не открылся -
+	// выделение возвращается на текущий.
+	goto_frame := fn [mut st, open_file] (idx int) {
+		if idx < 0 || idx >= st.frames.len || idx == st.frame_idx {
+			return
+		}
+		open_file(st.frames[idx].path)
+		sync_strip(mut st)
+	}
+	st.thumb_done = fn [mut st] (res ThumbResult) {
+		take_thumb(mut st, res)
+	}
+	mut strip := vgui.list_box_h(strip_item_width(strip_pane_h))
+	strip.pad = strip_pad
+	// Одиночный щелчок (и стрелки при фокусе на ленте) только выделяет
+	// миниатюру; открыть кадр - двойным щелчком или Enter
+	strip.on_dbl_click = fn [goto_frame] (idx int, text string) {
+		goto_frame(idx)
+	}
+	st.strip = strip
+	mut strip_info := vgui.label('')
+	strip_info.color = vgui.Color{150, 150, 156, 255}
+	st.strip_info = strip_info
+	mut strip_toggle := vgui.button('Скрыть ленту')
+	strip_toggle.style = .outline
+	strip_toggle.on_click = fn [mut st] () {
+		st.strip_open = !st.strip_open
+		layout_strip(mut st)
+	}
+	st.strip_toggle = strip_toggle
+	mut strip_bar := vgui.create_hbox_fill()
+	strip_bar.set_spacing(8)
+	strip_bar.add(strip_info, 1)
+	strip_bar.add_fixed(strip_toggle, 130)
+	st.strip_bar = strip_bar
+	// ←/→, Home/End - соседний, первый, последний кадр (если фокус не у
+	// ползунка: его стрелки двигают значение)
+	win.bind_hotkey('Left', fn [mut st, goto_frame] () {
+		goto_frame(st.frame_idx - 1)
+	})
+	win.bind_hotkey('Right', fn [mut st, goto_frame] () {
+		goto_frame(st.frame_idx + 1)
+	})
+	win.bind_hotkey('Home', fn [goto_frame] () {
+		goto_frame(0)
+	})
+	win.bind_hotkey('End', fn [mut st, goto_frame] () {
+		goto_frame(st.frames.len - 1)
+	})
 
 	mut b_open := vgui.button('Открыть RAW...')
 	b_open.on_click = fn [mut app, win, open_file] () {
@@ -1316,6 +1446,10 @@ fn main() {
 		b_save.enabled = true
 	}
 	b_save.on_click = fn [mut st, mut nm, mut app, win, mut b_save, save_done] () {
+		if st.loading {
+			nm.show_warning('Кадр ещё загружается')
+			return
+		}
 		if isnil(st.dev) {
 			nm.show_warning('Сначала откройте RAW-файл')
 			return
@@ -1333,6 +1467,7 @@ fn main() {
 		job := SaveJob{
 			src:        st.dev.path
 			dst:        path
+			db:         st.lens_db
 			highlight:  st.edit.highlight
 			lens_corr:  st.edit.lens_corr && !isnil(st.corr)
 			nr_impulse: st.edit.nr[0]
@@ -1488,16 +1623,43 @@ fn main() {
 	mut viewer := vgui.create_vbox_fill()
 	viewer.set_padding(16)
 	viewer.set_bg(viewer_bg)
+	viewer.set_spacing(8)
 	viewer.add(view_stack, 1)
+	st.viewer = viewer
+	st.view_stack = view_stack
+	// Под просмотром - лента кадров папки (layout_strip, когда открыт
+	// первый файл). Высота ленты - вертикальным сплиттером; после
+	// перетаскивания ячейки подстраиваются под новую высоту.
+	mut vsplit := vgui.splitter_vertical()
+	vsplit.bar_size = 3
+	vsplit.bar_color = divider_color
+	vsplit.min_first = 200
+	vsplit.min_second = strip_bar_h + 80
+	// Стартовая высота ленты ~strip_pane_h при высоте окна 946 (минус поля)
+	vsplit.ratio = 1 - strip_pane_h / (946 - 32)
+	vsplit.on_resize = fn [mut st] (r f32) {
+		fit_strip_items(mut st)
+	}
+	st.vsplit = vsplit
+	mut strip_box := vgui.create_vbox_fill()
+	strip_box.set_spacing(4)
+	st.strip_box = strip_box
 
-	mut divider := vgui.vseparator()
-	divider.color = divider_color
-
-	mut top := vgui.create_hbox_fill()
-	top.set_spacing(0)
-	top.add(viewer, 1)
-	top.add_fixed(divider, 1)
-	top.add_fixed(right, 440)
+	// Просмотр | панель инструментов - горизонтальный сплиттер: ширину
+	// панели можно менять (по умолчанию 440 при ширине окна 1280)
+	mut top := vgui.splitter_horizontal()
+	top.bar_size = 3
+	top.bar_color = divider_color
+	top.min_first = 400
+	top.min_second = 360
+	top.ratio = (1280 - 3 - 440) / f32(1280 - 3)
+	top.set_first(viewer)
+	top.set_second(right)
+	// Ширина просмотра изменилась - текущий кадр ленты снова по центру
+	top.on_resize = fn [mut st] (r f32) {
+		center_strip(mut st)
+	}
+	st.hsplit = top
 
 	win.add_widget(top)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
@@ -1519,8 +1681,13 @@ fn main() {
 	if !isnil(st.dev) {
 		st.dev.close()
 	}
-	wait_prep(mut st) // воркер пользуется st.corr
-	if !isnil(st.corr) {
-		st.corr.free()
+	wait_prep(mut st) // воркер пользуется профилем из st.lens_db
+	wait_thumbs(mut st)
+	wait_loads(mut st)
+	for t in st.save_threads {
+		t.wait() // сохранение ищет профиль в общей базе
+	}
+	if !isnil(st.lens_db) {
+		st.lens_db.free()
 	}
 }

@@ -211,6 +211,7 @@ fn sync_sidecar(mut st State) {
 		sidecar_error(mut st, err)
 		return
 	}
+	mark_edited(mut st) // отметка «изменён» на миниатюре ленты
 }
 
 fn sidecar_error(mut st State, err IError) {

@@ -147,3 +147,33 @@ fn test_find_unknown_lens() {
 		assert false, 'пустое имя объектива не должно находиться'
 	}
 }
+
+// Общая база: поиск без повторной загрузки, Corrector её не освобождает
+fn test_shared_database() {
+	mut db := load_db()!
+	defer {
+		db.free()
+	}
+	mut c := db.find('Canon', 'EOS R8', 'RF24-50mm F4.5-6.3 IS STM') or {
+		eprintln('ПРОПУСК: профиль RF 24-50 не найден в базе lensfun')
+		return
+	}
+	c.free() // не трогает общую базу
+	// После free профиля база жива: второй поиск работает
+	c2 := db.find('Canon', 'EOS R8', 'RF24-50mm F4.5-6.3 IS STM') or {
+		assert false, 'база испорчена после Corrector.free'
+		return
+	}
+	assert c2.lens_name.contains('24-50')
+	w := 60
+	h := 40
+	mut buf := []u16{len: w * h * 3, init: 2000}
+	assert c2.vignetting(unsafe { &u16(buf.data) }, w, h, 24.0, 5.6)
+	// Неизвестное - none
+	if _ := db.find('Canon', 'EOS R8', '') {
+		assert false
+	}
+	if _ := db.find('Nobody', 'Camera X', 'Lens') {
+		assert false
+	}
+}
