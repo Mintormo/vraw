@@ -25,6 +25,7 @@ mut:
 	lens_corr bool = true         // чекбокс «Коррекция объектива»
 	use_curve bool = true         // чекбокс «Камерная кривая»
 	nr        [4]f32              // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
+	ai        f32                 // AI-шумодав: сила 1..100, 0 - выключен (ai_nr.v)
 }
 
 // neutral_edit - настройки только что открытого файла (запись «Открыт файл»)
@@ -212,11 +213,13 @@ fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Can
 		load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
 	} else if lens_changed {
 		request_prep(mut st, mut app, true)
-	} else if st.nr_applied != st.edit.nr {
+	} else if prep_stale(st) {
 		request_prep(mut st, mut app, false)
 	}
 	// Тон - сразу по текущему сырью; готовая подготовка применит ещё раз
 	apply_pipeline(mut st, mut cv, mut hist)
+	// Откат к снимку с AI: результат модели в памяти - мгновенно, иначе прогон
+	ai_check(mut st, mut app)
 }
 
 // goto_history - переход к записи idx (двойной щелчок или Enter в списке,

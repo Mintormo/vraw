@@ -6,11 +6,12 @@ module main
 //
 // Порядок - как в превью: LibRaw (демозаика, камерный ББ, режим
 // пересветов) -> коррекция объектива (виньетирование, затем дисторсия +
-// TCA) -> импульсы -> шумодав -> ореолы -> маска «Тени/Света» ->
-// pipeline.apply (тон, кривые, HSL) -> 8 бит.
+// TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> маска
+// «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит.
 import raw
 import lens
 import pipeline
+import ai
 
 // correct_lens - коррекция объектива на месте (виньетирование строго до
 // дисторсии: ремап двигает пиксели); false - профиля нет
@@ -31,12 +32,28 @@ struct Image {
 	rgb    []u8 // width * height * 3
 }
 
+// AiExport - AI-шумодав для экспорта: модель (общая, грузится один раз) и
+// прогресс по плиткам (false - отмена, develop_full вернёт ai.Cancelled).
+// Без модели кадр с включённым AI не проявляется - ошибка, а не молча
+// другой результат. progress по умолчанию nil (без прогресса): анонимная
+// функция значением по умолчанию в @[params]-поле ломает C-кодоген V.
+@[params]
+struct AiExport {
+	cache    &ai.Cache = unsafe { nil }
+	progress fn (int, int) bool = unsafe { nil }
+}
+
+fn no_progress(_ int, _ int) bool {
+	return true
+}
+
 // develop_full - проявка RAW-файла по настройкам кадра e в 8-битный RGB
 // полного размера. e - с производными полями (камерная кривая и таблицы
 // кривых в params, как у живого st.edit); db - база lensfun (nil - без
 // коррекции объектива). Свой LibRaw (открывает и закрывает файл сам) -
-// годится для фонового потока.
-fn develop_full(path string, e EditState, db &lens.Database) !Image {
+// годится для фонового потока. AI-шумодав (e.ai > 0) - модель по всему
+// кадру, ~2.5 мин на 24 Мп.
+fn develop_full(path string, e EditState, db &lens.Database, ax AiExport) !Image {
 	mut d := raw.open(path)!
 	defer {
 		d.close()
@@ -50,6 +67,17 @@ fn develop_full(path string, e EditState, db &lens.Database) !Image {
 	buf := img.data_u16()
 	if e.lens_corr {
 		correct_lens(buf, w, h, d.meta(), db)
+	}
+	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
+	if e.ai > 0 {
+		if isnil(ax.cache) {
+			return error('AI-шумодав недоступен')
+		}
+		mut cache := unsafe { ax.cache }
+		model := cache.get()!
+		progress := if isnil(ax.progress) { no_progress } else { ax.progress }
+		den := ai.denoise(model, buf, w, h, progress)!
+		ai.blend(buf, den, e.ai / 100)
 	}
 	if e.nr[0] > 0 {
 		pipeline.impulse(buf, w, h, e.nr[0])

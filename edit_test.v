@@ -399,3 +399,25 @@ fn test_sidecar_legacy_camera_curve() {
 	assert loaded.history.len == 2
 	assert loaded.history[1].state.params.exposure == f32(0.3)
 }
+
+// AI-шумодав в сайдкаре: сила пишется и читается; в старых файлах
+// поля нет - AI выключен (0), файл при этом не считается испорченным
+fn test_sidecar_ai_field() {
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('ai')
+	st.edit.ai = 70
+	drag(mut exp, 0.3)
+	text := os.read_file(st.side_path)!
+	assert text.contains('"ai": 70')
+	loaded := decode_sidecar(text)!
+	assert loaded.history[1].state.ai == 70
+	// Старый файл: строк "ai" нет; поле последнее в объекте - убираем и
+	// повисшую запятую перед закрывающей скобкой
+	lines := text.split_into_lines().filter(!it.trim_space().starts_with('"ai":'))
+	legacy := lines.join('\n').replace(',\n  }', '\n  }').replace(',\n      }', '\n      }').replace(',\n    }', '\n    }')
+	assert !legacy.contains('"ai"')
+	old := decode_sidecar(legacy)!
+	assert old.history.len == 2
+	assert old.history[1].state.ai == 0
+	assert old.history[1].state.params.exposure == f32(0.3)
+}

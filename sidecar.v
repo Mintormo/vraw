@@ -42,6 +42,7 @@ struct SideState {
 	lens_corr     bool
 	use_curve     bool
 	nr            []f32 // импульсный, яркостный, цветовой, ореолы
+	ai            f32   // AI-шумодав 0..100 (в старых файлах нет - 0)
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -96,6 +97,7 @@ fn side_state(e EditState) SideState {
 		lens_corr:     e.lens_corr
 		use_curve:     e.use_curve
 		nr:            e.nr[..].clone()
+		ai:            e.ai
 	}
 }
 
@@ -115,6 +117,7 @@ fn edit_state(s SideState) !EditState {
 		highlight: s.highlight
 		lens_corr: s.lens_corr
 		use_curve: s.use_curve
+		ai:        s.ai
 	}
 	for i in 0 .. 5 {
 		e.params.eq[i] = s.eq[i]

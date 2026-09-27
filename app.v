@@ -19,6 +19,7 @@ import vgui
 import raw
 import lens
 import pipeline
+import ai
 
 const raw_patterns = 'CR3;CR2;CRW;NEF;ARW;DNG;RAF;ORF;RW2;cr3;cr2;crw;nef;arw;dng;raf;orf;rw2'
 
@@ -120,6 +121,26 @@ mut:
 	secondary_labels []&vgui.Label
 	hsl_labels       []&vgui.Label
 	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
+	// AI-шумодав (ai_nr.v): модель (грузится при первом прогоне), результат
+	// модели по raw_linear и номер сырья, из которого он посчитан; raw_gen
+	// растёт с каждым новым raw_linear. raw_pending - идёт подготовка с
+	// коррекцией объектива (raw_linear вот-вот сменится). ai_prev / ai_exp -
+	// идущие прогоны превью и экспорта (nil - нет), ai_wanted - нажата
+	// кнопка, ai_restart - прогон превью отменён сменой сырья.
+	ai_cache    &ai.Cache = unsafe { nil }
+	ai_linear   []u16
+	ai_raw_gen  int
+	raw_gen     int
+	raw_pending bool
+	ai_applied  f32 // сила AI в последней подготовке сырья
+	ai_prev     &AiCtl = unsafe { nil }
+	ai_exp      &AiCtl = unsafe { nil }
+	ai_wanted   bool
+	ai_restart  bool
+	ai_threads  []thread
+	ai_ui       &AiUi = unsafe { nil }
+	ai_done     fn (AiResult) = unsafe { nil }
+	ai_progress fn (&AiCtl, int, int, f64) = unsafe { nil }
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -185,6 +206,7 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	} else {
 		take_prep(mut st, prep_compute(make_prep_job(mut st)))
 		apply_pipeline(mut st, mut cv, mut hist)
+		ai_check(mut st, mut app)
 	}
 }
 
@@ -203,6 +225,8 @@ struct PrepJob {
 	focal     f32
 	aperture  f32
 	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
+	ai_src    []u16  // результат модели по тому же сырью (копия) или пусто
+	ai_s      f32    // сила AI 0..100 (0 - без AI)
 }
 
 struct PrepResult {
@@ -211,12 +235,19 @@ struct PrepResult {
 	linear     []u16
 	mask       []u16
 	nr         [4]f32
+	ai_s       f32
 }
 
 // make_prep_job снимает параметры подготовки с State (главный поток)
 fn make_prep_job(mut st State) PrepJob {
 	redo := st.lens_dirty
 	st.lens_dirty = false
+	if redo {
+		st.raw_pending = true
+	}
+	// Новое сырьё (коррекция объектива) - старый результат модели к нему
+	// не подходит: без AI, модель пересчитает ai_check после take_prep
+	ai_s := if redo { f32(0) } else { ai_effective(st) }
 	return PrepJob{
 		gen:       st.file_gen
 		src:       if redo { st.dev_linear.clone() } else { st.raw_linear.clone() }
@@ -227,6 +258,8 @@ fn make_prep_job(mut st State) PrepJob {
 		focal:     st.meta.focal
 		aperture:  st.meta.aperture
 		nr:        st.edit.nr
+		ai_src:    if ai_s > 0 { st.ai_linear.clone() } else { []u16{} }
+		ai_s:      ai_s
 	}
 }
 
@@ -243,6 +276,10 @@ fn prep_compute(job PrepJob) PrepResult {
 	}
 	// raw_linear - точка возврата для следующего пересчёта шумодава
 	raw_linear := if job.redo_lens { job.src.clone() } else { []u16{} }
+	// AI-шумодав: смешение с готовым результатом модели по силе (ai_nr.v)
+	if job.ai_s > 0 && job.ai_src.len == job.src.len {
+		ai.blend(buf, job.ai_src, job.ai_s / 100)
+	}
 	// Импульсы - до шумодава: вейвлет размазал бы выброс по уровням
 	if job.nr[0] > 0 {
 		pipeline.impulse(buf, job.w, job.h, job.nr[0])
@@ -262,6 +299,7 @@ fn prep_compute(job PrepJob) PrepResult {
 		linear:     job.src
 		mask:       mask
 		nr:         job.nr
+		ai_s:       job.ai_s
 	}
 }
 
@@ -270,10 +308,13 @@ fn prep_compute(job PrepJob) PrepResult {
 fn take_prep(mut st State, res PrepResult) {
 	if res.raw_linear.len > 0 {
 		st.raw_linear = res.raw_linear
+		st.raw_pending = false
+		raw_changed(mut st) // результат модели устарел (ai_check перезапустит)
 	}
 	st.linear = res.linear
 	st.mask = res.mask
 	st.nr_applied = res.nr
+	st.ai_applied = res.ai_s
 }
 
 // prep_worker выполняется в spawn; результат уходит в главный поток
@@ -327,34 +368,57 @@ struct SaveJob {
 	db        &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
 	edit      EditState // настройки кадра с производными полями - как в окне
 	quality   int
+	ai_cache  &ai.Cache = unsafe { nil } // модель AI-шумодава (общая)
+	ai_ctl    &AiCtl    = unsafe { nil } // прогон AI (при edit.ai > 0)
+	on_ai     fn (&AiCtl, int, int, f64) = unsafe { nil } // прогресс AI - в главный поток
+}
+
+// SaveOutcome - итог сохранения: вид уведомления
+enum SaveOutcome {
+	saved
+	failed
+	cancelled
 }
 
 // report доставляет результат из фонового потока в главный:
 // app.post() - единственный потокобезопасный вход vgui, замыкание
 // выполнится в потоке App между событиями и рендером. ok выбирает
 // вид уведомления (успех/ошибка) на принимающей стороне.
-fn report(mut app vgui.App, on_done fn (bool, string), ok bool, msg string) {
-	app.post(fn [on_done, ok, msg] () {
-		on_done(ok, msg)
+fn report(mut app vgui.App, on_done fn (SaveOutcome, string), res SaveOutcome, msg string) {
+	app.post(fn [on_done, res, msg] () {
+		on_done(res, msg)
 	})
 }
 
 // save_worker выполняется в spawn: полная проявка и запись JPEG без единого
 // обращения к vgui или общему состоянию - кроме app.post() (потокобезопасен
 // по контракту vgui). Результат - уведомление через report.
-fn save_worker(job SaveJob, mut app vgui.App, on_done fn (bool, string)) {
+fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
-	img := develop_full(job.src, job.edit, job.db) or {
-		report(mut app, on_done, false, 'Ошибка проявки: ${err.msg()}')
+	mut ax := AiExport{
+		cache: job.ai_cache
+	}
+	if !isnil(job.ai_ctl) {
+		ax = AiExport{
+			cache:    job.ai_cache
+			progress: ai_progress_fn(mut app, job.ai_ctl, job.on_ai)
+		}
+	}
+	img := develop_full(job.src, job.edit, job.db, ax) or {
+		if err is ai.Cancelled {
+			report(mut app, on_done, .cancelled, 'Экспорт отменён')
+		} else {
+			report(mut app, on_done, .failed, 'Ошибка проявки: ${err.msg()}')
+		}
 		return
 	}
 	stbi.stbi_write_jpg(job.dst, img.width, img.height, 3, img.rgb.data, job.quality) or {
-		report(mut app, on_done, false, 'Не удалось сохранить: ${err}')
+		report(mut app, on_done, .failed, 'Не удалось сохранить: ${err}')
 		return
 	}
 	size_mb := f64(os.file_size(job.dst)) / 1024 / 1024
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	report(mut app, on_done, true, 'Сохранено: ${job.dst} (${img.width}x${img.height}, ${size_mb:.1f} МБ, качество ${job.quality}, ${sec:.1f} с)')
+	report(mut app, on_done, .saved, 'Сохранено: ${job.dst} (${img.width}x${img.height}, ${size_mb:.1f} МБ, качество ${job.quality}, ${sec:.1f} с)')
 }
 
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
@@ -901,7 +965,7 @@ fn main() {
 	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
 		'Контраст', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
 		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Качество JPEG',
-		'Оранжевый', 'Фиолетовый', 'Пурпурный'], 8)
+		'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила'], 8)
 	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
 		'-4.00', '100'], 8)
 
@@ -910,6 +974,8 @@ fn main() {
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = lens.load_db() or { unsafe { nil } }
+	// Модель AI-шумодава: только путь; загрузка (~1.5 с) - при первом прогоне
+	st.ai_cache = ai.new_cache(ai.find_model())
 	st.edit = neutral_edit()
 
 	// Холст превью скрыт до открытия файла - на его месте заглушка
@@ -952,11 +1018,26 @@ fn main() {
 			take_prep(mut st, res)
 			apply_pipeline(mut st, mut cv, mut hist)
 		}
-		if st.dev_linear.len > 0 && (st.lens_dirty || st.nr_applied != st.edit.nr) {
+		if st.dev_linear.len > 0 && (st.lens_dirty || prep_stale(st)) {
 			// Пока воркер считал, настройки снова поменялись (или это
 			// был старый кадр)
 			request_prep(mut st, mut app, false)
 		}
+		// Новое сырьё - AI (если включён) пересчитается по нему
+		ai_check(mut st, mut app)
+	}
+	// AI-шумодав (ai_nr.v): прогресс и итог прогона - в главном потоке
+	st.ai_progress = fn [mut st] (ctl &AiCtl, done int, total int, eta f64) {
+		mut c := unsafe { ctl }
+		c.done = done
+		c.total = total
+		c.eta = eta
+		if st.ai_prev == ctl || (isnil(st.ai_prev) && st.ai_exp == ctl) {
+			sync_ai_ui(mut st)
+		}
+	}
+	st.ai_done = fn [mut st, mut app] (res AiResult) {
+		ai_take(mut st, mut app, res)
 	}
 
 	// ── Ползунки и чекбоксы правки ──
@@ -971,7 +1052,7 @@ fn main() {
 	// и коррекция объектива не перезапускаются - сырьё в raw_linear.
 	// Отпускание на уже применённом значении ничего не пересчитывает.
 	prep_fx := fn [mut st, mut app] () {
-		if st.nr_applied != st.edit.nr {
+		if prep_stale(st) {
 			request_prep(mut st, mut app, false)
 		}
 	}
@@ -1354,6 +1435,8 @@ fn main() {
 		st.corr = unsafe { nil }
 		st.file_gen++
 		st.loading = true
+		ai_forget(mut st)
+		st.raw_pending = false
 		st.dev_linear = []u16{}
 		st.raw_linear = []u16{}
 		st.linear = []u16{}
@@ -1444,7 +1527,9 @@ fn main() {
 		st.linear = res.linear
 		st.mask = res.mask
 		st.nr_applied = [f32(0), 0, 0, 0]!
+		st.ai_applied = 0
 		st.lens_dirty = false
+		st.raw_pending = false
 		st.curve = res.curve
 		crv_cb.enabled = st.curve.len > 0
 		// Производные поля снимков - по камерной кривой этого кадра
@@ -1461,10 +1546,12 @@ fn main() {
 			load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
 		} else if st.edit.lens_corr != res.lens_corr {
 			request_prep(mut st, mut app, true)
-		} else if st.nr_applied != st.edit.nr {
+		} else if prep_stale(st) {
 			request_prep(mut st, mut app, false)
 		}
 		apply_pipeline(mut st, mut cv, mut hist)
+		// AI из сайдкара - прогон модели по превью (с прогрессом в секции)
+		ai_check(mut st, mut app)
 		if st.load_msg.len > 0 {
 			nm.show_warning(st.load_msg)
 		}
@@ -1548,6 +1635,8 @@ fn main() {
 		}
 		st.corr = unsafe { nil }
 		st.file_gen++
+		ai_forget(mut st)
+		st.raw_pending = false
 		st.dev_linear = []u16{}
 		st.raw_linear = []u16{}
 		st.linear = []u16{}
@@ -1592,13 +1681,15 @@ fn main() {
 	// доставляет через app.post() - цикл vgui спит как обычно.
 	mut m_export := vgui.menu_action('Экспорт JPEG...')
 	m_export.shortcut = 'Ctrl+E'
-	save_done := fn [mut nm, mut m_export] (ok bool, msg string) {
-		if ok {
-			nm.show_success(msg)
-		} else {
-			nm.show_error(msg)
+	save_done := fn [mut st, mut nm, mut m_export] (res SaveOutcome, msg string) {
+		match res {
+			.saved { nm.show_success(msg) }
+			.failed { nm.show_error(msg) }
+			.cancelled { nm.show_warning(msg) }
 		}
 		m_export.enabled = true
+		st.ai_exp = unsafe { nil }
+		sync_ai_ui(mut st)
 	}
 	m_export.on_click = fn [mut st, mut nm, mut app, win, mut m_export, save_done] () {
 		if st.loading {
@@ -1619,15 +1710,32 @@ fn main() {
 			return
 		}
 		// Снимок всего нужного по значению: воркер не трогает st после спавна
-		job := SaveJob{
+		mut job := SaveJob{
 			src:       st.dev.path
 			dst:       path
 			db:        st.lens_db
 			edit:      st.edit.clone()
 			quality:   st.quality
+			ai_cache:  st.ai_cache
+			on_ai:     st.ai_progress
+		}
+		if st.edit.ai > 0 {
+			job = SaveJob{
+				...job
+				ai_ctl: &AiCtl{
+					export: true
+				}
+			}
 		}
 		m_export.enabled = false
-		nm.show_info('Проявляю в полном размере (в фоне)...')
+		if !isnil(job.ai_ctl) {
+			// Прогресс AI полного кадра - в секции «Шумодав и ореолы»
+			st.ai_exp = job.ai_ctl
+			sync_ai_ui(mut st)
+			nm.show_info('Экспорт с AI-шумодавом (~3 мин, прогресс - в секции «Шумодав и ореолы»)...')
+		} else {
+			nm.show_info('Проявляю в полном размере (в фоне)...')
+		}
 		st.save_threads << spawn save_worker(job, mut app, save_done)
 	}
 
@@ -1740,6 +1848,30 @@ fn main() {
 	mut nrl_row := edit_row(mut st, mut nrl, lbl_w, val_w)
 	mut nrc_row := edit_row(mut st, mut nrc, lbl_w, val_w)
 	mut df_row := edit_row(mut st, mut df, lbl_w, val_w)
+	// AI-шумодав - блок над классическими ползунками (ai_nr.v). Сила -
+	// обычная настройка кадра (история, сайдкар): смешение с результатом
+	// модели в подготовке сырья, мгновенно - модель не пересчитывается.
+	mut ai_str := edit_slider(mut st, SliderCfg{
+		label:  'Сила'
+		hname:  'AI-шумодав: сила'
+		min:    1
+		max:    100
+		def:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return if e.ai > 0 { e.ai } else { 100 }
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.ai = v
+		}
+		fx:     prep_fx
+	})
+	ai_block := build_ai_block(mut st, mut app, mut ai_str, lbl_w, val_w)
+	mut ai_caption := vgui.label('Нейросеть')
+	ai_caption.font_style = .bold
+	mut classic_caption := vgui.label('Классический')
+	classic_caption.font_style = .bold
 	mut q_row := slider_row(mut st, q_lb, mut q_sl, q_vl, 92.0, lbl_w, val_w)
 
 	// Гистограмма и кнопки файлов закреплены сверху, кнопки вида - снизу;
@@ -1784,6 +1916,10 @@ fn main() {
 		SectionRow{hsl_tabs, 32 + 8 * 26 + 7 * 6 + 16},
 	]))
 	acc.add_section('Шумодав и ореолы', section([
+		SectionRow{ai_caption, 16},
+		SectionRow{ai_block, ai_block_h},
+		SectionRow{vgui.separator(), 9},
+		SectionRow{classic_caption, 16},
 		SectionRow{imp_row, 26},
 		SectionRow{nrl_row, 26},
 		SectionRow{nrc_row, 26},
@@ -1884,7 +2020,16 @@ fn main() {
 
 	app.run()
 
+	// Прогон AI по превью - отменить (вернётся после текущей плитки)
+	if !isnil(st.ai_prev) {
+		mut c := st.ai_prev
+		c.cancel = true
+	}
+	for t in st.ai_threads {
+		t.wait()
+	}
 	// Не обрывать записывающийся JPEG, если окно закрыли во время сохранения
+	// (экспорт с AI доработает до конца - это минуты, но файл важнее)
 	for t in st.save_threads {
 		t.wait()
 	}
@@ -1900,5 +2045,8 @@ fn main() {
 	st.save_threads.clear()
 	if !isnil(st.lens_db) {
 		st.lens_db.free()
+	}
+	if !isnil(st.ai_cache) {
+		st.ai_cache.free()
 	}
 }
