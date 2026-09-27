@@ -24,7 +24,7 @@ import stbi
 import vgui
 import raw
 import lens
-import develop
+import pipeline
 
 struct LoadJob {
 	gen       int
@@ -93,7 +93,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		...res
 		corr: job.db.find(meta.cam_make, meta.cam_model, meta.lens) or { unsafe { nil } }
 	}
-	mut img := d.develop(half: true, linear16: true, highlight: job.highlight) or {
+	mut img := d.develop(half: true, highlight: job.highlight) or {
 		res = LoadResult{
 			...res
 			err: 'Ошибка проявки: ${err.msg()}'
@@ -167,10 +167,17 @@ fn quick_preview(mut d raw.Developer, job LoadJob) ?LoadPreview {
 	}
 }
 
-// camera_curve - камерная кривая кадра по нейтральной проявке превью
-// (develop.match_camera - общий с CLI расчёт; пусто - встроенного JPEG нет)
+// camera_curve - камерная кривая кадра: встроенный полный JPEG камеры +
+// гистограммное сопоставление с нейтральной проявкой превью linear (npix
+// пикселей). Именно полный JPEG: у CR3 превью 1620x1080 обработано иначе.
+// Пусто - встроенного JPEG нет.
 fn camera_curve(mut d raw.Developer, linear []u16, npix int) []f32 {
-	return develop.match_camera(mut d, unsafe { &u16(linear.data) }, npix)
+	tj := d.thumb() or { return []f32{} }
+	mut t := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return []f32{} }
+	defer {
+		t.free()
+	}
+	return pipeline.match_curve(unsafe { &u16(linear.data) }, npix, t.data, t.width * t.height)
 }
 
 // free_load - закрыть LibRaw отброшенного результата загрузки (профиль

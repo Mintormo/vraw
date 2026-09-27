@@ -277,7 +277,7 @@ pub fn match_curve(src &u16, npix int, ref_ &u8, ref_npix int) []f32 {
 	mut hs := []f64{len: 256} // гистограмма тонов источника
 	mut hr := []f64{len: 256} // гистограмма тонов камерного JPEG
 	unsafe {
-		mut s := src
+		mut s := &u16(src)
 		tl := &f32(tone.data)
 		ps := &f64(hs.data)
 		for _ in 0 .. npix / 4 {
@@ -285,7 +285,7 @@ pub fn match_curve(src &u16, npix int, ref_ &u8, ref_npix int) []f32 {
 			ps[int(tl[y])] += 1.0
 			s += 12
 		}
-		mut r := ref_
+		mut r := &u8(ref_)
 		pr := &f64(hr.data)
 		for _ in 0 .. ref_npix / 4 {
 			pr[(54 * int(r[0]) + 183 * int(r[1]) + 19 * int(r[2])) >> 8] += 1.0
@@ -343,7 +343,7 @@ pub fn blur_luma(src &u16, w int, h int) []u16 {
 	npix := w * h
 	mut a := []u16{len: npix}
 	unsafe {
-		mut s := src
+		mut s := &u16(src)
 		d := &u16(a.data)
 		for i in 0 .. npix {
 			d[i] = u16((54 * u32(s[0]) + 183 * u32(s[1]) + 19 * u32(s[2])) >> 8)
@@ -507,7 +507,7 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
 	sat := p.saturation
 	unsafe {
-		mut s := src
+		mut s := &u16(src)
 		mut d := &u8(dst.data)
 		ml := &f32(mlut.data)
 		flr := &f32(flut_r.data)

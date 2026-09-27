@@ -1,9 +1,9 @@
 module main
 
-// vraw-gui - проявка RAW с собственным пайплайном.
+// vraw - проявка RAW с собственным пайплайном.
 //
 // LibRaw используется только как источник сырья: демозаика + камерный ББ,
-// линейные 16-битные данные (см. raw.DevParams.linear16). Вся тональная
+// линейные 16-битные данные (см. raw.Developer.develop). Вся тональная
 // работа - модуль pipeline: экспозиция, тени, тон-эквалайзер, контраст,
 // насыщенность. Пайплайн построен на таблицах, поэтому любой ползунок
 // применяется к превью вживую, без перепроявки LibRaw.
@@ -19,7 +19,6 @@ import vgui
 import raw
 import lens
 import pipeline
-import develop
 
 const raw_patterns = 'CR3;CR2;CRW;NEF;ARW;DNG;RAF;ORF;RW2;cr3;cr2;crw;nef;arw;dng;raf;orf;rw2'
 
@@ -157,7 +156,7 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	if isnil(st.dev) {
 		return
 	}
-	mut img := st.dev.develop(half: true, linear16: true, highlight: st.edit.highlight) or {
+	mut img := st.dev.develop(half: true, highlight: st.edit.highlight) or {
 		nm.show_error('Ошибка проявки: ${err.msg()}')
 		return
 	}
@@ -326,8 +325,7 @@ struct SaveJob {
 	src       string
 	dst       string
 	db        &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
-	settings  develop.Settings // настройки кадра - как в сайдкаре
-	cam_curve []f32            // камерная кривая, с которой кадр показан в окне
+	edit      EditState // настройки кадра с производными полями - как в окне
 	quality   int
 }
 
@@ -346,9 +344,7 @@ fn report(mut app vgui.App, on_done fn (bool, string), ok bool, msg string) {
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (bool, string)) {
 	sw := time.new_stopwatch()
-	// Та же проявка, что у CLI по сайдкару (develop.full) - экспорт из
-	// окна и `vraw файл.CR3` дают одинаковый JPEG
-	img := develop.full(job.src, job.settings, cam_curve: job.cam_curve, db: job.db) or {
+	img := develop_full(job.src, job.edit, job.db) or {
 		report(mut app, on_done, false, 'Ошибка проявки: ${err.msg()}')
 		return
 	}
@@ -793,10 +789,16 @@ fn identity_curve() []vgui.CurvePoint {
 
 // tone_lut - кривая редактора (0..1) как таблица пайплайна: 256 узлов тон
 // 0..255 -> тон 0..255; тождественная - пустой массив (кривой нет).
-// Считает develop.tone_lut - тот же сплайн, что у редактора vgui (сверяет
-// тест), общий с CLI: проявка не зависит от vgui.
+// Тот же сплайн, которым рисует редактор кривых (vgui.curve_lut).
 fn tone_lut(pts []vgui.CurvePoint) []f32 {
-	return develop.tone_lut(dev_points(pts))
+	if vgui.curve_is_identity(pts) {
+		return []f32{}
+	}
+	mut l := vgui.curve_lut(pts, 256)
+	for i in 0 .. 256 {
+		l[i] *= 255.0
+	}
+	return l
 }
 
 // curves_to_params переносит точки всех четырёх кривых в Params
@@ -1621,8 +1623,7 @@ fn main() {
 			src:       st.dev.path
 			dst:       path
 			db:        st.lens_db
-			settings:  side_state(st.edit)
-			cam_curve: st.curve.clone()
+			edit:      st.edit.clone()
 			quality:   st.quality
 		}
 		m_export.enabled = false
@@ -1876,7 +1877,7 @@ fn main() {
 	win.add_widget(nm)
 	app.add_window(win)
 
-	// Путь к RAW можно передать аргументом: vraw-gui файл.CR3
+	// Путь к RAW можно передать аргументом: vraw файл.CR3
 	if os.args.len > 1 && os.exists(os.args[1]) {
 		open_file(os.args[1])
 	}

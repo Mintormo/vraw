@@ -11,9 +11,9 @@ fn test_develop_highlight() {
 		return
 	}
 	mut d := open(path)!
-	mut a := d.develop(half: true, linear16: true)! // 0 - клип
-	mut b := d.develop(half: true, linear16: true, highlight: 2)! // смешение
-	mut c := d.develop(half: true, linear16: true, highlight: 5)! // реконструкция
+	mut a := d.develop(half: true)! // 0 - клип
+	mut b := d.develop(half: true, highlight: 2)! // смешение
+	mut c := d.develop(half: true, highlight: 5)! // реконструкция
 	assert a.bits == 16
 	assert a.width == b.width
 	assert a.width == c.width

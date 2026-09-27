@@ -16,7 +16,7 @@ fn test_half_edge_cropped() {
 	defer {
 		d.close()
 	}
-	mut img := d.develop(half: true, linear16: true)!
+	mut img := d.develop(half: true)!
 	defer {
 		img.free()
 	}

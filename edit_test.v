@@ -5,7 +5,6 @@ module main
 // пустом State сразу выходят - проверяются только снимки и записи.
 import os
 import vgui
-import develop
 
 // new_state - State с двумя ползунками (экспозиция, яркостный шумодав)
 // и списком истории, как в main; открыт «файл» (запись «Открыт файл»).
@@ -62,14 +61,14 @@ fn jump(mut st State, idx int) {
 	goto_history(mut st, idx, mut cv, mut hist, mut nm, mut app)
 }
 
-fn names(st &State) []string {
+fn hist_names(st &State) []string {
 	return st.history.map(it.name)
 }
 
 fn test_drag_is_one_entry() {
 	mut st, mut exp, _ := new_state()
 	drag(mut exp, 0.7)
-	assert names(st) == ['Открыт файл', 'Экспозиция +0.70']
+	assert hist_names(st) == ['Открыт файл', 'Экспозиция +0.70']
 	assert st.hist_pos == 1
 	assert st.hist_lb.row_count() == 2
 	assert st.hist_lb.selected == 1
@@ -84,12 +83,12 @@ fn test_steps_merge() {
 	exp.set_value(0.1)
 	exp.set_value(0.2)
 	exp.set_value(0.3)
-	assert names(st) == ['Открыт файл', 'Экспозиция +0.30']
+	assert hist_names(st) == ['Открыт файл', 'Экспозиция +0.30']
 	// Другой ползунок - своя запись; шаги после него не склеиваются
 	// с экспозицией
 	nrl.set_value(40)
 	exp.set_value(0.4)
-	assert names(st) == ['Открыт файл', 'Экспозиция +0.30', 'Шумодав: яркостный 40',
+	assert hist_names(st) == ['Открыт файл', 'Экспозиция +0.30', 'Шумодав: яркостный 40',
 		'Экспозиция +0.40']
 	// Перетаскивание не склеивается с шагами
 	drag(mut exp, -1.0)
@@ -120,7 +119,7 @@ fn test_undo_redo_and_truncate() {
 	assert exp.value == 0
 	assert st.edit == st.history[0].state
 	drag(mut nrl, 10)
-	assert names(st) == ['Открыт файл', 'Шумодав: яркостный 10']
+	assert hist_names(st) == ['Открыт файл', 'Шумодав: яркостный 10']
 	assert st.hist_pos == 1
 }
 
@@ -132,7 +131,7 @@ fn test_step_after_undo_not_merged() {
 	jump(mut st, 0)
 	// Шаг сразу после отката - новая запись, а не замена чужой
 	exp.set_value(0.1)
-	assert names(st) == ['Открыт файл', 'Экспозиция +0.10']
+	assert hist_names(st) == ['Открыт файл', 'Экспозиция +0.10']
 	jump(mut st, 1)
 	jump(mut st, 0)
 	jump(mut st, 1)
@@ -181,7 +180,7 @@ fn test_auto_label() {
 	st.hist_label = ''
 	// Следующий шаг колесом - отдельной записью
 	exp.set_value(1.3)
-	assert names(st) == ['Открыт файл', 'Авто-экспозиция +1.23', 'Экспозиция +1.30']
+	assert hist_names(st) == ['Открыт файл', 'Авто-экспозиция +1.23', 'Экспозиция +1.30']
 }
 
 fn test_no_history_without_file() {
@@ -196,7 +195,7 @@ fn test_no_history_without_file() {
 fn side_tmp(name string) string {
 	dir := os.join_path(os.temp_dir(), 'vraw_sidecar_test')
 	os.mkdir_all(dir) or {}
-	path := os.join_path(dir, name + develop.sidecar_ext)
+	path := os.join_path(dir, name + sidecar_ext)
 	os.rm(path) or {}
 	return path
 }
@@ -386,40 +385,17 @@ fn test_make_thumb_real() {
 	assert pixel(pix, thumb_w, 0, 0) != [thumb_bg.r, thumb_bg.g, thumb_bg.b]
 }
 
-// ── Кривые: develop (проявка GUI и CLI) = vgui (редактор) ──
-
-fn test_curve_lut_matches_vgui() {
-	sets := [
-		[vgui.CurvePoint{0, 0}, vgui.CurvePoint{1, 1}],
-		[vgui.CurvePoint{0, 0}, vgui.CurvePoint{0.5, 0.7}, vgui.CurvePoint{1, 1}],
-		[vgui.CurvePoint{0, 0.1}, vgui.CurvePoint{0.25, 0.2}, vgui.CurvePoint{0.5, 0.5},
-			vgui.CurvePoint{0.75, 0.85}, vgui.CurvePoint{1, 0.95}],
-		[vgui.CurvePoint{0, 1}, vgui.CurvePoint{0.4, 0.4}, vgui.CurvePoint{0.6, 0.45},
-			vgui.CurvePoint{1, 0}],
-		[vgui.CurvePoint{0, 0}, vgui.CurvePoint{0.3, 0.3}, vgui.CurvePoint{0.31, 0.9},
-			vgui.CurvePoint{1, 1}],
-	]
-	for pts in sets {
-		a := vgui.curve_lut(pts, 256)
-		b := develop.curve_lut(dev_points(pts), 256)
-		assert a == b
-		assert vgui.curve_is_identity(pts) == develop.is_identity(dev_points(pts))
-	}
-}
-
-// Сайдкар несёт камерную кривую кадра (для CLI)
-fn test_sidecar_camera_curve() {
+// Старый сайдкар с полем camera_curve (его писал GUI для убранного
+// консольного vraw) читается: лишнее поле пропускается
+fn test_sidecar_legacy_camera_curve() {
 	mut st, mut exp, _ := new_state()
-	st.curve = []f32{len: 256, init: f32(index) * 0.9}
-	st.edit = with_derived(st.edit, st.curve)
-	st.history = st.history.map(HistEntry{
-		name:  it.name
-		key:   it.key
-		state: with_derived(it.state, st.curve)
-	})
-	st.side_path = side_tmp('camcurve')
+	st.side_path = side_tmp('legacy')
 	drag(mut exp, 0.3)
-	f := develop.load(st.side_path)!
-	assert f.camera_curve == st.curve
-	assert f.state.exposure == f32(0.3)
+	text := os.read_file(st.side_path)!
+	assert !text.contains('camera_curve')
+	legacy := text.replace('"current":', '"camera_curve": [0, 1, 2],\n  "current":')
+	assert legacy.contains('camera_curve')
+	loaded := decode_sidecar(legacy)!
+	assert loaded.history.len == 2
+	assert loaded.history[1].state.params.exposure == f32(0.3)
 }

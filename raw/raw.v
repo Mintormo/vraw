@@ -15,8 +15,7 @@ mut:
 	half_size      int
 	use_camera_wb  int
 	no_auto_bright int
-	bright         f32
-	output_bps     int    // 8 или 16 бит на канал
+	output_bps     int    // бит на канал (vraw всегда берёт 16)
 	gamm           [6]f64 // гамма-кривая; [0]=1,[1]=1 - линейный выход
 	highlight      int    // пересветы: 0 клип, 1 без клипа, 2 смешение, 3..9 реконструкция
 }
@@ -100,16 +99,14 @@ fn err_text(code int) string {
 	return unsafe { cstring_to_vstring(&char(C.libraw_strerror(code))) }
 }
 
-// Параметры проявки (аналоги ключей dcraw)
+// Параметры проявки (аналоги ключей dcraw). Результат всегда - сырьё
+// для собственного пайплайна: 16 бит на канал, линейная гамма, без
+// авто-яркости; вся тональная работа - в pipeline.
 @[params]
 pub struct DevParams {
 pub mut:
-	bright        f32 = 1.0 // яркость, 1.0 = как есть
 	half          bool // проявка в половинном размере (быстрое превью)
 	use_camera_wb bool = true // баланс белого из камеры (-w)
-	// linear16: сырьё для собственного пайплайна - 16 бит на канал,
-	// линейная гамма, без авто-яркости (bright игнорируется).
-	linear16 bool
 	// highlight: работа с пересветами (аналог dcraw -H).
 	// 0 - клип (дефолт), 1 - без клипа, 2 - смешение (blend),
 	// 3..9 - реконструкция (меньше - белее, больше - цветнее).
@@ -131,14 +128,14 @@ pub:
 	path string
 }
 
-// Готовый 8-битный RGB-результат проявки. Владеет C-буфером LibRaw —
+// Результат проявки (16-битный линейный RGB). Владеет C-буфером LibRaw —
 // после использования обязателен вызов free().
 pub struct DevImage {
 pub:
 	width  int
 	height int
 	colors int
-	bits   int // 8 или 16
+	bits   int // бит на канал (16)
 mut:
 	img &C.libraw_processed_image_t = unsafe { nil }
 }
@@ -174,20 +171,10 @@ pub fn (mut d Developer) develop(p DevParams) !DevImage {
 		d.lr.params.use_camera_wb = if p.use_camera_wb { 1 } else { 0 }
 		d.lr.params.half_size = if p.half { 1 } else { 0 }
 		d.lr.params.highlight = p.highlight
-		if p.linear16 {
-			d.lr.params.output_bps = 16
-			d.lr.params.gamm[0] = 1.0
-			d.lr.params.gamm[1] = 1.0
-			d.lr.params.no_auto_bright = 1
-			d.lr.params.bright = 1.0
-		} else {
-			// Дефолты dcraw: 8 бит, гамма BT.709, авто-яркость
-			d.lr.params.output_bps = 8
-			d.lr.params.gamm[0] = 1.0 / 2.4
-			d.lr.params.gamm[1] = 12.92
-			d.lr.params.no_auto_bright = 0
-			d.lr.params.bright = p.bright
-		}
+		d.lr.params.output_bps = 16
+		d.lr.params.gamm[0] = 1.0
+		d.lr.params.gamm[1] = 1.0
+		d.lr.params.no_auto_bright = 1
 	}
 	if !d.unpacked {
 		code := C.libraw_unpack(d.lr)
@@ -382,11 +369,7 @@ fn (mut d Developer) thumb_jpeg() ![]u8 {
 	return out
 }
 
-pub fn (im &DevImage) data() &u8 {
-	return im.img.data
-}
-
-// data_u16 - тот же буфер как 16-битные значения (только при bits == 16).
+// data_u16 - пиксели: width * height * colors значений u16
 pub fn (im &DevImage) data_u16() &u16 {
 	return unsafe { &u16(im.img.data) }
 }

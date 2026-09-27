@@ -25,7 +25,7 @@ fn to_yuv_sqrt(buf &u16, npix int) ([]f32, []f32, []f32) {
 	mut u := []f32{len: npix}
 	mut v := []f32{len: npix}
 	unsafe {
-		mut s := buf
+		mut s := &u16(buf)
 		py := &f32(y.data)
 		pu := &f32(u.data)
 		pv := &f32(v.data)
@@ -58,7 +58,7 @@ fn sq_clamp(x f32) u16 {
 // from_yuv_sqrt собирает плоскости y/u/v обратно в линейный RGB-буфер.
 fn from_yuv_sqrt(buf &u16, npix int, y []f32, u []f32, v []f32) {
 	unsafe {
-		mut d := buf
+		mut d := &u16(buf)
 		py := &f32(y.data)
 		pu := &f32(u.data)
 		pv := &f32(v.data)

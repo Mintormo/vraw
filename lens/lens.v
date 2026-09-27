@@ -216,7 +216,7 @@ pub fn (c &Corrector) vignetting(buf &u16, w int, h int, focal f32, aperture f32
 		return false
 	}
 	unsafe {
-		mut p := buf
+		mut p := &u16(buf)
 		mut gp := &f32(gain.data)
 		for _ in 0 .. w * h {
 			mut g := *gp
@@ -310,7 +310,7 @@ pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
 	mut coords := []f32{len: w * 2 * 3}
 	sp := unsafe { &u16(src.data) }
 	unsafe {
-		mut dst := buf
+		mut dst := &u16(buf)
 		for y in 0 .. h {
 			if C.lf_modifier_apply_subpixel_geometry_distortion(m, 0.0, f32(y), w, 1,
 				&f32(coords.data)) == 0 {

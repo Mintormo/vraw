@@ -3,6 +3,11 @@ module raw
 import os
 import stbi
 
+// stbi зовёт libm, но V ставит объектник stbi в команде gcc ПОСЛЕ -lm, а
+// ld в Ubuntu (--as-needed) отбрасывает ещё не нужную libm: линковка
+// падает, и V молча пересобирает тест запасным компилятором
+#flag -Wl,--no-as-needed -lm
+
 // thumb_min выбирает наименьшее достаточное встроенное превью:
 // у CR3 - 1620x1080 для 256 и 1000, 160x120 для 100, полное для 4000.
 fn test_thumb_min() {
@@ -44,14 +49,14 @@ fn test_thumb_min_after_develop() {
 	defer {
 		d.close()
 	}
-	mut im := d.develop(half: true, linear16: true)!
+	mut im := d.develop(half: true)!
 	im.free()
 	j := d.thumb_min(1000)!
 	mut img := stbi.load_from_memory(j.data, j.len, desired_channels: 3)!
 	assert img.width == 1620
 	img.free()
 	// И повторная проявка после этого работает
-	mut im2 := d.develop(half: true, linear16: true)!
+	mut im2 := d.develop(half: true)!
 	assert im2.width > 0
 	im2.free()
 }
@@ -69,7 +74,7 @@ fn test_thumb_after_thumb_min_and_develop() {
 		d.close()
 	}
 	small := d.thumb_min(1000)!
-	mut im := d.develop(half: true, linear16: true)!
+	mut im := d.develop(half: true)!
 	im.free()
 	full := d.thumb()!
 	assert full.len > 1_000_000
