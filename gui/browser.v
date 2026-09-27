@@ -41,6 +41,8 @@ const strip_name_h = f32(18)
 // миниатюра заезжала на рамку - отсечение vgui расширено на 1 px наружу,
 // а поле почти целиком занято самой рамкой и кольцом фокуса
 const strip_pad = f32(8)
+// Поле панели ленты (strip_box: полоса + лента на тёмном фоне viewer_bg)
+const strip_box_pad = f32(8)
 const thumb_bg = vgui.Color{30, 30, 33, 255}
 // Отметка «кадр изменён» (есть сайдкар) - кружок в правом верхнем углу
 const mark_color = vgui.Color{240, 160, 60, 255}
@@ -384,10 +386,11 @@ fn sync_strip(mut st State) {
 
 // strip_item_width - ширина ячейки ленты под высоту её панели pane_h
 // (полоса + лента): миниатюра 3:2 во всю высоту ячейки над подписью.
-// Отступы: 4 - между полосой и лентой, 2 x strip_pad - поля ListBox,
-// 2 x 6 - поля ячейки, 4 - между миниатюрой и подписью.
+// Отступы: 2 x strip_box_pad - поля панели, 4 - между полосой и лентой,
+// 2 x strip_pad - поля ListBox, 2 x 6 - поля ячейки, 4 - между
+// миниатюрой и подписью.
 fn strip_item_width(pane_h f32) f32 {
-	thumb := pane_h - strip_bar_h - 4 - 2 * strip_pad - 12 - 4 - strip_name_h
+	thumb := pane_h - 2 * strip_box_pad - strip_bar_h - 4 - 2 * strip_pad - 12 - 4 - strip_name_h
 	w := thumb * 1.5 + 12
 	return if w < 80 { 80 } else { w }
 }
@@ -422,8 +425,8 @@ fn center_strip(mut st State) {
 	mut view_w := strip.bounds.w - 2 * strip.pad
 	if !isnil(st.hsplit) && st.hsplit.bounds.w > 0 {
 		sp := st.hsplit
-		// Ширина просмотра минус его поля (16 с каждой стороны)
-		view_w = (sp.bounds.w - sp.bar_size) * sp.ratio - 32 - 2 * strip.pad
+		// Ширина просмотра минус поля панели ленты
+		view_w = (sp.bounds.w - sp.bar_size) * sp.ratio - 2 * strip_box_pad - 2 * strip.pad
 	}
 	if view_w <= 0 {
 		return
@@ -436,11 +439,14 @@ fn center_strip(mut st State) {
 	strip.scroll_x = x
 }
 
-// layout_strip собирает область просмотра: без папки - только просмотр;
-// лента открыта - вертикальный сплиттер «просмотр | полоса + лента»;
-// скрыта - просмотр и под ним одна полоса с кнопкой «Показать ленту».
+// layout_strip собирает область просмотра: без папки - только область
+// снимка (view_area); лента открыта - вертикальный сплиттер «снимок |
+// полоса + лента»; скрыта - снимок и под ним панель с одной полосой
+// («Показать ленту»). Пересборка через clear + add: VBox.remove в vgui
+// не работает.
 fn layout_strip(mut st State) {
-	if isnil(st.viewer) || isnil(st.strip) || isnil(st.strip_bar) || isnil(st.vsplit) {
+	if isnil(st.viewer) || isnil(st.strip) || isnil(st.strip_bar) || isnil(st.vsplit)
+		|| isnil(st.view_area) {
 		return
 	}
 	mut v := st.viewer
@@ -451,22 +457,35 @@ fn layout_strip(mut st State) {
 	sp.clear_second()
 	sb.clear()
 	if st.frames.len == 0 {
-		v.add(st.view_stack, 1)
+		v.add(st.view_area, 1)
 		return
 	}
+	sb.add_fixed(st.strip_bar, strip_bar_h)
 	if st.strip_open {
-		sb.add_fixed(st.strip_bar, strip_bar_h)
 		sb.add(st.strip, 1)
-		sp.set_first(st.view_stack)
+		sp.set_first(st.view_area)
 		sp.set_second(sb)
 		v.add(sp, 1)
 		fit_strip_items(mut st)
 	} else {
-		v.add(st.view_stack, 1)
-		v.add_fixed(st.strip_bar, strip_bar_h)
+		v.add(st.view_area, 1)
+		v.add_fixed(sb, strip_bar_h + 2 * strip_box_pad)
 	}
 	if !isnil(st.strip_toggle) {
 		mut b := st.strip_toggle
 		b.text = if st.strip_open { 'Скрыть ленту' } else { 'Показать ленту' }
 	}
+	if !isnil(st.m_strip) {
+		mut m := st.m_strip
+		m.checked = st.strip_open
+	}
+}
+
+// set_strip_open - показать/скрыть ленту (кнопка на полосе, меню «Вид»),
+// выбор запоминается в настройках
+fn set_strip_open(mut st State, open bool) {
+	st.strip_open = open
+	st.settings.strip_open = open
+	save_settings(st.settings)
+	layout_strip(mut st)
 }

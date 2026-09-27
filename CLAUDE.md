@@ -116,6 +116,13 @@ CLI (`main.v`) — отдельный быстрый конвертер клас
 - **`VBox.remove`/`HBox.remove` в vgui не работают** (сравнивают voidptr
   интерфейса, всегда false): убирать виджет — пересборкой контейнера
   (`clear()` + `add`). `Splitter` вторую панель не сворачивает.
+- vgui меню: `menu_bar()` + `add_menu`; сочетания клавиш — поле
+  `shortcut` пункта, обрабатывает сам MenuBar (не дублировать
+  `bind_hotkey`); флажок меню сам переключает `checked` перед
+  `on_toggle`. Выбор папки — `native_select_folder_dialog`.
+- Настройки vraw между запусками — `~/.config/vraw/settings.json`; в
+  тестах/временных сборках запускать с `XDG_CONFIG_HOME=<черновик>`,
+  чтобы не трогать настоящий конфиг.
 - Canvas: `stretch = false` (по умолчанию auto_fit) — вписывание с
   сохранением пропорций; `stretch = true` — растяжка на весь виджет.
 - LibRaw: `unpack_thumb_ex` после `dcraw_process` — ошибка -4 (out of

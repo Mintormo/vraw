@@ -84,6 +84,7 @@ mut:
 	frames        []Frame
 	frame_idx     int = -1
 	viewer        &vgui.VBox     = unsafe { nil } // область просмотра (пересобирается)
+	view_area     &vgui.VBox     = unsafe { nil } // снимок на выбранном фоне
 	view_stack    &vgui.Stack    = unsafe { nil } // холст превью + заглушка
 	vsplit        &vgui.Splitter = unsafe { nil } // просмотр | лента
 	hsplit        &vgui.Splitter = unsafe { nil } // просмотр | панель
@@ -105,6 +106,11 @@ mut:
 	load_msg     string
 	on_load_pv   fn (LoadPreview) = unsafe { nil }
 	on_load_done fn (LoadResult)  = unsafe { nil }
+	// Настройки между запусками (settings.v) и меню, которое их отражает
+	settings Settings
+	m_strip  &vgui.MenuItem = unsafe { nil }
+	m_bg     []&vgui.MenuItem
+	holder   &Placeholder = unsafe { nil } // заглушка области снимка
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -613,22 +619,82 @@ fn edit_row(mut s EditSlider, lw f32, vw f32) &vgui.HBox {
 }
 
 // Цвета оформления (тёмная тема): область просмотра темнее панели
-// инструментов - фото на тёмно-сером нейтральном фоне, как в проявщиках.
+// инструментов. viewer_bg - фон панели ленты; фон вокруг снимка
+// выбирается в меню «Вид» (bg_colors, settings.v), по умолчанию такой же.
 const viewer_bg = vgui.Color{22, 22, 24, 255}
 const panel_bg = vgui.Color{37, 37, 38, 255}
 const divider_color = vgui.Color{58, 58, 62, 255}
 
-// make_placeholder - заглушка области просмотра, пока файл не открыт:
-// мягкий радиальный градиент (центр светлее) и по центру значок
-// диафрагмы с подсказкой. Градиент - Canvas с растяжкой (stretch),
-// пассивный: без зума, панорамы и событий.
-fn make_placeholder() &vgui.Stack {
-	gw, gh := 960, 720
-	mut bg := vgui.canvas(gw, gh)
+// Placeholder - заглушка области просмотра, пока кадр не открыт: мягкий
+// радиальный градиент в цветах темы приложения и по центру значок диафрагмы
+// с подсказкой. Градиент - Canvas с растяжкой (stretch), пассивный: без
+// зума, панорамы и событий. Текст - по режиму (set_placeholder_text).
+@[heap]
+struct Placeholder {
+mut:
+	stack &vgui.Stack  = unsafe { nil }
+	bg    &vgui.Canvas = unsafe { nil }
+	icon  &vgui.Icon   = unsafe { nil }
+	title &vgui.Label  = unsafe { nil }
+	hint  &vgui.Label  = unsafe { nil }
+	fmts  &vgui.Label  = unsafe { nil }
+	edge  vgui.Color // цвет края градиента - им же поле вокруг заглушки
+}
+
+fn make_placeholder(th vgui.Theme) &Placeholder {
+	mut bg := vgui.canvas(960, 720)
 	bg.stretch = true
 	bg.enabled = false
 	bg.set_wheel_zoom(false)
 	bg.set_pan_buttons(0)
+
+	mut ic := vgui.icon('aperture')
+	ic.set_size(64)
+	mut title := vgui.label('')
+	title.align = .center
+	title.font_size = 20
+	mut hint := vgui.label('')
+	hint.align = .center
+	mut fmts := vgui.label('CR3 · CR2 · NEF · ARW · DNG · RAF · ORF · RW2')
+	fmts.align = .center
+
+	mut col := vgui.create_vbox_fill()
+	col.set_spacing(6)
+	col.add_fixed(ic, 76)
+	col.add_fixed(title, 32)
+	col.add_fixed(hint, 22)
+	col.add_fixed(fmts, 22)
+	mut center := vgui.create_centered(560, 170)
+	center.set_child(col)
+
+	mut stack := &vgui.Stack{}
+	stack.add(bg)
+	stack.add(center)
+	mut ph := &Placeholder{
+		stack: stack
+		bg:    bg
+		icon:  ic
+		title: title
+		hint:  hint
+		fmts:  fmts
+	}
+	paint_placeholder(mut ph, th)
+	set_placeholder_text(mut ph, false)
+	return ph
+}
+
+// paint_placeholder - заглушка в цветах темы приложения: градиент от
+// theme.bg по краям к theme.surface в центре, текст - цветами текста
+// темы (заголовок - основной, подсказка - вторичный, значок и форматы -
+// подсказочный). От выбранного фона вокруг снимка не зависит: он - только
+// под снимком (sync_view_bg).
+fn paint_placeholder(mut ph Placeholder, th vgui.Theme) {
+	mut bg := ph.bg
+	gw := bg.width
+	gh := bg.height
+	edge := th.bg
+	mid := th.surface
+	ph.edge = edge
 	unsafe {
 		mut p := &u8(bg.pixels.data)
 		mut seed := u32(12345)
@@ -638,53 +704,86 @@ fn make_placeholder() &vgui.Stack {
 				dy := (f32(y) - gh / 2) / (gh / 2)
 				r := math.sqrtf(dx * dx + dy * dy) / 1.4142
 				t := r * r * (3 - 2 * r) // smoothstep: мягкий спад к краям
-				v := 36 - (36 - f32(viewer_bg.r)) * t
-				// Дизер ±0.5: на тёмном гладком градиенте иначе видны ступени
+				// Дизер ±0.5: на гладком градиенте иначе видны ступени
 				seed = seed * 1664525 + 1013904223
-				n := f32(seed >> 8) / 16777216.0 - 0.5
-				c := u8(v + n + 0.5)
-				p[0] = c
-				p[1] = c
-				p[2] = u8(f32(c) + 2 * (1 - t)) // чуть холоднее в центре
+				n := f32(seed >> 8) / 16777216.0
+				p[0] = clamp_u8(f32(mid.r) + (f32(edge.r) - f32(mid.r)) * t + n)
+				p[1] = clamp_u8(f32(mid.g) + (f32(edge.g) - f32(mid.g)) * t + n)
+				p[2] = clamp_u8(f32(mid.b) + (f32(edge.b) - f32(mid.b)) * t + n)
 				p[3] = 255
 				p += 4
 			}
 		}
 	}
-
-	mut ic := vgui.icon('aperture')
-	ic.set_size(64)
-	ic.set_color(vgui.Color{92, 94, 100, 255})
-	mut title := vgui.label('Откройте RAW-файл')
-	title.align = .center
-	title.font_size = 20
-	title.color = vgui.Color{176, 176, 182, 255}
-	mut hint := vgui.label('Кнопка «Открыть RAW...» на панели справа')
-	hint.align = .center
-	hint.color = vgui.Color{120, 120, 126, 255}
-	mut fmts := vgui.label('CR3 · CR2 · NEF · ARW · DNG · RAF · ORF · RW2')
-	fmts.align = .center
-	fmts.color = vgui.Color{92, 92, 98, 255}
-
-	mut col := vgui.create_vbox_fill()
-	col.set_spacing(6)
-	col.add_fixed(ic, 76)
-	col.add_fixed(title, 32)
-	col.add_fixed(hint, 22)
-	col.add_fixed(fmts, 22)
-	mut center := vgui.create_centered(420, 170)
-	center.set_child(col)
-
-	mut ph := &vgui.Stack{}
-	ph.add(bg)
-	ph.add(center)
-	return ph
+	bg.mark_dirty()
+	mut ic := ph.icon
+	mut title := ph.title
+	mut hint := ph.hint
+	mut fmts := ph.fmts
+	ic.set_color(th.text_hint)
+	title.color = th.text_primary
+	hint.color = th.text_secondary
+	fmts.color = th.text_hint
 }
 
-// show_viewer убирает заглушку и показывает холст превью (файл открыт)
+fn clamp_u8(v f32) u8 {
+	return if v <= 0 { u8(0) } else if v >= 255 { u8(255) } else { u8(v) }
+}
+
+// set_placeholder_text - что предложить: открыть файл/папку или (папка
+// открыта, кадр не выбран) выбрать кадр в ленте
+fn set_placeholder_text(mut ph Placeholder, folder bool) {
+	mut title := ph.title
+	mut hint := ph.hint
+	if folder {
+		title.text = 'Выберите кадр'
+		hint.text = 'Двойной щелчок по миниатюре в ленте'
+	} else {
+		title.text = 'Откройте RAW-файл или папку'
+		hint.text = 'Меню «Файл»: Ctrl+O - файл, Ctrl+Shift+O - папка'
+	}
+}
+
+// set_viewer_bg - фон вокруг снимка (меню «Вид»): отметка в меню (ровно
+// один пункт), область снимка, запомнить в настройках
+fn set_viewer_bg(mut st State, idx int) {
+	for j in 0 .. st.m_bg.len {
+		mut m := st.m_bg[j]
+		m.checked = j == idx
+	}
+	st.settings.viewer_bg = bg_keys[idx]
+	sync_view_bg(mut st)
+	save_settings(st.settings)
+}
+
+// sync_view_bg - фон области снимка: выбранный в меню - когда виден
+// снимок; пока заглушка - цвет края её градиента (фон темы), чтобы
+// вокруг заглушки не было рамки другого цвета
+fn sync_view_bg(mut st State) {
+	if isnil(st.view_area) {
+		return
+	}
+	mut va := st.view_area
+	shown := !isnil(st.holder) && !st.holder.stack.visible
+	va.set_bg(if shown {
+		bg_colors[bg_index(st.settings.viewer_bg)]
+	} else if !isnil(st.holder) {
+		st.holder.edge
+	} else {
+		viewer_bg
+	})
+}
+
+// show_viewer убирает заглушку и показывает холст превью (кадр открыт)
 fn show_viewer(mut cv vgui.Canvas, mut placeholder vgui.Stack) {
 	placeholder.visible = false
 	cv.visible = true
+}
+
+// show_placeholder - обратно: кадр закрыт (открыта папка)
+fn show_placeholder(mut cv vgui.Canvas, mut placeholder vgui.Stack) {
+	cv.visible = false
+	placeholder.visible = true
 }
 
 // ── Тональные кривые ──
@@ -793,7 +892,9 @@ fn section(rows []SectionRow) &vgui.VBox {
 }
 
 fn main() {
-	mut app := vgui.create_app(theme: vgui.dark_theme())!
+	// Тема приложения; из неё же - цвета заглушки области просмотра
+	theme := vgui.dark_theme()
+	mut app := vgui.create_app(theme: theme)!
 	// Тема приложения: окно без своей темы получит её в add_window
 	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1280, height: 946)!
 
@@ -818,7 +919,11 @@ fn main() {
 	mut cv := vgui.canvas(4, 3)
 	cv.fill(viewer_bg)
 	cv.visible = false
-	mut placeholder := make_placeholder()
+	st.settings = load_settings()
+	st.strip_open = st.settings.strip_open
+	mut ph := make_placeholder(theme)
+	st.holder = ph
+	mut placeholder := ph.stack
 
 	// Гистограмма: буфер 256 колонок (колонка = бин), растягивается на виджет.
 	// Зум и панораму отключаем - это индикатор, а не изображение.
@@ -1210,13 +1315,14 @@ fn main() {
 	mut hist_hint := vgui.label('Двойной щелчок - перейти, Ctrl+Z / Ctrl+Shift+Z')
 	hist_hint.color = vgui.Color{130, 130, 136, 255}
 	hist_hint.font_size = 12
-	win.bind_hotkey('Ctrl+Z', fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+	// Ctrl+Z / Ctrl+Shift+Z - пункты меню «Правка» (сочетания обрабатывает
+	// меню); Ctrl+Y - дополнительно, горячей клавишей окна
+	undo := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
 		goto_history(mut st, st.hist_pos - 1, mut cv, mut hist, mut nm, mut app)
-	})
+	}
 	redo := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
 		goto_history(mut st, st.hist_pos + 1, mut cv, mut hist, mut nm, mut app)
 	}
-	win.bind_hotkey('Ctrl+Shift+Z', redo)
 	win.bind_hotkey('Ctrl+Y', redo)
 
 	mut q_lb := vgui.label('Качество JPEG')
@@ -1313,6 +1419,7 @@ fn main() {
 		cv.mark_dirty()
 		render_histogram(mut hist, cv.pixels)
 		show_viewer(mut cv, mut placeholder)
+		sync_view_bg(mut st)
 	}
 
 	// Итог загрузки: хендлы и буферы - в State, затем досчитать то, что
@@ -1354,6 +1461,7 @@ fn main() {
 			state: with_derived(it.state, st.curve)
 		})
 		show_viewer(mut cv, mut placeholder)
+		sync_view_bg(mut st)
 		// Что поменяли за время загрузки (и шумодав из сайдкара)
 		if st.edit.highlight != st.hl_developed {
 			load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
@@ -1396,8 +1504,7 @@ fn main() {
 	mut strip_toggle := vgui.button('Скрыть ленту')
 	strip_toggle.style = .outline
 	strip_toggle.on_click = fn [mut st] () {
-		st.strip_open = !st.strip_open
-		layout_strip(mut st)
+		set_strip_open(mut st, !st.strip_open)
 	}
 	st.strip_toggle = strip_toggle
 	mut strip_bar := vgui.create_hbox_fill()
@@ -1420,8 +1527,8 @@ fn main() {
 		goto_frame(st.frames.len - 1)
 	})
 
-	mut b_open := vgui.button('Открыть RAW...')
-	b_open.on_click = fn [mut app, win, open_file] () {
+	// ── Файл: открыть файл или папку, экспорт (меню «Файл») ──
+	open_file_dialog := fn [mut app, win, open_file] () {
 		path := vgui.native_open_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
 			filter_names:    ['RAW-файлы', 'Все файлы']
 			filter_patterns: [raw_patterns, '*']
@@ -1431,21 +1538,75 @@ fn main() {
 		}
 	}
 
-	// Сохранение - в фоновом потоке (полный кадр с коррекцией ~3.5 с,
-	// окно не должно замирать). Кнопка на это время гаснет - и защита
-	// от двойного запуска (disabled-кнопка событий не получает);
-	// ползунки остаются живыми. Результат воркер доставляет через
-	// app.post() - цикл vgui спит как обычно и просыпается ровно один раз.
-	mut b_save := vgui.button('Сохранить JPEG...')
-	save_done := fn [mut nm, mut b_save] (ok bool, msg string) {
+	// close_file - в области просмотра нет кадра (открыта папка без
+	// выбора): загрузка отменяется, LibRaw закрывается, история пуста
+	// (правки некуда писать - record без истории молчит), вместо снимка -
+	// заглушка. Результаты фоновых воркеров отбросятся по file_gen.
+	close_file := fn [mut st, mut cv, mut hist, mut lens_cb, mut lens_lb, mut placeholder] () {
+		if !isnil(st.load_stop) {
+			mut ls := st.load_stop
+			ls.stop = true
+		}
+		st.loading = false
+		if !isnil(st.dev) {
+			st.dev.close()
+			st.dev = unsafe { nil }
+		}
+		st.corr = unsafe { nil }
+		st.file_gen++
+		st.dev_linear = []u16{}
+		st.raw_linear = []u16{}
+		st.linear = []u16{}
+		st.mask = []u16{}
+		st.curve = []f32{}
+		st.side_path = ''
+		set_edit(mut st, neutral_edit())
+		st.history = []HistEntry{}
+		st.hist_pos = 0
+		refresh_history(mut st)
+		st.frame_idx = -1
+		lens_lb.text = ''
+		lens_cb.enabled = false
+		hist.fill(vgui.Color{16, 16, 18, 255})
+		hist.mark_dirty()
+		show_placeholder(mut cv, mut placeholder)
+		sync_view_bg(mut st)
+	}
+
+	// Открыть папку: все RAW - в ленте, в области просмотра ничего
+	// (заглушка «Выберите кадр»); кадр открывается двойным щелчком
+	open_folder := fn [mut st, mut app, mut nm, close_file] (dir string) {
+		close_file()
+		load_folder(mut st, os.real_path(dir), '', mut app)
+		sync_strip(mut st)
+		mut ph := st.holder
+		set_placeholder_text(mut ph, st.frames.len > 0)
+		if st.frames.len == 0 {
+			nm.show_warning('В папке нет RAW-файлов')
+		}
+	}
+	open_folder_dialog := fn [mut app, win, open_folder] () {
+		dir := vgui.native_select_folder_dialog(win, mut app, vgui.NativeFileDialogConfig{})
+		if dir.len > 0 {
+			open_folder(dir)
+		}
+	}
+
+	// Экспорт - в фоновом потоке (полный кадр с коррекцией ~3.5 с, окно
+	// не должно замирать). Пункт меню на это время гаснет - и защита от
+	// двойного запуска; ползунки остаются живыми. Результат воркер
+	// доставляет через app.post() - цикл vgui спит как обычно.
+	mut m_export := vgui.menu_action('Экспорт JPEG...')
+	m_export.shortcut = 'Ctrl+E'
+	save_done := fn [mut nm, mut m_export] (ok bool, msg string) {
 		if ok {
 			nm.show_success(msg)
 		} else {
 			nm.show_error(msg)
 		}
-		b_save.enabled = true
+		m_export.enabled = true
 	}
-	b_save.on_click = fn [mut st, mut nm, mut app, win, mut b_save, save_done] () {
+	m_export.on_click = fn [mut st, mut nm, mut app, win, mut m_export, save_done] () {
 		if st.loading {
 			nm.show_warning('Кадр ещё загружается')
 			return
@@ -1477,46 +1638,88 @@ fn main() {
 			params:     st.edit.params
 			quality:    st.quality
 		}
-		b_save.enabled = false
+		m_export.enabled = false
 		nm.show_info('Проявляю в полном размере (в фоне)...')
 		st.save_threads << spawn save_worker(job, mut app, save_done)
 	}
 
 	// «Сброс» тональный: пересветы, коррекция объектива, камерная кривая
 	// и шумодав остаются как есть. Это обычная правка - запись в истории,
-	// отменяется Ctrl+Z.
-	mut b_reset := vgui.button('Сброс')
-	b_reset.style = .outline
-	b_reset.on_click = fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+	// отменяется Ctrl+Z. Кнопка на панели и пункт меню «Правка».
+	reset_tone := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
 		mut e := st.edit.clone()
 		e.params = pipeline.Params{}
 		e.curve_pts = neutral_edit().curve_pts
 		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
 		record(mut st, 'reset', 'Сброс', false)
 	}
+	mut b_reset := vgui.button('Сброс')
+	b_reset.style = .outline
+	b_reset.on_click = reset_tone
 
-	mut b_fit := vgui.button('Вписать')
-	b_fit.style = .outline
-	b_fit.on_click = fn [mut cv] () {
+	// ── Меню вверху окна ──
+	// Сочетания клавиш пунктов обрабатывает само меню (MenuBar)
+	mut bar := vgui.menu_bar()
+	mut m_open := vgui.menu_action('Открыть файл...')
+	m_open.shortcut = 'Ctrl+O'
+	m_open.on_click = open_file_dialog
+	mut m_open_dir := vgui.menu_action('Открыть папку...')
+	m_open_dir.shortcut = 'Ctrl+Shift+O'
+	m_open_dir.on_click = open_folder_dialog
+	mut m_quit := vgui.menu_action('Выход')
+	m_quit.shortcut = 'Ctrl+Q'
+	m_quit.on_click = fn [mut app] () {
+		app.quit()
+	}
+	bar.add_menu('Файл', [m_open, m_open_dir, vgui.menu_separator(), m_export,
+		vgui.menu_separator(), m_quit])
+
+	mut m_undo := vgui.menu_action('Отменить')
+	m_undo.shortcut = 'Ctrl+Z'
+	m_undo.on_click = undo
+	mut m_redo := vgui.menu_action('Вернуть')
+	m_redo.shortcut = 'Ctrl+Shift+Z'
+	m_redo.on_click = redo
+	mut m_reset := vgui.menu_action('Сбросить тон')
+	m_reset.on_click = reset_tone
+	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_reset])
+
+	mut m_fit := vgui.menu_action('Вписать')
+	m_fit.shortcut = 'Ctrl+0'
+	m_fit.on_click = fn [mut cv] () {
 		cv.fit_to_view()
 	}
-	mut b_100 := vgui.button('1:1')
-	b_100.style = .outline
-	b_100.on_click = fn [mut cv] () {
+	mut m_z50 := vgui.menu_action('50%')
+	m_z50.on_click = fn [mut cv] () {
+		cv.set_zoom(0.5)
+	}
+	mut m_z100 := vgui.menu_action('100% (1:1)')
+	m_z100.shortcut = 'Ctrl+1'
+	m_z100.on_click = fn [mut cv] () {
 		cv.set_zoom(1.0)
 	}
-
-	// ── Компоновка: превью слева, панель управления справа ──
-	mut files_row := vgui.create_hbox_fill()
-	files_row.set_spacing(6)
-	files_row.add(b_open, 1)
-	files_row.add(b_save, 1)
-
-	mut view_row := vgui.create_hbox_fill()
-	view_row.set_spacing(6)
-	view_row.add(b_fit, 1)
-	view_row.add(b_100, 1)
-	view_row.add(b_reset, 1)
+	mut m_z200 := vgui.menu_action('200%')
+	m_z200.on_click = fn [mut cv] () {
+		cv.set_zoom(2.0)
+	}
+	mut m_strip := vgui.menu_checkbox('Лента кадров', st.strip_open)
+	m_strip.on_toggle = fn [mut st] (v bool) {
+		set_strip_open(mut st, v)
+	}
+	st.m_strip = m_strip
+	// Фон вокруг снимка: пункты-флажки, работают как переключатель
+	// (отмечен ровно один - set_viewer_bg)
+	mut m_bg := vgui.menu_submenu('Фон вокруг снимка')
+	for i in 0 .. bg_keys.len {
+		mut it := vgui.menu_checkbox(bg_names[i], bg_keys[i] == st.settings.viewer_bg)
+		it.on_toggle = fn [mut st, i] (v bool) {
+			set_viewer_bg(mut st, i)
+		}
+		st.m_bg << it
+		m_bg.add(it)
+	}
+	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, vgui.menu_separator(), m_strip,
+		m_bg])
 
 	mut hl_row := edit_row(mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
@@ -1604,45 +1807,52 @@ fn main() {
 	scroll.sb_width = 8
 	scroll.add(acc)
 
-	// Правая панель - свой фон и внутренние отступы; от области
-	// просмотра её отделяет тонкая вертикальная линия.
+	// Правая панель - свой фон и внутренние отступы: гистограмма сверху,
+	// инструменты в прокрутке, «Сброс» снизу. Открытие, экспорт и масштаб -
+	// в меню вверху окна.
 	mut right := vgui.create_vbox_fill()
 	right.set_spacing(6)
 	right.set_padding(10)
 	right.set_bg(panel_bg)
 	right.add_fixed(hist, 120)
-	right.add_fixed(files_row, 34)
 	right.add(scroll, 1)
-	right.add_fixed(view_row, 30)
+	right.add_fixed(b_reset, 30)
 
-	// Область просмотра: тёмный нейтральный фон, картинка с отступом от
+	// Область снимка: фон, выбранный в меню «Вид», картинка с отступом от
 	// краёв. Холст и заглушка лежат друг на друге в Stack, видим один.
 	mut view_stack := &vgui.Stack{}
 	view_stack.add(cv)
 	view_stack.add(placeholder)
-	mut viewer := vgui.create_vbox_fill()
-	viewer.set_padding(16)
-	viewer.set_bg(viewer_bg)
-	viewer.set_spacing(8)
-	viewer.add(view_stack, 1)
-	st.viewer = viewer
+	mut view_area := vgui.create_vbox_fill()
+	view_area.set_padding(16)
+	view_area.set_bg(ph.edge) // выбранный фон - когда виден снимок (sync_view_bg)
+	view_area.add(view_stack, 1)
+	st.view_area = view_area
 	st.view_stack = view_stack
-	// Под просмотром - лента кадров папки (layout_strip, когда открыт
-	// первый файл). Высота ленты - вертикальным сплиттером; после
-	// перетаскивания ячейки подстраиваются под новую высоту.
+	// Область просмотра - снимок и под ним лента кадров папки
+	// (layout_strip, когда открыт файл или папка)
+	mut viewer := vgui.create_vbox_fill()
+	viewer.set_bg(viewer_bg)
+	viewer.add(view_area, 1)
+	st.viewer = viewer
+	// Высота ленты - вертикальным сплиттером; после перетаскивания ячейки
+	// подстраиваются под новую высоту
 	mut vsplit := vgui.splitter_vertical()
 	vsplit.bar_size = 3
 	vsplit.bar_color = divider_color
 	vsplit.min_first = 200
-	vsplit.min_second = strip_bar_h + 80
-	// Стартовая высота ленты ~strip_pane_h при высоте окна 946 (минус поля)
-	vsplit.ratio = 1 - strip_pane_h / (946 - 32)
+	vsplit.min_second = strip_bar_h + 80 + 2 * strip_box_pad
+	// Стартовая высота ленты ~strip_pane_h при высоте окна 946 (минус меню)
+	vsplit.ratio = 1 - strip_pane_h / (946 - 28)
 	vsplit.on_resize = fn [mut st] (r f32) {
 		fit_strip_items(mut st)
 	}
 	st.vsplit = vsplit
+	// Панель ленты: полоса и лента на тёмном фоне с полями
 	mut strip_box := vgui.create_vbox_fill()
 	strip_box.set_spacing(4)
+	strip_box.set_padding(strip_box_pad)
+	strip_box.set_bg(viewer_bg)
 	st.strip_box = strip_box
 
 	// Просмотр | панель инструментов - горизонтальный сплиттер: ширину
@@ -1661,7 +1871,11 @@ fn main() {
 	}
 	st.hsplit = top
 
-	win.add_widget(top)
+	// Корень: меню вверху, под ним рабочая область
+	mut root := vgui.create_vbox_fill()
+	root.add_fixed(bar, 28)
+	root.add(top, 1)
+	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).
 	win.add_widget(nm)
