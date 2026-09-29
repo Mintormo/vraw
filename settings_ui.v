@@ -1,8 +1,8 @@
 module main
 
 // Окно «Настройки» (меню «Правка - Настройки...»): оформление (тема, фон
-// вокруг снимка - те же, что в меню «Вид»), формат экспорта и качество
-// JPEG, AI-шумодав: скачивание ONNX Runtime и моделей в папки рядом с
+// вокруг снимка - те же, что в меню «Вид»), экспорт (формат, качество
+// JPEG, AI-шумодав при экспорте), AI-шумодав: скачивание ONNX Runtime и моделей в папки рядом с
 // программой, выбор модели для новых прогонов. Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
 // закрыть и работать дальше, итог - тостом в главном окне.
@@ -46,6 +46,7 @@ mut:
 	theme_cb &vgui.ComboBox    = unsafe { nil }
 	bg_cb    &vgui.ComboBox    = unsafe { nil }
 	fmt_cb   &vgui.ComboBox    = unsafe { nil } // формат экспорта
+	ai_cb    &vgui.CheckBox    = unsafe { nil } // AI-шумодав при экспорте
 	rt_state &vgui.Label       = unsafe { nil }
 	rt_btn   &vgui.Button      = unsafe { nil }
 	rows     []ModelRow
@@ -57,7 +58,7 @@ mut:
 }
 
 const set_w = 640
-const set_h = 766
+const set_h = 820
 const set_row_h = f32(28)
 const set_note_h = f32(20)
 const set_state_w = f32(150)
@@ -289,6 +290,17 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(q_row, set_row_h)
 	body.add_fixed(note(mut u, 'Больше - лучше качество и больше файл; ${jpeg_q_default} - хороший баланс'),
 		set_note_h)
+	// AI-шумодав на полном кадре - минуты (SCUNet ~16 мин): можно
+	// отключить для быстрых проб; кадр своей настройки AI не теряет
+	mut ai_cb := vgui.checkbox('AI-шумодав при экспорте')
+	ai_cb.on_change = fn [mut st] (v bool) {
+		st.settings.export_no_ai = !v
+		save_settings(st.settings)
+	}
+	u.ai_cb = ai_cb
+	body.add_fixed(ai_cb, set_row_h)
+	body.add_fixed(indented(note(mut u, 'Выключено - кадры с AI экспортируются без него: быстро, но шумнее'),
+		26), set_note_h)
 	body.add_fixed(vgui.create_spacer(), 8)
 	body.add_fixed(caption('AI-шумодав'), 20)
 	body.add_fixed(rt_row, set_row_h)
@@ -411,6 +423,8 @@ fn sync_settings_ui(mut st State) {
 	bcb.set_selected(bg_index(st.settings.viewer_bg))
 	mut fcb := u.fmt_cb
 	fcb.set_selected(imgio.formats.index(st.settings.export_fmt()))
+	mut acb := u.ai_cb
+	acb.checked = !st.settings.export_no_ai
 	busy := !isnil(st.dl)
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''

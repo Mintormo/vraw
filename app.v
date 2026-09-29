@@ -384,7 +384,8 @@ struct SaveJob {
 	db        &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
 	edit      EditState // настройки кадра с производными полями - как в окне
 	format    imgio.Format
-	quality   int // JPEG
+	quality   int  // JPEG
+	no_ai     bool // AI у кадра есть, но при экспорте отключён (для итога)
 	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
 	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
 	on_stage  fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil } // прогресс - в главный поток
@@ -435,7 +436,8 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 	size_mb := f64(os.file_size(job.dst)) / 1024 / 1024
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
 	q := if job.format == .jpeg { ', качество ${job.quality}' } else { '' }
-	report(mut app, on_done, .saved, 'Сохранено: ${job.dst} (${job.format.name()}, ${img.width}x${img.height}, ${size_mb:.1f} МБ${q}, ${sec:.1f} с)')
+	no_ai := if job.no_ai { ', без AI-шумодава' } else { '' }
+	report(mut app, on_done, .saved, 'Сохранено: ${job.dst} (${job.format.name()}, ${img.width}x${img.height}, ${size_mb:.1f} МБ${q}${no_ai}, ${sec:.1f} с)')
 }
 
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
@@ -1777,21 +1779,29 @@ fn main() {
 			save_settings(st.settings)
 			sync_settings_ui(mut st)
 		}
+		// AI при экспорте можно отключить в настройках: кадр проявляется
+		// без него (своя настройка AI у кадра не меняется)
+		mut edit := st.edit.clone()
+		ai_skipped := edit.ai > 0 && st.settings.export_no_ai
+		if ai_skipped {
+			edit.ai = 0
+		}
 		mut ai_cache := &ai.Cache(unsafe { nil })
 		mut ai_secs := 0.0
-		if st.edit.ai > 0 {
+		if edit.ai > 0 {
 			// Модель кадра (которой считано превью) - без неё не проявить
-			ai_cache = ai_cache_for(mut st, st.edit.ai_model) or {
+			ai_cache = ai_cache_for(mut st, edit.ai_model) or {
 				nm.show_error('Экспорт с AI-шумодавом: ${err.msg()}')
 				return
 			}
-			ai_secs = ai_estimate(st, st.edit.ai_model, true)
+			ai_secs = ai_estimate(st, edit.ai_model, true)
 		}
 		ctl := &ExportCtl{
 			src:     st.dev.path
 			dst:     path
-			fmt:     fmt
-			plan:    export_plan(st.edit, ai_secs, fmt)
+			fmt:        fmt
+			ai_skipped: ai_skipped
+			plan:       export_plan(edit, ai_secs, fmt)
 			started: time.now().unix_milli()
 		}
 		// Снимок всего нужного по значению: воркер не трогает st после спавна
@@ -1799,8 +1809,9 @@ fn main() {
 			src:      st.dev.path
 			dst:      path
 			db:       st.lens_db
-			edit:     st.edit.clone()
+			edit:     edit
 			format:   fmt
+			no_ai:    ai_skipped
 			quality:  st.settings.jpeg_quality
 			ai_cache: ai_cache
 			ctl:      ctl

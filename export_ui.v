@@ -24,6 +24,8 @@ mut:
 	src     string
 	dst     string
 	fmt     imgio.Format
+	// AI у кадра включён, но при экспорте отключён в настройках
+	ai_skipped bool
 	plan    StagePlan
 	stage   ExportStage
 	done    int // плитки AI
@@ -197,7 +199,8 @@ fn export_started(mut st State) {
 	mut u := st.eui
 	c := st.exp
 	mut f := u.files
-	f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}'
+	no_ai := if c.ai_skipped { '  ·  без AI-шумодава' } else { '' }
+	f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
 	u.folder.set('Папка: ', os.dir(c.dst))
 	paint_export(mut st)
 	mut b := u.btn

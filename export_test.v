@@ -3,6 +3,7 @@ module main
 import os
 import vgui
 import imgio
+import json2
 
 fn test_tone_lut() {
 	assert tone_lut(identity_curve()).len == 0 // диагональ - кривой нет
@@ -37,6 +38,14 @@ fn test_export_plan() {
 	// запись PNG - дольше, её доля больше
 	c.plan = export_plan(e, 0, .png)
 	assert c.fraction() < 0.7
+}
+
+// Настройки старой версии (без поля) - AI при экспорте включён
+fn test_settings_export_ai_default() {
+	old := json2.decode[Settings]('{"theme": "dark", "jpeg_quality": 90}')!
+	assert !old.export_no_ai
+	off := json2.decode[Settings]('{"export_no_ai": true}')!
+	assert off.export_no_ai
 }
 
 // Формат по имени из диалога сохранения

@@ -2,8 +2,8 @@ module main
 
 // Настройки программы между запусками: settings.json рядом с программой
 // (не путать с сайдкаром - там правки кадра): тема, цвет области вокруг
-// снимка, видимость ленты кадров, модель AI-шумодава, формат экспорта и
-// качество JPEG. Пишутся при изменении. vraw переносим: настройки, модели (models/) и ONNX Runtime
+// снимка, видимость ленты кадров, модель AI-шумодава, формат экспорта,
+// качество JPEG и AI при экспорте. Пишутся при изменении. vraw переносим: настройки, модели (models/) и ONNX Runtime
 // (onnxruntime/) - всё в папке программы (app_dir).
 import os
 import json2
@@ -21,6 +21,10 @@ mut:
 	export_format string = 'jpeg'
 	// качество JPEG при экспорте (jpeg_q_min..100)
 	jpeg_quality int = jpeg_q_default
+	// true - экспорт без AI-шумодава, даже если он включён у кадра.
+	// Отрицание нарочно: в settings.json старой версии поля нет, json2
+	// даст false - AI при экспорте остаётся включённым
+	export_no_ai bool
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -64,6 +68,7 @@ fn load_settings() Settings {
 		theme:      theme_keys[theme_index(s.theme)]
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()
+		export_no_ai:  s.export_no_ai
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {
 			s.jpeg_quality
