@@ -32,18 +32,97 @@ struct Image {
 	rgb    []u8 // width * height * 3
 }
 
-// AiExport - AI-шумодав для экспорта: модель (общая, грузится один раз) и
-// прогресс по плиткам (false - отмена, develop_full вернёт ai.Cancelled).
-// Без модели кадр с включённым AI не проявляется - ошибка, а не молча
-// другой результат. progress по умолчанию nil (без прогресса): анонимная
-// функция значением по умолчанию в @[params]-поле ломает C-кодоген V.
-@[params]
-struct AiExport {
-	cache    &ai.Cache = unsafe { nil }
-	progress fn (int, int) bool = unsafe { nil }
+// ExportStage - этапы проявки полного кадра, в порядке выполнения.
+// Диалог экспорта показывает текущий и общую долю по весам (export_plan).
+enum ExportStage {
+	decode
+	lens
+	ai
+	impulse
+	denoise
+	defringe
+	tone
+	write // запись JPEG - в save_worker, после develop_full
 }
 
-fn no_progress(_ int, _ int) bool {
+fn stage_title(s ExportStage) string {
+	return match s {
+		.decode { 'Демозаика (LibRaw)' }
+		.lens { 'Коррекция объектива' }
+		.ai { 'AI-шумодав' }
+		.impulse { 'Импульсный шум' }
+		.denoise { 'Шумодав' }
+		.defringe { 'Ореолы' }
+		.tone { 'Тон и цвет' }
+		.write { 'Запись JPEG' }
+	}
+}
+
+// StagePlan - этапы экспорта для настроек кадра и их веса (примерные
+// секунды на 24 Мп в рабочей сборке, см. замеры в PROJECT.md)
+struct StagePlan {
+	stages  []ExportStage
+	weights []f64
+}
+
+// export_plan - какие этапы пройдёт develop_full с настройками e (условия -
+// те же, что в нём) и запись JPEG; ai_secs - оценка AI по полному кадру
+fn export_plan(e EditState, ai_secs f64) StagePlan {
+	mut st := [ExportStage.decode]
+	mut w := [0.6]
+	if e.lens_corr {
+		st << .lens
+		w << 2.8
+	}
+	if e.ai > 0 {
+		st << .ai
+		w << ai_secs
+	}
+	if e.nr[0] > 0 {
+		st << .impulse
+		w << 4.0
+	}
+	if e.nr[1] > 0 || e.nr[2] > 0 {
+		st << .denoise
+		w << 4.0
+	}
+	if e.nr[3] > 0 {
+		st << .defringe
+		w << 2.0
+	}
+	st << .tone
+	w << 1.6
+	st << .write
+	w << 1.0
+	return StagePlan{
+		stages:  st
+		weights: w
+	}
+}
+
+// ExportCancelled - экспорт отменён (progress вернул false)
+struct ExportCancelled {
+	Error
+}
+
+fn (e ExportCancelled) msg() string {
+	return 'экспорт отменён'
+}
+
+// ExportOpts - модель AI-шумодава (общая, грузится один раз) и прогресс:
+// progress(этап, done, total) зовётся в начале каждого этапа (0, 0) и
+// после каждой плитки AI; false - отмена, develop_full вернёт
+// ExportCancelled. Без модели кадр с включённым AI не проявляется -
+// ошибка, а не молча другой результат. progress по умолчанию nil (без
+// прогресса): анонимная функция значением по умолчанию в @[params]-поле
+// ломает C-кодоген V.
+@[params]
+struct ExportOpts {
+	ai_cache &ai.Cache = unsafe { nil }
+	progress fn (ExportStage, int, int) bool = unsafe { nil }
+}
+
+fn no_progress(_ ExportStage, _ int, _ int) bool {
 	return true
 }
 
@@ -52,8 +131,13 @@ fn no_progress(_ int, _ int) bool {
 // кривых в params, как у живого st.edit); db - база lensfun (nil - без
 // коррекции объектива). Свой LibRaw (открывает и закрывает файл сам) -
 // годится для фонового потока. AI-шумодав (e.ai > 0) - модель по всему
-// кадру, ~2.5 мин на 24 Мп.
-fn develop_full(path string, e EditState, db &lens.Database, ax AiExport) !Image {
+// кадру, ~2.5 мин на 24 Мп. Отмена проверяется между этапами и между
+// плитками AI.
+fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Image {
+	progress := if isnil(o.progress) { no_progress } else { o.progress }
+	if !progress(.decode, 0, 0) {
+		return ExportCancelled{}
+	}
 	mut d := raw.open(path)!
 	defer {
 		d.close()
@@ -66,27 +150,51 @@ fn develop_full(path string, e EditState, db &lens.Database, ax AiExport) !Image
 	h := img.height
 	buf := img.data_u16()
 	if e.lens_corr {
+		if !progress(.lens, 0, 0) {
+			return ExportCancelled{}
+		}
 		correct_lens(buf, w, h, d.meta(), db)
 	}
 	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
 	if e.ai > 0 {
-		if isnil(ax.cache) {
+		if isnil(o.ai_cache) {
 			return error('AI-шумодав недоступен')
 		}
-		mut cache := unsafe { ax.cache }
+		if !progress(.ai, 0, 0) {
+			return ExportCancelled{}
+		}
+		mut cache := unsafe { o.ai_cache }
 		model := cache.get()!
-		progress := if isnil(ax.progress) { no_progress } else { ax.progress }
-		den := ai.denoise(model, buf, w, h, progress)!
+		den := ai.denoise(model, buf, w, h, fn [progress] (done int, total int) bool {
+			return progress(.ai, done, total)
+		}) or {
+			if err is ai.Cancelled {
+				return ExportCancelled{}
+			}
+			return err
+		}
 		ai.blend(buf, den, e.ai / 100)
 	}
 	if e.nr[0] > 0 {
+		if !progress(.impulse, 0, 0) {
+			return ExportCancelled{}
+		}
 		pipeline.impulse(buf, w, h, e.nr[0])
 	}
 	if e.nr[1] > 0 || e.nr[2] > 0 {
+		if !progress(.denoise, 0, 0) {
+			return ExportCancelled{}
+		}
 		pipeline.denoise(buf, w, h, e.nr[1], e.nr[2])
 	}
 	if e.nr[3] > 0 {
+		if !progress(.defringe, 0, 0) {
+			return ExportCancelled{}
+		}
 		pipeline.defringe(buf, w, h, e.nr[3])
+	}
+	if !progress(.tone, 0, 0) {
+		return ExportCancelled{}
 	}
 	mask := pipeline.blur_luma(buf, w, h)
 	mut rgb := []u8{len: w * h * 3}

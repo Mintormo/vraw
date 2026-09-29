@@ -1,7 +1,8 @@
 module main
 
 // Окно «Настройки» (меню «Правка - Настройки...»): оформление (тема, фон
-// вокруг снимка - те же, что в меню «Вид») и AI-шумодав: скачивание ONNX
+// вокруг снимка - те же, что в меню «Вид»), качество JPEG экспорта и
+// AI-шумодав: скачивание ONNX
 // Runtime и моделей в папки рядом с программой, выбор модели для новых
 // прогонов. Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
@@ -55,11 +56,12 @@ mut:
 }
 
 const set_w = 640
-const set_h = 640
+const set_h = 730
 const set_row_h = f32(28)
 const set_note_h = f32(20)
 const set_state_w = f32(150)
 const set_btn_w = f32(110)
+const set_path_max = 76 // символов в строке пути (ширина окна минус поля)
 
 fn fmt_mb(bytes i64) string {
 	return '${f64(bytes) / 1e6:.0f} МБ'
@@ -97,6 +99,75 @@ fn note(mut u SettingsUi, text string) &vgui.Label {
 	mut l := vgui.label(text)
 	u.notes << l
 	return l
+}
+
+// PathNote - вторичная подпись с путём: длинный путь обрезается
+// многоточием в начале (важен конец пути), полный - в подсказке при
+// наведении. Подсказку добавить в окно после корня (tip).
+struct PathNote {
+	label &vgui.Label   = unsafe { nil }
+	tip   &vgui.Tooltip = unsafe { nil }
+	max   int // символов подписи вместе с префиксом - по ширине окна
+}
+
+const path_tip_line = 60 // символов в строке подсказки с путём
+
+fn path_note(prefix string, path string, max int) PathNote {
+	mut t := vgui.tooltip('')
+	// Перенос подсказки vgui - только по пробелам, в пути их обычно нет:
+	// строки режет path_tip, ширина - с запасом под них
+	t.max_width = 560
+	p := PathNote{
+		label: vgui.label('')
+		tip:   t
+		max:   max
+	}
+	p.set(prefix, path)
+	t.attach(p.label)
+	return p
+}
+
+fn (p PathNote) set(prefix string, path string) {
+	mut l := p.label
+	l.text = prefix + elide_left(path, p.max - prefix.runes().len)
+	mut t := p.tip
+	t.set_text(path_tip(path))
+}
+
+// elide_left - длинная строка с многоточием в начале
+fn elide_left(s string, max int) string {
+	r := s.runes()
+	return if r.len <= max || max < 4 { s } else { '...' + r[r.len - max + 3..].string() }
+}
+
+// path_tip - путь строками не длиннее path_tip_line, разрыв после
+// разделителя папок: «/» или «\» (на будущее - Windows). Имя папки
+// длиннее строки не режется.
+fn path_tip(path string) string {
+	// Части пути - каждая с разделителем на конце (у последней его нет)
+	mut parts := []string{}
+	mut part := []rune{}
+	for r in path.runes() {
+		part << r
+		if r == `/` || r == `\\` {
+			parts << part.string()
+			part.clear()
+		}
+	}
+	if part.len > 0 {
+		parts << part.string()
+	}
+	mut lines := []string{}
+	mut line := ''
+	for p in parts {
+		if line.runes().len + p.runes().len > path_tip_line && line.len > 0 {
+			lines << line
+			line = ''
+		}
+		line += p
+	}
+	lines << line
+	return lines.join('\n')
 }
 
 // indented - виджет с отступом слева (под текстом переключателя)
@@ -169,6 +240,30 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(caption('Оформление'), 20)
 	body.add_fixed(labeled('Тема', theme_cb), set_row_h)
 	body.add_fixed(labeled('Фон вокруг снимка', bg_cb), set_row_h)
+	body.add_fixed(vgui.create_spacer(), 8)
+
+	// ── Экспорт ──
+	q := st.settings.jpeg_quality
+	mut q_vl := value_label('${q}')
+	mut q_sl := vgui.slider_horizontal(jpeg_q_min, 100, q)
+	q_sl.step = 1
+	q_sl.on_change = fn [mut st, mut q_vl] (v f32) {
+		if int(v) != st.settings.jpeg_quality {
+			st.settings.jpeg_quality = int(v)
+			save_settings(st.settings)
+		}
+		q_vl.text = '${int(v)}'
+	}
+	mut q_row := vgui.create_hbox_fill()
+	q_row.set_spacing(8)
+	q_row.add_fixed(vgui.label('Качество JPEG'), 170)
+	q_row.add_fixed(q_sl, 240)
+	q_row.add_fixed(q_vl, 40)
+	q_row.add(vgui.create_spacer(), 1)
+	body.add_fixed(caption('Экспорт'), 20)
+	body.add_fixed(q_row, set_row_h)
+	body.add_fixed(note(mut u, 'Больше - лучше качество и больше файл; ${jpeg_q_default} - хороший баланс'),
+		set_note_h)
 	body.add_fixed(vgui.create_spacer(), 8)
 	body.add_fixed(caption('AI-шумодав'), 20)
 	body.add_fixed(rt_row, set_row_h)
@@ -251,8 +346,12 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 
 	// ── Где что лежит, закрыть ──
 	body.add(vgui.create_spacer(), 1)
-	body.add_fixed(note(mut u, 'Настройки: ${settings_path()}'), set_note_h)
-	body.add_fixed(note(mut u, 'Модели: ${st.ai_places.models}'), set_note_h)
+	paths := [path_note('Настройки: ', settings_path(), set_path_max),
+		path_note('Модели: ', st.ai_places.models, set_path_max)]
+	for p in paths {
+		u.notes << p.label
+		body.add_fixed(p.label, set_note_h)
+	}
 	mut close := vgui.button('Закрыть')
 	close.style = .accent
 	close.on_click = fn [mut dlg] () {
@@ -265,6 +364,10 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(close_row, 30)
 
 	dlg.add_widget(body)
+	// Подсказки - после корня: рисуются поверх
+	for p in paths {
+		dlg.add_widget(p.tip)
+	}
 	app.add_dialog(dlg)
 	st.sui = u
 	paint_settings(mut st)
@@ -302,7 +405,7 @@ fn sync_settings_ui(mut st State) {
 			b.text = if armed { 'Точно?' } else { 'Удалить' }
 			b.style = if armed { .danger } else { .normal }
 			// Пока идёт скачивание или прогон AI - модель может быть в работе
-			b.enabled = !busy && isnil(st.ai_prev) && isnil(st.ai_exp)
+			b.enabled = !busy && isnil(st.ai_prev) && isnil(st.exp)
 		} else if info.downloadable() {
 			// Вместе с моделью докачается и движок, если его нет
 			extra := if have_rt { i64(0) } else { ai.runtime_file.size }

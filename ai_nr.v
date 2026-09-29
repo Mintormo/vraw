@@ -19,13 +19,12 @@ module main
 // - raw_linear сменился (объектив, пересветы, другой кадр) - ai_linear
 //   устарел (raw_gen); если AI включён, прогон перезапускается сам.
 // - Экспорт с AI считает модель на полном кадре (NAFNet ~2.5 мин, SCUNet
-//   ~16 мин) в save_worker;
-//   его прогресс - в этом же блоке, пока не идёт прогон превью.
+//   ~16 мин) в save_worker; его прогресс - в диалоге экспорта (export_ui.v).
 import time
 import vgui
 import ai
 
-// AiCtl - один прогон модели (превью или экспорт). cancel пишет главный
+// AiCtl - один прогон модели по превью. cancel пишет главный
 // поток, читает воркер между плитками без синхронизации (опоздание на
 // одну плитку безвредно, как ThumbStop). t1/n1 - время и номер первой
 // готовой плитки (пишет только воркер) - для оценки оставшегося
@@ -35,8 +34,7 @@ import ai
 struct AiCtl {
 mut:
 	cancel bool
-	export bool // true - экспорт полного кадра, false - превью
-	t1     i64  // мс первой готовой плитки, 0 - ещё не было
+	t1    i64  // мс первой готовой плитки, 0 - ещё не было
 	n1     int
 	done   int
 	total  int
@@ -399,7 +397,7 @@ fn fmt_eta(sec f64) string {
 }
 
 // sync_ai_ui - какое состояние блока показать. Приоритет - идущий прогон
-// превью, затем экспорт с AI, затем «применён» / кнопка.
+// превью, затем «применён» / кнопка. Экспорт с AI - в своём диалоге.
 fn sync_ai_ui(mut st State) {
 	// Кнопки «Удалить» в настройках гаснут на время прогона
 	sync_settings_ui(mut st)
@@ -407,14 +405,14 @@ fn sync_ai_ui(mut st State) {
 		return
 	}
 	mut u := st.ai_ui
-	ctl := if !isnil(st.ai_prev) { st.ai_prev } else { st.ai_exp }
+	ctl := st.ai_prev
 	running := !isnil(ctl)
 	applied := !running && st.edit.ai > 0 && ai_ready(st)
 	u.running.visible = running
 	u.applied.visible = applied
 	u.idle.visible = !running && !applied
 	if running {
-		what := if ctl.export { 'Экспорт: полный кадр' } else { 'Превью' }
+		what := 'Превью'
 		if ctl.total == 0 {
 			u.bar.set_value(0)
 			u.pct.text = ''
@@ -494,7 +492,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	u.pct = pct
 	mut cancel := icon_button(mut st, 'circle-x', 'Отменить')
 	cancel.on_click = fn [mut st] () {
-		ctl := if !isnil(st.ai_prev) { st.ai_prev } else { st.ai_exp }
+		ctl := st.ai_prev
 		if !isnil(ctl) {
 			mut c := unsafe { ctl }
 			c.cancel = true

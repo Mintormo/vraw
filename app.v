@@ -33,7 +33,6 @@ mut:
 	pw           int   // размеры превью
 	ph           int
 	edit         EditState // все настройки правки кадра (history.v)
-	quality      int = 92
 	hl_developed int = -1 // режим пересветов последней проявки (не проявлять зря)
 	// true = пакетная установка виджетов (откат истории, сброс, новый файл):
 	// on_change только пишут настройки - без пересчётов и записей в историю
@@ -125,8 +124,8 @@ mut:
 	// (модель грузится при первом прогоне), результат модели по raw_linear,
 	// номер сырья и модель, из которых он посчитан; raw_gen
 	// растёт с каждым новым raw_linear. raw_pending - идёт подготовка с
-	// коррекцией объектива (raw_linear вот-вот сменится). ai_prev / ai_exp -
-	// идущие прогоны превью и экспорта (nil - нет), ai_wanted - нажата
+	// коррекцией объектива (raw_linear вот-вот сменится). ai_prev - идущий
+	// прогон превью (nil - нет), ai_wanted - нажата
 	// кнопка, ai_restart - прогон превью отменён сменой сырья.
 	ai_places   ai.Places
 	ai_caches   map[string]&ai.Cache
@@ -138,7 +137,6 @@ mut:
 	raw_pending bool
 	ai_applied  f32 // сила AI в последней подготовке сырья
 	ai_prev     &AiCtl = unsafe { nil }
-	ai_exp      &AiCtl = unsafe { nil }
 	ai_wanted   bool
 	ai_restart  bool
 	ai_threads  []thread
@@ -154,6 +152,11 @@ mut:
 	dl_threads    []thread
 	dl_progress   fn (&DlCtl, i64) = unsafe { nil }
 	dl_done       fn (DlResult)    = unsafe { nil }
+	// Экспорт (export_ui.v): идущий (nil - нет), его диалог и приёмник
+	// прогресса в главном потоке
+	exp          &ExportCtl = unsafe { nil }
+	eui          &ExportUi  = unsafe { nil }
+	exp_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -381,9 +384,9 @@ struct SaveJob {
 	db        &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
 	edit      EditState // настройки кадра с производными полями - как в окне
 	quality   int
-	ai_cache  &ai.Cache = unsafe { nil } // модель AI-шумодава (общая)
-	ai_ctl    &AiCtl    = unsafe { nil } // прогон AI (при edit.ai > 0)
-	on_ai     fn (&AiCtl, int, int, f64) = unsafe { nil } // прогресс AI - в главный поток
+	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
+	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
+	on_stage  fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil } // прогресс - в главный поток
 }
 
 // SaveOutcome - итог сохранения: вид уведомления
@@ -408,21 +411,20 @@ fn report(mut app vgui.App, on_done fn (SaveOutcome, string), res SaveOutcome, m
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
-	mut ax := AiExport{
-		cache: job.ai_cache
-	}
-	if !isnil(job.ai_ctl) {
-		ax = AiExport{
-			cache:    job.ai_cache
-			progress: ai_progress_fn(mut app, job.ai_ctl, job.on_ai)
-		}
-	}
-	img := develop_full(job.src, job.edit, job.db, ax) or {
-		if err is ai.Cancelled {
+	progress := export_progress_fn(mut app, job.ctl, job.on_stage)
+	img := develop_full(job.src, job.edit, job.db,
+		ai_cache: job.ai_cache
+		progress: progress
+	) or {
+		if err is ExportCancelled {
 			report(mut app, on_done, .cancelled, 'Экспорт отменён')
 		} else {
 			report(mut app, on_done, .failed, 'Ошибка проявки: ${err.msg()}')
 		}
+		return
+	}
+	if !progress(.write, 0, 0) {
+		report(mut app, on_done, .cancelled, 'Экспорт отменён')
 		return
 	}
 	stbi.stbi_write_jpg(job.dst, img.width, img.height, 3, img.rgb.data, job.quality) or {
@@ -979,8 +981,7 @@ fn main() {
 	// расширит колонку - наездов на ползунок не будет.
 	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
 		'Контраст', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
-		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Качество JPEG',
-		'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила'], 8)
+		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила'], 8)
 	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
 		'-4.00', '100'], 8)
 
@@ -1048,7 +1049,7 @@ fn main() {
 		c.done = done
 		c.total = total
 		c.eta = eta
-		if st.ai_prev == ctl || (isnil(st.ai_prev) && st.ai_exp == ctl) {
+		if st.ai_prev == ctl {
 			sync_ai_ui(mut st)
 		}
 	}
@@ -1430,15 +1431,6 @@ fn main() {
 	}
 	win.bind_hotkey('Ctrl+Y', redo)
 
-	mut q_lb := vgui.label('Качество JPEG')
-	mut q_vl := value_label('92')
-	mut q_sl := vgui.slider_horizontal(50, 100, 92)
-	q_sl.step = 1
-	q_sl.on_change = fn [mut st, mut q_vl] (v f32) {
-		st.quality = int(v)
-		q_vl.text = '${int(v)}'
-	}
-
 	// ── Открытие файла (кнопка, аргумент, лента) ──
 	// Быстрая часть - здесь, в главном потоке: файл, настройки и история
 	// из сайдкара, лента. Проявка, коррекция и камерная кривая - в фоне
@@ -1706,22 +1698,46 @@ fn main() {
 	}
 
 	// Экспорт - в фоновом потоке (полный кадр с коррекцией ~3.5 с, окно
-	// не должно замирать). Пункт меню на это время гаснет - и защита от
-	// двойного запуска; ползунки остаются живыми. Результат воркер
+	// не должно замирать), ход - в диалоге экспорта (export_ui.v). Пока
+	// экспорт идёт, пункт меню не запускает второй, а снова открывает
+	// диалог; ползунки остаются живыми. Прогресс и результат воркер
 	// доставляет через app.post() - цикл vgui спит как обычно.
 	mut m_export := vgui.menu_action('Экспорт JPEG...')
 	m_export.shortcut = 'Ctrl+E'
-	save_done := fn [mut st, mut nm, mut m_export] (res SaveOutcome, msg string) {
-		match res {
-			.saved { nm.show_success(msg) }
-			.failed { nm.show_error(msg) }
-			.cancelled { nm.show_warning(msg) }
+	st.exp_progress = fn [mut st] (ctl &ExportCtl, stage ExportStage, done int, total int, eta f64) {
+		mut c := unsafe { ctl }
+		if stage != c.stage {
+			c.done = 0
+			c.total = 0
+			c.eta = -1
 		}
-		m_export.enabled = true
-		st.ai_exp = unsafe { nil }
-		sync_ai_ui(mut st)
+		c.stage = stage
+		if total > 0 {
+			c.done = done
+			c.total = total
+			c.eta = eta
+		}
+		if st.exp == ctl {
+			sync_export_ui(mut st)
+		}
 	}
-	m_export.on_click = fn [mut st, mut nm, mut app, win, mut m_export, save_done] () {
+	save_done := fn [mut st, mut nm] (res SaveOutcome, msg string) {
+		st.exp = unsafe { nil }
+		// Итог - в открытом диалоге, иначе тостом
+		if !export_finished(mut st, res, msg) {
+			match res {
+				.saved { nm.show_success(msg) }
+				.failed { nm.show_error(msg) }
+				.cancelled { nm.show_warning(msg) }
+			}
+		}
+		sync_settings_ui(mut st)
+	}
+	m_export.on_click = fn [mut st, mut nm, mut app, win, save_done] () {
+		if !isnil(st.exp) {
+			show_export(mut st, mut app, win)
+			return
+		}
 		if st.loading {
 			nm.show_warning('Кадр ещё загружается')
 			return
@@ -1739,39 +1755,38 @@ fn main() {
 		if path.len == 0 {
 			return
 		}
-		// Снимок всего нужного по значению: воркер не трогает st после спавна
-		mut job := SaveJob{
-			src:     st.dev.path
-			dst:     path
-			db:      st.lens_db
-			edit:    st.edit.clone()
-			quality: st.quality
-			on_ai:   st.ai_progress
-		}
+		mut ai_cache := &ai.Cache(unsafe { nil })
+		mut ai_secs := 0.0
 		if st.edit.ai > 0 {
 			// Модель кадра (которой считано превью) - без неё не проявить
-			cache := ai_cache_for(mut st, st.edit.ai_model) or {
+			ai_cache = ai_cache_for(mut st, st.edit.ai_model) or {
 				nm.show_error('Экспорт с AI-шумодавом: ${err.msg()}')
 				return
 			}
-			job = SaveJob{
-				...job
-				ai_cache: cache
-				ai_ctl:   &AiCtl{
-					export: true
-				}
-			}
+			ai_secs = ai_estimate(st, st.edit.ai_model, true)
 		}
-		m_export.enabled = false
-		if !isnil(job.ai_ctl) {
-			// Прогресс AI полного кадра - в секции «Шумодав и ореолы»
-			st.ai_exp = job.ai_ctl
-			sync_ai_ui(mut st)
-			nm.show_info('Экспорт с AI-шумодавом (${model_title(st.edit.ai_model)}, ~${fmt_dur(ai_estimate(st,
-				st.edit.ai_model, true))}, прогресс - в секции «Шумодав и ореолы»)...')
-		} else {
-			nm.show_info('Проявляю в полном размере (в фоне)...')
+		ctl := &ExportCtl{
+			src:     st.dev.path
+			dst:     path
+			plan:    export_plan(st.edit, ai_secs)
+			started: time.now().unix_milli()
 		}
+		// Снимок всего нужного по значению: воркер не трогает st после спавна
+		job := SaveJob{
+			src:      st.dev.path
+			dst:      path
+			db:       st.lens_db
+			edit:     st.edit.clone()
+			quality:  st.settings.jpeg_quality
+			ai_cache: ai_cache
+			ctl:      ctl
+			on_stage: st.exp_progress
+		}
+		st.exp = ctl
+		show_export(mut st, mut app, win)
+		export_started(mut st)
+		// Пока идёт экспорт, модели не удалить (модель может быть в работе)
+		sync_settings_ui(mut st)
 		st.save_threads << spawn save_worker(job, mut app, save_done)
 	}
 
@@ -1914,8 +1929,6 @@ fn main() {
 	ai_caption.font_style = .bold
 	mut classic_caption := vgui.label('Классический')
 	classic_caption.font_style = .bold
-	mut q_row := slider_row(mut st, q_lb, mut q_sl, q_vl, 92.0, lbl_w, val_w)
-
 	// Гистограмма и кнопки файлов закреплены сверху, кнопки вида - снизу;
 	// всё остальное (чекбоксы и ползунки) прокручивается в ScrollBox
 	// с тонким ползунком. Высота контента считается автоматически
@@ -1966,9 +1979,6 @@ fn main() {
 		SectionRow{nrl_row, 26},
 		SectionRow{nrc_row, 26},
 		SectionRow{df_row, 26},
-	]))
-	acc.add_section('Экспорт', section([
-		SectionRow{q_row, 26},
 	]))
 	// История - последней секцией, открыта: 8 строк списка и подсказка
 	acc.add_section_expanded('История', section([
