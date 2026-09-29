@@ -2,14 +2,14 @@ module main
 
 // Настройки программы между запусками: settings.json рядом с программой
 // (не путать с сайдкаром - там правки кадра): тема, цвет области вокруг
-// снимка, видимость ленты кадров, модель AI-шумодава, качество JPEG
-// экспорта. Пишутся при
-// изменении. vraw переносим: настройки, модели (models/) и ONNX Runtime
+// снимка, видимость ленты кадров, модель AI-шумодава, формат экспорта и
+// качество JPEG. Пишутся при изменении. vraw переносим: настройки, модели (models/) и ONNX Runtime
 // (onnxruntime/) - всё в папке программы (app_dir).
 import os
 import json2
 import vgui
 import ai
+import imgio
 
 struct Settings {
 mut:
@@ -17,8 +17,15 @@ mut:
 	strip_open bool   = true
 	theme      string = 'dark' // ключ из theme_keys (themes.v)
 	ai_model   string = ai.default_model // модель для новых прогонов AI
+	// формат экспорта (ключ imgio.Format.key) - последний выбранный
+	export_format string = 'jpeg'
 	// качество JPEG при экспорте (jpeg_q_min..100)
 	jpeg_quality int = jpeg_q_default
+}
+
+// export_fmt - формат экспорта из настроек (неизвестный - JPEG)
+fn (s &Settings) export_fmt() imgio.Format {
+	return imgio.format_by_key(s.export_format) or { imgio.Format.jpeg }
 }
 
 const jpeg_q_min = 50
@@ -56,6 +63,7 @@ fn load_settings() Settings {
 		strip_open: s.strip_open
 		theme:      theme_keys[theme_index(s.theme)]
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
+		export_format: s.export_fmt().key()
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {
 			s.jpeg_quality

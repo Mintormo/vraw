@@ -12,6 +12,7 @@ import raw
 import lens
 import pipeline
 import ai
+import imgio
 
 // correct_lens - коррекция объектива на месте (виньетирование строго до
 // дисторсии: ремап двигает пиксели); false - профиля нет
@@ -42,7 +43,7 @@ enum ExportStage {
 	denoise
 	defringe
 	tone
-	write // запись JPEG - в save_worker, после develop_full
+	write // запись файла - в save_worker, после develop_full
 }
 
 fn stage_title(s ExportStage) string {
@@ -54,7 +55,7 @@ fn stage_title(s ExportStage) string {
 		.denoise { 'Шумодав' }
 		.defringe { 'Ореолы' }
 		.tone { 'Тон и цвет' }
-		.write { 'Запись JPEG' }
+		.write { 'Запись файла' }
 	}
 }
 
@@ -65,9 +66,24 @@ struct StagePlan {
 	weights []f64
 }
 
+// write_secs - примерное время записи кадра 24 Мп (замер, -prod): PNG и
+// TIFF - сжатие Deflate, GIF - палитра и дизеринг, BMP и QOI - почти
+// ничего
+fn write_secs(f imgio.Format) f64 {
+	return match f {
+		.jpeg { 0.7 }
+		.png { 4.1 }
+		.tiff { 3.4 }
+		.bmp { 0.1 }
+		.qoi { 0.35 }
+		.gif { 1.4 }
+	}
+}
+
 // export_plan - какие этапы пройдёт develop_full с настройками e (условия -
-// те же, что в нём) и запись JPEG; ai_secs - оценка AI по полному кадру
-fn export_plan(e EditState, ai_secs f64) StagePlan {
+// те же, что в нём) и запись файла формата f; ai_secs - оценка AI по
+// полному кадру
+fn export_plan(e EditState, ai_secs f64, f imgio.Format) StagePlan {
 	mut st := [ExportStage.decode]
 	mut w := [0.6]
 	if e.lens_corr {
@@ -93,7 +109,7 @@ fn export_plan(e EditState, ai_secs f64) StagePlan {
 	st << .tone
 	w << 1.6
 	st << .write
-	w << 1.0
+	w << write_secs(f)
 	return StagePlan{
 		stages:  st
 		weights: w

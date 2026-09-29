@@ -3,12 +3,13 @@ module main
 // Диалог экспорта: что проявляется и куда, текущий этап («Этап 3 из 6:
 // Шумодав»), общая полоса прогресса по весам этапов (export_plan), время
 // и отмена. Открывается при старте экспорта; закрыть можно в любой момент -
-// экспорт идёт дальше в фоне, «Файл - Экспорт JPEG...» открывает диалог
+// экспорт идёт дальше в фоне, «Файл - Экспорт...» открывает диалог
 // снова. Итог - в диалоге, если он открыт, иначе тостом в главном окне.
 // Создаётся при первом экспорте и живёт до выхода: закрытие только прячет.
 import os
 import time
 import vgui
+import imgio
 
 // ExportCtl - один экспорт. cancel пишет главный поток, читает воркер
 // между этапами и плитками AI (опоздание на плитку безвредно, как у
@@ -22,12 +23,28 @@ mut:
 	n1      int
 	src     string
 	dst     string
+	fmt     imgio.Format
 	plan    StagePlan
 	stage   ExportStage
 	done    int // плитки AI
 	total   int
 	eta     f64 = -1 // AI: секунд до конца, < 0 - неизвестно
 	started i64 // unix мс
+}
+
+// export_target - формат и путь по имени из диалога сохранения: формат -
+// по расширению; без расширения - формат def (расширение дописывается);
+// незнакомое расширение - ошибка (молча писать не то, что просили, нельзя)
+fn export_target(path string, def imgio.Format) !(imgio.Format, string) {
+	if f := imgio.format_by_path(path) {
+		return f, path
+	}
+	ext := os.file_ext(path)
+	if ext == '' {
+		return def, '${path}.${def.ext()}'
+	}
+	names := imgio.formats.map(it.name()).join(', ')
+	return error('Формат «${ext}» не поддерживается. Можно: ${names}')
 }
 
 // fraction - общая доля готового по весам этапов
@@ -96,7 +113,7 @@ fn export_open(st &State) bool {
 fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &ExportUi{}
 	mut dlg := vgui.create_dialog(
-		title:     'Экспорт JPEG'
+		title:     'Экспорт'
 		width:     exp_w
 		height:    exp_h
 		parent:    unsafe { parent }
@@ -208,6 +225,8 @@ fn sync_export_ui(mut st State) {
 		} else {
 			'${name} - плитка ${c.done} из ${c.total}'
 		}
+	} else if c.stage == .write {
+		name = if c.fmt == .gif { 'Палитра и запись GIF' } else { 'Запись ${c.fmt.name()}' }
 	}
 	s.text = 'Этап ${c.stage_no()} из ${c.plan.stages.len}: ${name}'
 	frac := c.fraction()

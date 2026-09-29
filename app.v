@@ -14,7 +14,7 @@ module main
 import os
 import math
 import time
-import stbi
+import imgio
 import vgui
 import raw
 import lens
@@ -383,7 +383,8 @@ struct SaveJob {
 	dst       string
 	db        &lens.Database = unsafe { nil } // общая база lensfun (только чтение)
 	edit      EditState // настройки кадра с производными полями - как в окне
-	quality   int
+	format    imgio.Format
+	quality   int // JPEG
 	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
 	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
 	on_stage  fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil } // прогресс - в главный поток
@@ -406,7 +407,7 @@ fn report(mut app vgui.App, on_done fn (SaveOutcome, string), res SaveOutcome, m
 	})
 }
 
-// save_worker выполняется в spawn: полная проявка и запись JPEG без единого
+// save_worker выполняется в spawn: полная проявка и запись файла без единого
 // обращения к vgui или общему состоянию - кроме app.post() (потокобезопасен
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
@@ -427,13 +428,14 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		report(mut app, on_done, .cancelled, 'Экспорт отменён')
 		return
 	}
-	stbi.stbi_write_jpg(job.dst, img.width, img.height, 3, img.rgb.data, job.quality) or {
+	imgio.write(job.dst, job.format, img.width, img.height, img.rgb, quality: job.quality) or {
 		report(mut app, on_done, .failed, 'Не удалось сохранить: ${err}')
 		return
 	}
 	size_mb := f64(os.file_size(job.dst)) / 1024 / 1024
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	report(mut app, on_done, .saved, 'Сохранено: ${job.dst} (${img.width}x${img.height}, ${size_mb:.1f} МБ, качество ${job.quality}, ${sec:.1f} с)')
+	q := if job.format == .jpeg { ', качество ${job.quality}' } else { '' }
+	report(mut app, on_done, .saved, 'Сохранено: ${job.dst} (${job.format.name()}, ${img.width}x${img.height}, ${size_mb:.1f} МБ${q}, ${sec:.1f} с)')
 }
 
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
@@ -1697,12 +1699,13 @@ fn main() {
 		}
 	}
 
-	// Экспорт - в фоновом потоке (полный кадр с коррекцией ~3.5 с, окно
-	// не должно замирать), ход - в диалоге экспорта (export_ui.v). Пока
+	// Экспорт (JPEG, PNG, TIFF, BMP, QOI, GIF - imgio) - в фоновом потоке
+	// (полный кадр с коррекцией ~3.5 с, окно не должно замирать), ход - в
+	// диалоге экспорта (export_ui.v). Пока
 	// экспорт идёт, пункт меню не запускает второй, а снова открывает
 	// диалог; ползунки остаются живыми. Прогресс и результат воркер
 	// доставляет через app.post() - цикл vgui спит как обычно.
-	mut m_export := vgui.menu_action('Экспорт JPEG...')
+	mut m_export := vgui.menu_action('Экспорт...')
 	m_export.shortcut = 'Ctrl+E'
 	st.exp_progress = fn [mut st] (ctl &ExportCtl, stage ExportStage, done int, total int, eta f64) {
 		mut c := unsafe { ctl }
@@ -1746,14 +1749,33 @@ fn main() {
 			nm.show_warning('Сначала откройте RAW-файл')
 			return
 		}
-		default_name := os.file_name(st.dev.path).all_before_last('.') + '.jpg'
-		path := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
-			default_name:    default_name
-			filter_names:    ['JPEG']
-			filter_patterns: ['jpg;jpeg']
+		// Формат - по расширению выбранного имени (диалог не сообщает
+		// выбранный фильтр); по умолчанию - последний использованный, его
+		// фильтр первым
+		cur := st.settings.export_fmt()
+		mut order := [cur]
+		for f in imgio.formats {
+			if f != cur {
+				order << f
+			}
+		}
+		base := os.file_name(st.dev.path).all_before_last('.')
+		chosen := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
+			default_name:    '${base}.${cur.ext()}'
+			filter_names:    order.map(it.name())
+			filter_patterns: order.map(it.exts().join(';'))
 		})
-		if path.len == 0 {
+		if chosen.len == 0 {
 			return
+		}
+		fmt, path := export_target(chosen, cur) or {
+			nm.show_error(err.msg())
+			return
+		}
+		if fmt != cur {
+			st.settings.export_format = fmt.key()
+			save_settings(st.settings)
+			sync_settings_ui(mut st)
 		}
 		mut ai_cache := &ai.Cache(unsafe { nil })
 		mut ai_secs := 0.0
@@ -1768,7 +1790,8 @@ fn main() {
 		ctl := &ExportCtl{
 			src:     st.dev.path
 			dst:     path
-			plan:    export_plan(st.edit, ai_secs)
+			fmt:     fmt
+			plan:    export_plan(st.edit, ai_secs, fmt)
 			started: time.now().unix_milli()
 		}
 		// Снимок всего нужного по значению: воркер не трогает st после спавна
@@ -1777,6 +1800,7 @@ fn main() {
 			dst:      path
 			db:       st.lens_db
 			edit:     st.edit.clone()
+			format:   fmt
 			quality:  st.settings.jpeg_quality
 			ai_cache: ai_cache
 			ctl:      ctl

@@ -1,14 +1,14 @@
 module main
 
 // Окно «Настройки» (меню «Правка - Настройки...»): оформление (тема, фон
-// вокруг снимка - те же, что в меню «Вид»), качество JPEG экспорта и
-// AI-шумодав: скачивание ONNX
-// Runtime и моделей в папки рядом с программой, выбор модели для новых
-// прогонов. Диалог создаётся при первом открытии и живёт до выхода:
+// вокруг снимка - те же, что в меню «Вид»), формат экспорта и качество
+// JPEG, AI-шумодав: скачивание ONNX Runtime и моделей в папки рядом с
+// программой, выбор модели для новых прогонов. Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
 // закрыть и работать дальше, итог - тостом в главном окне.
 import vgui
 import ai
+import imgio
 
 // DlCtl - одно скачивание (ORT и/или модель). cancel пишет главный поток,
 // читает воркер между порциями данных; posted - только воркер (сколько
@@ -45,6 +45,7 @@ mut:
 	dlg      &vgui.Dialog      = unsafe { nil }
 	theme_cb &vgui.ComboBox    = unsafe { nil }
 	bg_cb    &vgui.ComboBox    = unsafe { nil }
+	fmt_cb   &vgui.ComboBox    = unsafe { nil } // формат экспорта
 	rt_state &vgui.Label       = unsafe { nil }
 	rt_btn   &vgui.Button      = unsafe { nil }
 	rows     []ModelRow
@@ -56,11 +57,23 @@ mut:
 }
 
 const set_w = 640
-const set_h = 730
+const set_h = 766
 const set_row_h = f32(28)
 const set_note_h = f32(20)
 const set_state_w = f32(150)
 const set_btn_w = f32(110)
+// fmt_title - формат в списке настроек: название и что это
+fn fmt_title(f imgio.Format) string {
+	return match f {
+		.jpeg { 'JPEG - компактный' }
+		.png { 'PNG - без потерь' }
+		.tiff { 'TIFF - для других программ' }
+		.bmp { 'BMP - без сжатия' }
+		.qoi { 'QOI - без потерь, быстрый' }
+		.gif { 'GIF - 256 цветов' }
+	}
+}
+
 const set_path_max = 76 // символов в строке пути (ширина окна минус поля)
 
 fn fmt_mb(bytes i64) string {
@@ -243,6 +256,17 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(vgui.create_spacer(), 8)
 
 	// ── Экспорт ──
+	// Формат - тот, что предложит «Экспорт...»; выбор другого расширения
+	// в диалоге сохранения тоже меняет его
+	mut fmt_cb := vgui.combo_box()
+	fmt_cb.set_items(imgio.formats.map(fmt_title(it)))
+	fmt_cb.on_change = fn [mut st] (i int, _ string) {
+		if i >= 0 && i < imgio.formats.len {
+			st.settings.export_format = imgio.formats[i].key()
+			save_settings(st.settings)
+		}
+	}
+	u.fmt_cb = fmt_cb
 	q := st.settings.jpeg_quality
 	mut q_vl := value_label('${q}')
 	mut q_sl := vgui.slider_horizontal(jpeg_q_min, 100, q)
@@ -261,6 +285,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	q_row.add_fixed(q_vl, 40)
 	q_row.add(vgui.create_spacer(), 1)
 	body.add_fixed(caption('Экспорт'), 20)
+	body.add_fixed(labeled('Формат', fmt_cb), set_row_h)
 	body.add_fixed(q_row, set_row_h)
 	body.add_fixed(note(mut u, 'Больше - лучше качество и больше файл; ${jpeg_q_default} - хороший баланс'),
 		set_note_h)
@@ -384,6 +409,8 @@ fn sync_settings_ui(mut st State) {
 	tcb.set_selected(theme_index(st.settings.theme))
 	mut bcb := u.bg_cb
 	bcb.set_selected(bg_index(st.settings.viewer_bg))
+	mut fcb := u.fmt_cb
+	fcb.set_selected(imgio.formats.index(st.settings.export_fmt()))
 	busy := !isnil(st.dl)
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''

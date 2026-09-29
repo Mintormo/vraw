@@ -2,6 +2,7 @@ module main
 
 import os
 import vgui
+import imgio
 
 fn test_tone_lut() {
 	assert tone_lut(identity_curve()).len == 0 // диагональ - кривой нет
@@ -17,11 +18,11 @@ fn test_tone_lut() {
 fn test_export_plan() {
 	mut e := neutral_edit()
 	e.lens_corr = false
-	p := export_plan(e, 0)
+	p := export_plan(e, 0, .jpeg)
 	assert p.stages == [ExportStage.decode, .tone, .write]
 	e.lens_corr = true
 	e.nr[1] = 10
-	p2 := export_plan(e, 0)
+	p2 := export_plan(e, 0, .jpeg)
 	assert p2.stages == [ExportStage.decode, .lens, .denoise, .tone, .write]
 	mut c := ExportCtl{
 		plan:  p2
@@ -31,8 +32,26 @@ fn test_export_plan() {
 	assert c.stage_no() == 1
 	c.stage = .write
 	assert c.stage_no() == 5
-	// всё, кроме записи: 9 из 10 весовых секунд
-	assert c.fraction() > 0.89 && c.fraction() < 0.91
+	// всё, кроме записи JPEG: 9 из 9.7 весовых секунд
+	assert c.fraction() > 0.92 && c.fraction() < 0.94
+	// запись PNG - дольше, её доля больше
+	c.plan = export_plan(e, 0, .png)
+	assert c.fraction() < 0.7
+}
+
+// Формат по имени из диалога сохранения
+fn test_export_target() {
+	f, p := export_target('/a/IMG.png', .jpeg)!
+	assert f == .png && p == '/a/IMG.png'
+	f2, p2 := export_target('/a/IMG', .tiff)!
+	assert f2 == .tiff && p2 == '/a/IMG.tif'
+	f3, _ := export_target('/a/IMG.JPEG', .gif)!
+	assert f3 == imgio.Format.jpeg
+	export_target('/a/IMG.webp', .jpeg) or {
+		assert err.msg().contains('.webp')
+		return
+	}
+	assert false
 }
 
 // Длинный путь: многоточие в начале, в подсказке - строки по «/»
