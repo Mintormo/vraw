@@ -14,3 +14,10 @@
 # Сайдкары правок vraw (рядом с RAW)
 *.vraw.json
 *.vraw.json.tmp
+
+# Рядом с программой (не в git): настройки, скачанные модели и ONNX Runtime
+/settings.json
+/models/
+/onnxruntime/
+/onnxruntime.tmp/
+*.part

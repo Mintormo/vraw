@@ -1,11 +1,16 @@
 module main
 
-// AI-шумодав в окне: нейросеть (модуль ai, NAFNet-SIDD) по кнопке, в
+// AI-шумодав в окне: нейросеть (модуль ai: SCUNet, NAFNet) по кнопке, в
 // фоне, с прогрессом и отменой. Секция «Шумодав и ореолы», блок сверху.
 //
 // Как устроено:
+// - Модели и ONNX Runtime скачиваются в окне «Настройки» (settings_ui.v)
+//   в папки рядом с программой. Модель новых прогонов - из настроек
+//   (st.settings.ai_model); кадр с AI помнит свою (edit.ai_model), по ней
+//   идут пересчёт превью и экспорт. У каждой модели свой ai.Cache.
 // - Модель считает превью (raw_linear - после коррекции объектива, до
-//   импульсов и вейвлета) один раз, ~40 с; результат - st.ai_linear.
+//   импульсов и вейвлета) один раз (NAFNet ~40 с, SCUNet ~4 мин);
+//   результат - st.ai_linear, модель результата - st.ai_lin_model.
 // - Настройка кадра - edit.ai (сила 1..100, 0 - выключен): в истории и
 //   сайдкаре. Подготовка сырья смешивает raw_linear с ai_linear по силе
 //   (ai.blend - мгновенно), дальше как обычно: импульсы, вейвлет, ореолы.
@@ -13,7 +18,8 @@ module main
 //   результат: повторное включение или откат к AI - новый прогон.
 // - raw_linear сменился (объектив, пересветы, другой кадр) - ai_linear
 //   устарел (raw_gen); если AI включён, прогон перезапускается сам.
-// - Экспорт с AI считает модель на полном кадре (~2.5 мин) в save_worker;
+// - Экспорт с AI считает модель на полном кадре (NAFNet ~2.5 мин, SCUNet
+//   ~16 мин) в save_worker;
 //   его прогресс - в этом же блоке, пока не идёт прогон превью.
 import time
 import vgui
@@ -41,6 +47,7 @@ mut:
 struct AiJob {
 	gen     int // file_gen кадра
 	raw_gen int
+	model   string // id модели
 	src     []u16
 	w       int
 	h       int
@@ -52,6 +59,7 @@ struct AiResult {
 	ctl       &AiCtl = unsafe { nil } // чей это прогон
 	gen       int
 	raw_gen   int
+	model     string
 	out       []u16
 	err       string
 	cancelled bool
@@ -73,14 +81,71 @@ mut:
 	pct      &vgui.Label       = unsafe { nil }
 	status   &vgui.Label       = unsafe { nil }
 	strength &vgui.Slider      = unsafe { nil }
+	ok_label &vgui.Label       = unsafe { nil }
 	ok_icon  &vgui.Icon        = unsafe { nil }
 	run_icon &vgui.Icon        = unsafe { nil }
 }
 
-// ai_ready - ai_linear посчитан по текущему raw_linear
+// ai_run_model - модель прогона: у кадра с AI - его модель, иначе
+// выбранная в настройках
+fn ai_run_model(st &State) string {
+	return if st.edit.ai > 0 && st.edit.ai_model != '' {
+		st.edit.ai_model
+	} else {
+		st.settings.ai_model
+	}
+}
+
+// ai_cache_for - кэш модели (создаётся при первой надобности); ошибка -
+// понятный текст, чего не хватает
+fn ai_cache_for(mut st State, id string) !&ai.Cache {
+	if c := st.ai_caches[id] {
+		return c
+	}
+	info := ai.find_model_info(id) or { return error('неизвестная модель ${id}') }
+	lib := ai.runtime_lib(st.ai_places)
+	if lib == '' {
+		return error('не скачан ONNX Runtime (Правка - Настройки)')
+	}
+	if !info.installed(st.ai_places) {
+		return error('не скачана модель ${info.title} (Правка - Настройки)')
+	}
+	c := ai.new_cache(info.path(st.ai_places), lib)
+	st.ai_caches[id] = c
+	return c
+}
+
+// ai_usable - модель скачана вместе с ONNX Runtime
+fn ai_usable(st &State, id string) bool {
+	info := ai.find_model_info(id) or { return false }
+	return ai.runtime_lib(st.ai_places) != '' && info.installed(st.ai_places)
+}
+
+// model_title - короткое имя модели для подписей
+fn model_title(id string) string {
+	info := ai.find_model_info(id) or { return id }
+	return info.title
+}
+
+// ai_estimate - оценка времени прогона модели, секунд: превью (открытый
+// кадр, без него - типичные 24 Мп) или полный кадр (вдвое больше по сторонам)
+fn ai_estimate(st &State, id string, full bool) f64 {
+	info := ai.find_model_info(id) or { return 0 }
+	w := if st.pw > 0 { st.pw } else { 3000 }
+	h := if st.ph > 0 { st.ph } else { 2000 }
+	k := if full { 2 } else { 1 }
+	return f64(ai.tile_count(w * k, h * k)) * info.tile_secs
+}
+
+// fmt_dur - «40 с» / «4 мин»
+fn fmt_dur(sec f64) string {
+	return if sec < 60 { '${int(sec + 0.5)} с' } else { '${int(sec / 60 + 0.5)} мин' }
+}
+
+// ai_ready - ai_linear посчитан по текущему raw_linear и нужной моделью
 fn ai_ready(st &State) bool {
 	return st.ai_linear.len > 0 && st.ai_linear.len == st.raw_linear.len
-		&& st.ai_raw_gen == st.raw_gen
+		&& st.ai_raw_gen == st.raw_gen && st.ai_lin_model == ai_run_model(st)
 }
 
 // ai_effective - сила AI, с которой сейчас надо готовить сырьё (0 - без AI:
@@ -125,8 +190,21 @@ fn ai_check(mut st State, mut app vgui.App) {
 		return
 	}
 	// Сырьё ещё не готово или вот-вот сменится - позовут снова
-	if st.loading || st.raw_linear.len == 0 || st.lens_dirty || st.raw_pending
-		|| isnil(st.ai_cache) {
+	if st.loading || st.raw_linear.len == 0 || st.lens_dirty || st.raw_pending {
+		sync_ai_ui(mut st)
+		return
+	}
+	id := ai_run_model(st)
+	cache := ai_cache_for(mut st, id) or {
+		// Нет модели или ORT: по кнопке - сказать всегда, для кадра с AI из
+		// сайдкара - один раз на кадр и модель (ai_check зовут часто)
+		warn := '${st.file_gen}/${id}'
+		if (st.ai_wanted || st.ai_warned != warn) && !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_error('AI-шумодав: ${err.msg()}')
+		}
+		st.ai_warned = warn
+		st.ai_wanted = false
 		sync_ai_ui(mut st)
 		return
 	}
@@ -136,10 +214,11 @@ fn ai_check(mut st State, mut app vgui.App) {
 	job := AiJob{
 		gen:     st.file_gen
 		raw_gen: st.raw_gen
+		model:   id
 		src:     st.raw_linear.clone()
 		w:       st.pw
 		h:       st.ph
-		cache:   st.ai_cache
+		cache:   cache
 		ctl:     ctl
 	}
 	st.ai_threads << spawn ai_worker(job, mut app, st.ai_progress, st.ai_done)
@@ -147,7 +226,8 @@ fn ai_check(mut st State, mut app vgui.App) {
 	// или пересветов) - секция может быть свёрнута: сказать тостом
 	if !st.ai_wanted && !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_info('AI-шумодав: пересчёт превью (~40 с, прогресс - в секции «Шумодав и ореолы»)')
+		nm.show_info('AI-шумодав: пересчёт превью (${model_title(id)}, ~${fmt_dur(ai_estimate(st,
+			id, false))}, прогресс - в секции «Шумодав и ореолы»)')
 	}
 	sync_ai_ui(mut st)
 }
@@ -180,6 +260,7 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 		ctl:     job.ctl
 		gen:     job.gen
 		raw_gen: job.raw_gen
+		model:   job.model
 	}
 	mut cache := unsafe { job.cache }
 	if model := cache.get() {
@@ -241,12 +322,13 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		sync_ai_ui(mut st)
 		return
 	}
-	if res.gen != st.file_gen || res.raw_gen != st.raw_gen {
+	if res.gen != st.file_gen || res.raw_gen != st.raw_gen || res.model != ai_run_model(st) {
 		ai_check(mut st, mut app)
 		return
 	}
 	st.ai_linear = res.out
 	st.ai_raw_gen = res.raw_gen
+	st.ai_lin_model = res.model
 	if st.ai_wanted {
 		ai_turn_on(mut st, mut app)
 		if !isnil(st.nm) {
@@ -270,6 +352,7 @@ fn ai_turn_on(mut st State, mut app vgui.App) {
 		st.suppress = false
 	}
 	st.edit.ai = 100
+	st.edit.ai_model = st.ai_lin_model
 	request_prep(mut st, mut app, false)
 	record(mut st, 'ai', 'AI-шумодав', false)
 	sync_ai_ui(mut st)
@@ -281,6 +364,7 @@ fn ai_turn_on(mut st State, mut app vgui.App) {
 // истории к записи с AI пересчитает модель через ai_check.
 fn ai_turn_off(mut st State, mut app vgui.App) {
 	st.edit.ai = 0
+	st.edit.ai_model = ''
 	st.ai_linear = []u16{}
 	request_prep(mut st, mut app, false)
 	record(mut st, 'ai', 'AI-шумодав: выкл', false)
@@ -317,6 +401,8 @@ fn fmt_eta(sec f64) string {
 // sync_ai_ui - какое состояние блока показать. Приоритет - идущий прогон
 // превью, затем экспорт с AI, затем «применён» / кнопка.
 fn sync_ai_ui(mut st State) {
+	// Кнопки «Удалить» в настройках гаснут на время прогона
+	sync_settings_ui(mut st)
 	if isnil(st.ai_ui) {
 		return
 	}
@@ -339,8 +425,28 @@ fn sync_ai_ui(mut st State) {
 			u.status.text = '${what} · ${fmt_eta(ctl.eta)}'
 		}
 	}
+	if applied {
+		mut l := u.ok_label
+		l.text = 'AI-шумодав применён · ${model_title(st.edit.ai_model)}'
+	}
+	// Кнопка: модель готова - запуск; нет - «Скачать модель...» (окно
+	// настроек, там и выбор модели)
+	id := st.settings.ai_model
+	ready := ai_usable(st, id)
 	mut b := u.start
-	b.enabled = !isnil(st.ai_cache) && st.ai_cache.path != '' && !isnil(st.dev) && !st.loading
+	mut hint := u.hint
+	if ready {
+		b.text = 'Убрать шум (AI)'
+		b.icon_name = 'sparkles'
+		b.enabled = !isnil(st.dev) && !st.loading
+		hint.text = '${model_title(id)} · превью ~${fmt_dur(ai_estimate(st, id, false))}, экспорт ~${fmt_dur(ai_estimate(st,
+			id, true))}'
+	} else {
+		b.text = 'Скачать модель...'
+		b.icon_name = 'download'
+		b.enabled = true
+		hint.text = 'Модель ${model_title(id)} не скачана - Правка - Настройки'
+	}
 }
 
 // build_ai_block - блок AI-шумодава в секции «Шумодав и ореолы»: Stack
@@ -349,14 +455,18 @@ fn sync_ai_ui(mut st State) {
 fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f32, vw f32) &vgui.Stack {
 	mut u := &AiUi{}
 	st.ai_ui = u
-	model_ok := !isnil(st.ai_cache) && st.ai_cache.path != ''
-
 	// Кнопка запуска и подсказка
 	mut start := vgui.button('Убрать шум (AI)')
 	start.icon_name = 'sparkles'
 	start.icon_size = 15
 	start.style = .accent
 	start.on_click = fn [mut st, mut app] () {
+		if !ai_usable(st, st.settings.ai_model) {
+			if !isnil(st.open_settings) {
+				st.open_settings()
+			}
+			return
+		}
 		if isnil(st.dev) || st.loading {
 			return
 		}
@@ -364,12 +474,10 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 		ai_check(mut st, mut app)
 	}
 	u.start = start
-	hint_text := if model_ok {
-		'NAFNet-SIDD · превью ~40 с, экспорт ~3 мин'
-	} else {
-		'Нет модели ${ai.model_name} в ~/.local/share/vraw/models'
-	}
-	mut hint := vgui.label(hint_text)
+	// Высота подписей (ai_note_h) - с запасом на внутренний отступ Label
+	// (4 px сверху): VBox слоя отсекает по своей границе, при 16 px текст
+	// уходил под край
+	mut hint := vgui.label('')
 	st.hint_labels << hint
 	u.hint = hint
 	mut idle := vgui.create_vbox_fill()
@@ -435,8 +543,9 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	mut ok_icon := vgui.icon('circle-check')
 	ok_icon.set_size(14)
 	u.ok_icon = ok_icon
-	mut ok_lb := vgui.label('AI-шумодав применён · NAFNet-SIDD')
+	mut ok_lb := vgui.label('AI-шумодав применён')
 	st.secondary_labels << ok_lb
+	u.ok_label = ok_lb
 	mut orow := vgui.create_hbox_fill()
 	orow.set_spacing(4)
 	orow.add_fixed(ok_icon, 18)
@@ -464,7 +573,7 @@ fn layer(w &vgui.Widget) &vgui.Stack {
 }
 
 const ai_row_h = f32(28)
-const ai_note_h = f32(16)
+const ai_note_h = f32(24)
 const ai_row_gap = f32(6)
 const ai_block_h = ai_row_h + ai_row_gap + ai_note_h
 

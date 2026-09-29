@@ -1,32 +1,31 @@
 module ai
 
-// Нейросетевой шумодав: модель ONNX (NAFNet-SIDD) через ONNX Runtime.
+// Нейросетевой шумодав: модель ONNX (SCUNet, NAFNet - каталог в
+// catalog.v) через ONNX Runtime.
 // Вход и выход - линейный 16-бит RGB, как везде в vraw; модель обучена
 // на sRGB, поэтому внутри кадр переводится в sRGB-гамму и обратно.
 // Кадр идёт плитками 256x256 с перекрытием 32 (модель тяжёлая - на
 // плитке CPU работает быстрее всего; крупные плитки не влезают в кэш),
 // швы сглаживаются весами, которые в сумме дают 1.
 //
-// ONNX Runtime - официальная сборка с GitHub в ~/soft/onnxruntime
-// (в apt её нет); путь к библиотеке вшит в бинарник (rpath).
+// ONNX Runtime не линкуется: библиотека грузится dlopen при первом
+// прогоне (load_runtime) из папки onnxruntime рядом с программой, куда её
+// скачивает install_runtime. Нет библиотеки - vraw работает без AI.
 import math
-import os
 import sync
 
-#flag -I $env('HOME')/soft/onnxruntime/include
-#flag -L $env('HOME')/soft/onnxruntime/lib
-#flag -Wl,-rpath,$env('HOME')/soft/onnxruntime/lib
-#flag -lonnxruntime
+#flag -I @VMODROOT/ai/include
+#flag -ldl
 #include "@VMODROOT/ai/ort_shim.h"
 
 @[typedef]
 struct C.VrModel {}
 
+fn C.vr_ort_load(path &char, err &char, err_len int) int
 fn C.vr_model_open(path &char, err &char, err_len int) &C.VrModel
 fn C.vr_model_run(m &C.VrModel, input &f32, output &f32, h int, w int, err &char, err_len int) int
 fn C.vr_model_close(m &C.VrModel)
 
-pub const model_name = 'nafnet_sidd_w32.onnx'
 pub const tile = 256
 pub const overlap = 32
 
@@ -46,17 +45,22 @@ pub fn (e Cancelled) msg() string {
 	return 'отменено'
 }
 
-// find_model - путь к файлу модели: папка models рядом с программой,
-// затем ~/.local/share/vraw/models; пусто - не найдена
-pub fn find_model() string {
-	for dir in [os.join_path(os.dir(os.executable()), 'models'),
-		os.join_path(os.home_dir(), '.local', 'share', 'vraw', 'models')] {
-		p := os.join_path(dir, model_name)
-		if os.is_file(p) {
-			return p
-		}
+// runtime_mu - загрузка библиотеки ORT один раз за процесс (превью и
+// экспорт могут попросить её из разных потоков)
+const runtime_mu = sync.new_mutex()
+
+// load_runtime - загрузить ONNX Runtime по пути к libonnxruntime.so
+// (повторный вызов после успеха - ничего не делает). Библиотека остаётся
+// в памяти до конца процесса.
+pub fn load_runtime(lib string) ! {
+	runtime_mu.lock()
+	defer {
+		runtime_mu.unlock()
 	}
-	return ''
+	mut err := []u8{len: 512}
+	if C.vr_ort_load(&char(lib.str), unsafe { &char(err.data) }, err.len) != 0 {
+		return error('не удалось загрузить ONNX Runtime: ${unsafe { cstring_to_vstring(&char(err.data)) }}')
+	}
 }
 
 // load открывает модель (~1.5 с: разбор графа и оптимизация)
@@ -84,8 +88,9 @@ pub fn (m &Model) free() {
 }
 
 // Cache - модель, загружаемая один раз за запуск при первой надобности
-// (превью и экспорт могут попросить её из разных потоков - под мьютексом).
-// Ошибка загрузки запоминается: повторно не грузим.
+// (превью и экспорт могут попросить её из разных потоков - под мьютексом),
+// вместе с библиотекой ORT. Ошибка загрузки запоминается: повторно не
+// грузим. На каждую модель каталога - свой Cache.
 @[heap]
 pub struct Cache {
 mut:
@@ -93,12 +98,14 @@ mut:
 	model &Model      = unsafe { nil }
 	err   string
 pub:
-	path string // пусто - модель не найдена
+	path    string // файл модели .onnx
+	runtime string // libonnxruntime.so
 }
 
-pub fn new_cache(path string) &Cache {
+pub fn new_cache(path string, runtime string) &Cache {
 	return &Cache{
-		path: path
+		path:    path
+		runtime: runtime
 	}
 }
 
@@ -110,11 +117,12 @@ pub fn (mut c Cache) get() !&Model {
 	if !isnil(c.model) {
 		return c.model
 	}
-	if c.path == '' {
-		return error('модель ${model_name} не найдена')
-	}
 	if c.err != '' {
 		return error(c.err)
+	}
+	load_runtime(c.runtime) or {
+		c.err = err.msg()
+		return err
 	}
 	c.model = load(c.path) or {
 		c.err = err.msg()

@@ -1,17 +1,21 @@
 module main
 
-// Настройки программы между запусками: ~/.config/vraw/settings.json
-// (не путать с сайдкаром - там правки кадра): тема, цвет области
-// вокруг снимка и видимость ленты кадров. Пишутся при изменении.
+// Настройки программы между запусками: settings.json рядом с программой
+// (не путать с сайдкаром - там правки кадра): тема, цвет области вокруг
+// снимка, видимость ленты кадров, модель AI-шумодава. Пишутся при
+// изменении. vraw переносим: настройки, модели (models/) и ONNX Runtime
+// (onnxruntime/) - всё в папке программы (app_dir).
 import os
 import json2
 import vgui
+import ai
 
 struct Settings {
 mut:
 	viewer_bg  string = 'dark' // ключ из bg_keys
 	strip_open bool   = true
 	theme      string = 'dark' // ключ из theme_keys (themes.v)
+	ai_model   string = ai.default_model // модель для новых прогонов AI
 }
 
 // Фон области просмотра вокруг снимка (меню «Вид - Фон вокруг снимка»).
@@ -26,8 +30,14 @@ fn bg_index(key string) int {
 	return if i < 0 { 1 } else { i }
 }
 
+// app_dir - папка программы: рядом с бинарником лежат настройки, модели
+// и ONNX Runtime
+fn app_dir() string {
+	return os.dir(os.executable())
+}
+
 fn settings_path() string {
-	return os.join_path(os.config_dir() or { os.home_dir() }, 'vraw', 'settings.json')
+	return os.join_path(app_dir(), 'settings.json')
 }
 
 // load_settings - настройки из файла; нет файла или он испорчен -
@@ -39,6 +49,7 @@ fn load_settings() Settings {
 		viewer_bg:  bg_keys[bg_index(s.viewer_bg)]
 		strip_open: s.strip_open
 		theme:      theme_keys[theme_index(s.theme)]
+		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 	}
 }
 

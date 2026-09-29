@@ -121,15 +121,19 @@ mut:
 	secondary_labels []&vgui.Label
 	hsl_labels       []&vgui.Label
 	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
-	// AI-шумодав (ai_nr.v): модель (грузится при первом прогоне), результат
-	// модели по raw_linear и номер сырья, из которого он посчитан; raw_gen
+	// AI-шумодав (ai_nr.v): где лежат модели и ORT, кэши моделей по id
+	// (модель грузится при первом прогоне), результат модели по raw_linear,
+	// номер сырья и модель, из которых он посчитан; raw_gen
 	// растёт с каждым новым raw_linear. raw_pending - идёт подготовка с
 	// коррекцией объектива (raw_linear вот-вот сменится). ai_prev / ai_exp -
 	// идущие прогоны превью и экспорта (nil - нет), ai_wanted - нажата
 	// кнопка, ai_restart - прогон превью отменён сменой сырья.
-	ai_cache    &ai.Cache = unsafe { nil }
+	ai_places   ai.Places
+	ai_caches   map[string]&ai.Cache
 	ai_linear   []u16
 	ai_raw_gen  int
+	ai_lin_model string
+	ai_warned   string // «кадр/модель», о чьей недоступности уже сказали
 	raw_gen     int
 	raw_pending bool
 	ai_applied  f32 // сила AI в последней подготовке сырья
@@ -141,6 +145,15 @@ mut:
 	ai_ui       &AiUi = unsafe { nil }
 	ai_done     fn (AiResult) = unsafe { nil }
 	ai_progress fn (&AiCtl, int, int, f64) = unsafe { nil }
+	// Окно настроек (settings_ui.v) и скачивание моделей: идущее (nil -
+	// нет), его потоки и приёмники в главном потоке
+	sui           &SettingsUi = unsafe { nil }
+	open_settings fn ()       = unsafe { nil }
+	dl            &DlCtl      = unsafe { nil }
+	del_armed     string // id модели, чьё «Удалить» ждёт подтверждения
+	dl_threads    []thread
+	dl_progress   fn (&DlCtl, i64) = unsafe { nil }
+	dl_done       fn (DlResult)    = unsafe { nil }
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -809,6 +822,7 @@ fn set_viewer_bg(mut st State, idx int) {
 	st.settings.viewer_bg = bg_keys[idx]
 	sync_view_bg(mut st)
 	save_settings(st.settings)
+	sync_settings_ui(mut st)
 }
 
 // sync_view_bg - фон области снимка: выбранный в меню - когда виден
@@ -955,7 +969,8 @@ fn main() {
 	theme := theme_by_key(settings.theme)
 	mut app := vgui.create_app(theme: theme)!
 	// Тема приложения: окно без своей темы получит её в add_window
-	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1280, height: 946)!
+	// Размер по умолчанию - золотое сечение: 1440 / 890 ~ 1.618
+	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1440, height: 890)!
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
@@ -974,8 +989,9 @@ fn main() {
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = lens.load_db() or { unsafe { nil } }
-	// Модель AI-шумодава: только путь; загрузка (~1.5 с) - при первом прогоне
-	st.ai_cache = ai.new_cache(ai.find_model())
+	// AI-шумодав: модели и ONNX Runtime - в папке программы; загрузка
+	// (~1.5 с) - при первом прогоне
+	st.ai_places = ai.places(app_dir())
 	st.edit = neutral_edit()
 
 	// Холст превью скрыт до открытия файла - на его месте заглушка
@@ -1038,6 +1054,20 @@ fn main() {
 	}
 	st.ai_done = fn [mut st, mut app] (res AiResult) {
 		ai_take(mut st, mut app, res)
+	}
+	// Скачивание моделей (settings_ui.v): прогресс и итог
+	st.dl_progress = fn [mut st] (ctl &DlCtl, done i64) {
+		mut c := unsafe { ctl }
+		c.done = done
+		if st.dl == ctl {
+			sync_settings_ui(mut st)
+		}
+	}
+	st.dl_done = fn [mut st] (res DlResult) {
+		dl_take(mut st, res)
+	}
+	st.open_settings = fn [mut st, mut app, win] () {
+		show_settings(mut st, mut app, win)
 	}
 
 	// ── Ползунки и чекбоксы правки ──
@@ -1711,18 +1741,23 @@ fn main() {
 		}
 		// Снимок всего нужного по значению: воркер не трогает st после спавна
 		mut job := SaveJob{
-			src:       st.dev.path
-			dst:       path
-			db:        st.lens_db
-			edit:      st.edit.clone()
-			quality:   st.quality
-			ai_cache:  st.ai_cache
-			on_ai:     st.ai_progress
+			src:     st.dev.path
+			dst:     path
+			db:      st.lens_db
+			edit:    st.edit.clone()
+			quality: st.quality
+			on_ai:   st.ai_progress
 		}
 		if st.edit.ai > 0 {
+			// Модель кадра (которой считано превью) - без неё не проявить
+			cache := ai_cache_for(mut st, st.edit.ai_model) or {
+				nm.show_error('Экспорт с AI-шумодавом: ${err.msg()}')
+				return
+			}
 			job = SaveJob{
 				...job
-				ai_ctl: &AiCtl{
+				ai_cache: cache
+				ai_ctl:   &AiCtl{
 					export: true
 				}
 			}
@@ -1732,7 +1767,8 @@ fn main() {
 			// Прогресс AI полного кадра - в секции «Шумодав и ореолы»
 			st.ai_exp = job.ai_ctl
 			sync_ai_ui(mut st)
-			nm.show_info('Экспорт с AI-шумодавом (~3 мин, прогресс - в секции «Шумодав и ореолы»)...')
+			nm.show_info('Экспорт с AI-шумодавом (${model_title(st.edit.ai_model)}, ~${fmt_dur(ai_estimate(st,
+				st.edit.ai_model, true))}, прогресс - в секции «Шумодав и ореолы»)...')
 		} else {
 			nm.show_info('Проявляю в полном размере (в фоне)...')
 		}
@@ -1776,7 +1812,13 @@ fn main() {
 	mut m_reset := vgui.menu_action('Сбросить тон')
 	m_reset.shortcut = 'Ctrl+Shift+R'
 	m_reset.on_click = reset_tone
-	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_reset])
+	mut m_settings := vgui.menu_action('Настройки...')
+	m_settings.shortcut = 'Ctrl+P'
+	m_settings.on_click = fn [mut st] () {
+		st.open_settings()
+	}
+	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_reset,
+		vgui.menu_separator(), m_settings])
 
 	mut m_fit := vgui.menu_action('Вписать')
 	m_fit.shortcut = 'Ctrl+0'
@@ -2028,6 +2070,14 @@ fn main() {
 	for t in st.ai_threads {
 		t.wait()
 	}
+	// Скачивание - отменить (недокачанный .part удалится сам)
+	if !isnil(st.dl) {
+		mut c := st.dl
+		c.cancel = true
+	}
+	for t in st.dl_threads {
+		t.wait()
+	}
 	// Не обрывать записывающийся JPEG, если окно закрыли во время сохранения
 	// (экспорт с AI доработает до конца - это минуты, но файл важнее)
 	for t in st.save_threads {
@@ -2046,7 +2096,8 @@ fn main() {
 	if !isnil(st.lens_db) {
 		st.lens_db.free()
 	}
-	if !isnil(st.ai_cache) {
-		st.ai_cache.free()
+	for _, c in st.ai_caches {
+		mut cc := unsafe { c }
+		cc.free()
 	}
 }

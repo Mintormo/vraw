@@ -24,13 +24,11 @@ vraw — одно GUI-приложение на vgui (консольной ве�
 - lensfun 0.3.4 из apt (`liblensfun-dev`), линкуется `#flag -llensfun`;
   свежая база профилей — в `~/.local/share/lensfun/updates/version_1`
   (подробности — в PROJECT.md, раздел про модуль lens/).
-- ONNX Runtime 1.30 — официальная сборка с GitHub в `~/soft/onnxruntime`
-  (симлинк на `onnxruntime-linux-x64-1.30.0`, в apt нет); путь к .so вшит
-  в бинарник rpath. Модель AI-шумодава —
-  `~/.local/share/vraw/models/nafnet_sidd_w32.onnx` (117 МБ, в git не
-  кладём; получить заново — `tools/nafnet_export.py` из официальных весов
-  NAFNet-SIDD-width32). Без модели тесты `ai/` пропускаются, кнопка в окне
-  неактивна.
+- vraw переносим: рядом с бинарником лежат `settings.json`, `models/`
+  (модели AI-шумодава) и `onnxruntime/` (ONNX Runtime 1.30, грузится
+  `dlopen`, не линкуется) — модели и ORT скачивает сама программа
+  («Правка - Настройки»); всё это не в git. Без них тесты `ai/`
+  пропускаются, программа работает без AI.
 - Тяжёлые эксперименты на Python (квантование, калибровка ORT) — ТОЛЬКО
   под `systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=0`:
   калибровка однажды съела 14 ГБ, OOM убил консоль.
@@ -139,9 +137,8 @@ RAW-файл ──LibRaw (раз на файл)──> линейный 16-би
   `shortcut` пункта, обрабатывает сам MenuBar (не дублировать
   `bind_hotkey`); флажок меню сам переключает `checked` перед
   `on_toggle`. Выбор папки — `native_select_folder_dialog`.
-- Настройки vraw между запусками — `~/.config/vraw/settings.json`; в
-  тестах/временных сборках запускать с `XDG_CONFIG_HOME=<черновик>`,
-  чтобы не трогать настоящий конфиг.
+- Временную сборку запускать из черновика: настройки пишутся рядом с
+  бинарником, настоящий `settings.json` она не тронет.
 - Canvas: `stretch = false` (по умолчанию auto_fit) — вписывание с
   сохранением пропорций; `stretch = true` — растяжка на весь виджет.
 - LibRaw: `unpack_thumb_ex` после `dcraw_process` — ошибка -4 (out of

@@ -1,30 +1,36 @@
 // Тонкая прослойка vraw к ONNX Runtime C API. C API ORT - таблица
 // указателей на функции (OrtApi), из V её звать неудобно, поэтому здесь
-// четыре простые функции: открыть модель, прогнать тензор, закрыть, текст
-// последней ошибки. Модель - один вход и один выход float32 NCHW
-// (1 x 3 x h x w), имена берутся из самой модели.
+// простые функции: загрузить библиотеку, открыть модель, прогнать тензор,
+// закрыть. Модель - один вход и один выход float32 NCHW (1 x 3 x h x w),
+// имена берутся из самой модели.
+//
+// Библиотека ORT не линкуется, а грузится dlopen по пути (vr_ort_load):
+// её можно скачать в папку рядом с программой, и без неё vraw работает.
+// Нужен ровно один символ - OrtGetApiBase, остальное - через таблицу.
+// Заголовки - в ai/include (из официальной сборки 1.30, MIT).
 #ifndef VRAW_ORT_SHIM_H
 #define VRAW_ORT_SHIM_H
 
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <onnxruntime_c_api.h>
+#include "onnxruntime_c_api.h"
 
 typedef struct VrModel {
-	OrtEnv *env;
 	OrtSession *sess;
 	OrtMemoryInfo *mem;
 	char *in_name;
 	char *out_name;
 } VrModel;
 
+// Таблица API и общая среда ORT (одна на процесс, на все модели).
+// Пишутся один раз в vr_ort_load - вызывающий (ai.load_runtime) держит мьютекс.
+static const OrtApi *vr_api = NULL;
+static OrtEnv *vr_env = NULL;
+
 static const OrtApi *vr_ort_api(void) {
-	static const OrtApi *api = NULL;
-	if (api == NULL) {
-		api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-	}
-	return api;
+	return vr_api;
 }
 
 // vr_take_error - текст ошибки ORT в buf (status освобождается); 1 - была ошибка
@@ -38,6 +44,45 @@ static int vr_take_error(OrtStatus *st, char *buf, int buf_len) {
 	return 1;
 }
 
+typedef const OrtApiBase *(*VrGetApiBase)(void);
+
+// vr_ort_load - загрузить библиотеку ORT по пути; 0 - успех (или уже
+// загружена), иначе текст ошибки в err
+static int vr_ort_load(const char *path, char *err, int err_len) {
+	if (vr_api != NULL) {
+		return 0;
+	}
+	void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+	if (h == NULL) {
+		snprintf(err, err_len, "%s", dlerror());
+		return 1;
+	}
+	VrGetApiBase get_base = (VrGetApiBase)dlsym(h, "OrtGetApiBase");
+	if (get_base == NULL) {
+		snprintf(err, err_len, "в библиотеке нет OrtGetApiBase");
+		dlclose(h);
+		return 1;
+	}
+	const OrtApi *api = get_base()->GetApi(ORT_API_VERSION);
+	if (api == NULL) {
+		snprintf(err, err_len, "несовместимая версия библиотеки (нужен API %d)", ORT_API_VERSION);
+		dlclose(h);
+		return 1;
+	}
+	OrtEnv *env = NULL;
+	OrtStatus *st = api->CreateEnv(ORT_LOGGING_LEVEL_ERROR, "vraw", &env);
+	if (st != NULL) {
+		snprintf(err, err_len, "%s", api->GetErrorMessage(st));
+		api->ReleaseStatus(st);
+		dlclose(h);
+		return 1;
+	}
+	// Библиотека остаётся загруженной до конца процесса
+	vr_env = env;
+	vr_api = api;
+	return 0;
+}
+
 static void vr_model_close(VrModel *m) {
 	if (m == NULL) {
 		return;
@@ -47,7 +92,6 @@ static void vr_model_close(VrModel *m) {
 	free(m->out_name);
 	if (m->mem) api->ReleaseMemoryInfo(m->mem);
 	if (m->sess) api->ReleaseSession(m->sess);
-	if (m->env) api->ReleaseEnv(m->env);
 	free(m);
 }
 
@@ -55,17 +99,16 @@ static void vr_model_close(VrModel *m) {
 static VrModel *vr_model_open(const char *path, char *err, int err_len) {
 	const OrtApi *api = vr_ort_api();
 	if (api == NULL) {
-		snprintf(err, err_len, "ONNX Runtime: несовместимая версия библиотеки");
+		snprintf(err, err_len, "ONNX Runtime не загружен");
 		return NULL;
 	}
 	VrModel *m = (VrModel *)calloc(1, sizeof(VrModel));
 	OrtSessionOptions *opts = NULL;
 	OrtAllocator *alloc = NULL;
 	char *name = NULL;
-	if (vr_take_error(api->CreateEnv(ORT_LOGGING_LEVEL_ERROR, "vraw", &m->env), err, err_len)) goto fail;
 	if (vr_take_error(api->CreateSessionOptions(&opts), err, err_len)) goto fail;
 	if (vr_take_error(api->SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL), err, err_len)) goto fail;
-	if (vr_take_error(api->CreateSession(m->env, path, opts, &m->sess), err, err_len)) goto fail;
+	if (vr_take_error(api->CreateSession(vr_env, path, opts, &m->sess), err, err_len)) goto fail;
 	api->ReleaseSessionOptions(opts);
 	opts = NULL;
 	if (vr_take_error(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &m->mem), err, err_len)) goto fail;

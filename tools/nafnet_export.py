@@ -2,7 +2,7 @@
 
 Веса: NAFNet-SIDD-width32.pth (официальные, зеркало huggingface.co/mikestealth/nafnet-models).
 Запуск (нужен PyTorch CPU): python nafnet_export.py NAFNet-SIDD-width32.pth 32 nafnet_sidd_w32.onnx
-Результат положить в ~/.local/share/vraw/models/.
+Результат положить в папку models рядом с программой vraw.
 """
 import sys, torch, torch.nn as nn, torch.nn.functional as F
 

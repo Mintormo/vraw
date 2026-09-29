@@ -89,6 +89,13 @@ fn apply_theme(mut st State, mut app vgui.App, idx int) {
 	paint_ui(mut st, th)
 	st.settings.theme = key
 	save_settings(st.settings)
+	// Окно настроек - со своей темой (задана при создании): перекрасить
+	if !isnil(st.sui) {
+		mut d := st.sui.dlg
+		d.set_theme(th)
+		paint_settings(mut st)
+		sync_settings_ui(mut st)
+	}
 }
 
 // paint_ui - свои цвета vraw по текущей палитре (при старте и смене темы)
