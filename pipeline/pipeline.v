@@ -5,10 +5,11 @@ module pipeline
 // Вся арифметика во f32, 16 бит - только формат исходника (сенсор Canon
 // даёт 14 бит, так что запас есть). Порядок операций:
 //
-//   линейный RGB -> экспозиция -> маска по люме (тени + тон-эквалайзер)
+//   линейный RGB -> баланс белого (матрица, wb.v) -> экспозиция
+//     -> маска по люме (тени + тон-эквалайзер)
 //     -> гамма 1/2.2 + камерная кривая + контраст (S-кривая)
 //     -> тональные кривые (общая RGB, затем по каналу) -> насыщенность
-//     -> HSL-эквалайзер -> 8 бит
+//     -> HSL-эквалайзер -> резкость (sharpen.v, apply_image) -> 8 бит
 //
 // Ради живых ползунков всё тяжёлое вынесено в две таблицы, которые
 // перестраиваются за ~130К операций при изменении любого параметра:
@@ -61,6 +62,23 @@ pub mut:
 	// Дизеринг финального квантования в 8 бит (TPDF ±1 LSB) - убирает
 	// полосы (banding) на гладких градиентах (небо). Включён по умолчанию.
 	dither bool = true
+	// Баланс белого (wb.v): матрица 3x3 в линейном sRGB, строки - выход;
+	// накладывается на сырьё первой. Производное поле - считается из
+	// температуры и оттенка кадра (CamColor.wb_matrix); wb_on = false -
+	// «как снято», матрицы нет.
+	wb_on bool
+	wb    [9]f32
+	// Резкость (sharpen.v) - последний шаг, только в apply_image
+	sharp Sharpen
+}
+
+// Sharpen - резкость: unsharp mask по люме в тоновом пространстве
+pub struct Sharpen {
+pub mut:
+	amount  f32        // величина 0..150 (%), 0 - выключена
+	radius  f32 = 1.0 // радиус размытия, px полного кадра (0.5..3)
+	detail  f32        // порог 0..100: слабые перепады (шум) не усиливаются
+	masking f32        // маска по краям 0..100: ровные области не трогаются
 }
 
 const inv_gamma = f32(1.0 / 2.2)
@@ -498,7 +516,21 @@ fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8) (f32, 
 // (альфа 255), 3 - RGB для JPEG. dst должен вмещать npix * dst_stride байт.
 // mask - размытая люма кадра (blur_luma, npix значений) для «Тени/Света»;
 // nil допустим - тогда sh_shadows/sh_highlights игнорируются.
+// Резкость apply не делает (ей нужны размеры кадра) - это apply_image.
 pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int) {
+	render(src, mask, npix, p, mut dst, dst_stride, unsafe { nil })
+}
+
+// Защита светов при ББ: от этого уровня входа до клипа матрица плавно
+// уступает масштабу (иначе клипнутое белое после матрицы ББ окрашивается -
+// розовые или голубые пятна вместо белого)
+const wb_hl_lo = f32(0.9 * 65535.0)
+const wb_hl_k = f32(1.0 / (0.1 * 65535.0))
+
+// render - пайплайн по пикселям. tone == nil - 8-битный результат в dst;
+// иначе тоновые значения (0..255, ×256 в u16, без квантования и дизера)
+// в tone - для резкости, которая досчитает и запишет dst сама.
+fn render(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int, tone &u16) {
 	mlut := build_mlut(&p)
 	flut_r, flut_g, flut_b := channel_luts(&p, build_flut(&p))
 	use_hsl := hsl_active(&p)
@@ -506,9 +538,24 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
 	sat := p.saturation
+	wb_on := p.wb_on
+	m := p.wb
+	// Защита светов: у клипа матрица плавно сменяется на «как снято» ×
+	// наибольшая сумма строки - клипнутое белое уходит в клип всеми
+	// каналами и остаётся белым, а яркий насыщенный цвет без смены ББ
+	// (тождественная матрица) не меняется
+	mut wb_hl_s := f32(1)
+	for r in 0 .. 3 {
+		rs := m[r * 3] + m[r * 3 + 1] + m[r * 3 + 2]
+		if rs > wb_hl_s {
+			wb_hl_s = rs
+		}
+	}
+	to_tone := !isnil(tone)
 	unsafe {
 		mut s := &u16(src)
 		mut d := &u8(dst.data)
+		mut t := &u16(tone)
 		ml := &f32(mlut.data)
 		flr := &f32(flut_r.data)
 		flg := &f32(flut_g.data)
@@ -520,18 +567,50 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 		sl := &f32(slut.data)
 		mk := mask
 		for i in 0 .. npix {
-			r := int(s[0])
-			g := int(s[1])
-			b := int(s[2])
-			// Целочисленная люма BT.709: 54+183+19 = 256
-			y := (54 * r + 183 * g + 19 * b) >> 8
+			mut cr := f32(s[0])
+			mut cg := f32(s[1])
+			mut cb := f32(s[2])
+			mut y := 0
+			if wb_on {
+				// Баланс белого - матрица по линейному сырью
+				ir := cr
+				ig := cg
+				ib := cb
+				cr = m[0] * ir + m[1] * ig + m[2] * ib
+				cg = m[3] * ir + m[4] * ig + m[5] * ib
+				cb = m[6] * ir + m[7] * ig + m[8] * ib
+				if cr < 0 {
+					cr = 0
+				}
+				if cg < 0 {
+					cg = 0
+				}
+				if cb < 0 {
+					cb = 0
+				}
+				mx_in := if ir > ig { if ir > ib { ir } else { ib } } else { if ig > ib { ig } else { ib } }
+				if mx_in > wb_hl_lo {
+					mut w := (mx_in - wb_hl_lo) * wb_hl_k
+					if w > 1 {
+						w = 1
+					}
+					cr += (wb_hl_s * ir - cr) * w
+					cg += (wb_hl_s * ig - cg) * w
+					cb += (wb_hl_s * ib - cb) * w
+				}
+				yf := 0.2126 * cr + 0.7152 * cg + 0.0722 * cb
+				y = if yf >= 65535.0 { 65535 } else { int(yf) }
+			} else {
+				// Целочисленная люма BT.709: 54+183+19 = 256
+				y = (54 * int(s[0]) + 183 * int(s[1]) + 19 * int(s[2])) >> 8
+			}
 			mut k := ml[y]
 			if use_sh {
 				k *= sl[int(mk[i])]
 			}
-			mut fr := f32(r) * k
-			mut fg := f32(g) * k
-			mut fb := f32(b) * k
+			mut fr := cr * k
+			mut fg := cg * k
+			mut fb := cb * k
 			if fr > 65535.0 {
 				fr = 65535.0
 			}
@@ -568,50 +647,69 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 			} else if vb > 255.0 {
 				vb = 255.0
 			}
-			if p.dither {
-				// TPDF ±1 LSB: разность двух независимых LCG-семплов в [0,1)
-				// даёт треугольное распределение шума (-1, 1), детерминировано
-				// по индексу пикселя - воспроизводимость для тестов.
-				mut seed := u32(i) * 2654435761
-				seed = seed * 1664525 + 1013904223
-				r1 := f32(seed >> 8) * (1.0 / 16777216.0)
-				seed = seed * 1664525 + 1013904223
-				r2 := f32(seed >> 8) * (1.0 / 16777216.0)
-				seed = seed * 1664525 + 1013904223
-				g1 := f32(seed >> 8) * (1.0 / 16777216.0)
-				seed = seed * 1664525 + 1013904223
-				g2 := f32(seed >> 8) * (1.0 / 16777216.0)
-				seed = seed * 1664525 + 1013904223
-				b1 := f32(seed >> 8) * (1.0 / 16777216.0)
-				seed = seed * 1664525 + 1013904223
-				b2 := f32(seed >> 8) * (1.0 / 16777216.0)
-				vr += r1 - r2
-				vg += g1 - g2
-				vb += b1 - b2
-				if vr < 0 {
-					vr = 0
-				} else if vr > 255.0 {
-					vr = 255.0
-				}
-				if vg < 0 {
-					vg = 0
-				} else if vg > 255.0 {
-					vg = 255.0
-				}
-				if vb < 0 {
-					vb = 0
-				} else if vb > 255.0 {
-					vb = 255.0
-				}
-			}
-			d[0] = u8(int(vr + 0.5))
-			d[1] = u8(int(vg + 0.5))
-			d[2] = u8(int(vb + 0.5))
-			if dst_stride == 4 {
-				d[3] = 255
+			if to_tone {
+				t[0] = u16(vr * 256.0 + 0.5)
+				t[1] = u16(vg * 256.0 + 0.5)
+				t[2] = u16(vb * 256.0 + 0.5)
+				t += 3
+			} else {
+				put_px(d, i, vr, vg, vb, p.dither, dst_stride)
+				d += dst_stride
 			}
 			s += 3
-			d += dst_stride
+		}
+	}
+}
+
+// put_px - квантование тона 0..255 в 8 бит (с дизером) и запись пикселя;
+// i - индекс пикселя (зерно дизера)
+@[inline]
+fn put_px(d &u8, i int, r f32, g f32, b f32, dither bool, dst_stride int) {
+	mut vr := r
+	mut vg := g
+	mut vb := b
+	unsafe {
+		if dither {
+			// TPDF ±1 LSB: разность двух независимых LCG-семплов в [0,1)
+			// даёт треугольное распределение шума (-1, 1), детерминировано
+			// по индексу пикселя - воспроизводимость для тестов.
+			mut seed := u32(i) * 2654435761
+			seed = seed * 1664525 + 1013904223
+			r1 := f32(seed >> 8) * (1.0 / 16777216.0)
+			seed = seed * 1664525 + 1013904223
+			r2 := f32(seed >> 8) * (1.0 / 16777216.0)
+			seed = seed * 1664525 + 1013904223
+			g1 := f32(seed >> 8) * (1.0 / 16777216.0)
+			seed = seed * 1664525 + 1013904223
+			g2 := f32(seed >> 8) * (1.0 / 16777216.0)
+			seed = seed * 1664525 + 1013904223
+			b1 := f32(seed >> 8) * (1.0 / 16777216.0)
+			seed = seed * 1664525 + 1013904223
+			b2 := f32(seed >> 8) * (1.0 / 16777216.0)
+			vr += r1 - r2
+			vg += g1 - g2
+			vb += b1 - b2
+			if vr < 0 {
+				vr = 0
+			} else if vr > 255.0 {
+				vr = 255.0
+			}
+			if vg < 0 {
+				vg = 0
+			} else if vg > 255.0 {
+				vg = 255.0
+			}
+			if vb < 0 {
+				vb = 0
+			} else if vb > 255.0 {
+				vb = 255.0
+			}
+		}
+		d[0] = u8(int(vr + 0.5))
+		d[1] = u8(int(vg + 0.5))
+		d[2] = u8(int(vb + 0.5))
+		if dst_stride == 4 {
+			d[3] = 255
 		}
 	}
 }

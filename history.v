@@ -27,6 +27,12 @@ mut:
 	nr        [4]f32              // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
 	ai        f32                 // AI-шумодав: сила 1..100, 0 - выключен (ai_nr.v)
 	ai_model  string              // id модели, которой посчитан AI (ai.models), при ai > 0
+	// Баланс белого (wb_ui.v): режим - ключ из wb_modes ('' - «как снято»,
+	// тогда температура и оттенок не используются и равны 0), температура
+	// K и оттенок источника. Матрица в params.wb - производная (with_derived).
+	wb_mode string
+	wb_temp f32
+	wb_tint f32
 }
 
 // neutral_edit - настройки только что открытого файла (запись «Открыт файл»)
@@ -191,7 +197,7 @@ fn set_edit(mut st State, e EditState) {
 		sl.set_value(b.get(&e))
 	}
 	st.suppress = false
-	st.edit = with_derived(e, st.curve)
+	st.edit = with_derived(e, st.curve, st.cam)
 	if !isnil(st.lens_cb) {
 		mut cb := st.lens_cb
 		cb.set_checked(e.lens_corr)
@@ -201,6 +207,7 @@ fn set_edit(mut st State, e EditState) {
 		cb.set_checked(e.use_curve)
 	}
 	sync_curve_editor(mut st)
+	sync_wb_mode(mut st)
 }
 
 // restore_edit - откат/возврат к снимку: виджеты (set_edit) и ровно нужные

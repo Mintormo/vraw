@@ -4,6 +4,7 @@ import os
 import vgui
 import imgio
 import json2
+import pipeline
 
 fn test_tone_lut() {
 	assert tone_lut(identity_curve()).len == 0 // диагональ - кривой нет
@@ -108,10 +109,10 @@ fn test_develop_full() {
 	}
 	mut e0 := neutral_edit()
 	e0.lens_corr = false
-	n := develop_full(path, with_derived(e0, []f32{}), unsafe { nil })!
+	n := develop_full(path, with_derived(e0, []f32{}, pipeline.CamColor{}), unsafe { nil })!
 	mut e1 := e0.clone()
 	e1.params.exposure = 1
-	b := develop_full(path, with_derived(e1, []f32{}), unsafe { nil })!
+	b := develop_full(path, with_derived(e1, []f32{}, pipeline.CamColor{}), unsafe { nil })!
 	assert n.width == b.width && n.rgb.len == n.width * n.height * 3
 	assert n.width > 5000 // полный размер
 	mut sn := u64(0)

@@ -214,7 +214,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	}
 	mask := pipeline.blur_luma(buf, w, h)
 	mut rgb := []u8{len: w * h * 3}
-	pipeline.apply(buf, unsafe { &u16(mask.data) }, w * h, e.params, mut rgb, 3)
+	pipeline.apply_image(buf, unsafe { &u16(mask.data) }, w, h, e.params, 1.0, mut rgb, 3)
 	return Image{
 		width:  w
 		height: h

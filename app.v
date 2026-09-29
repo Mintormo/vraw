@@ -157,6 +157,32 @@ mut:
 	exp          &ExportCtl = unsafe { nil }
 	eui          &ExportUi  = unsafe { nil }
 	exp_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
+	// Баланс белого (wb_ui.v): цвет камеры кадра и его ББ «как снято»,
+	// виджеты секции, режим пипетки; холст и тональный пересчёт - для
+	// обработчиков секции
+	cam         pipeline.CamColor
+	shot_temp   f32
+	shot_tint   f32
+	wb_cb       &vgui.ComboBox = unsafe { nil }
+	wb_pick_btn &vgui.Button   = unsafe { nil }
+	wb_temp_sl  &vgui.Slider   = unsafe { nil }
+	wb_tint_sl  &vgui.Slider   = unsafe { nil }
+	wb_pick     bool
+	cv          &vgui.Canvas = unsafe { nil }
+	tone_fx     fn () = unsafe { nil }
+}
+
+// Превью - половинного размера (LibRaw half-size): радиус резкости задан
+// в пикселях полного кадра
+const preview_scale = f32(0.5)
+
+// cam_color - цвет камеры кадра для баланса белого
+fn cam_color(c raw.ColorData) pipeline.CamColor {
+	return pipeline.CamColor{
+		shot:    c.cam_mul
+		rgb_cam: c.rgb_cam
+		cam_xyz: c.cam_xyz
+	}
 }
 
 // highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
@@ -177,8 +203,8 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if st.suppress || st.linear.len == 0 {
 		return
 	}
-	npix := st.pw * st.ph
-	pipeline.apply(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, npix, st.edit.params, mut cv.pixels, 4)
+	pipeline.apply_image(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, st.pw,
+		st.ph, st.edit.params, preview_scale, mut cv.pixels, 4)
 	cv.mark_dirty()
 	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
 	update_curve_histogram(mut st)
@@ -985,9 +1011,10 @@ fn main() {
 	// расширит колонку - наездов на ползунок не будет.
 	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
 		'Контраст', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
-		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила'], 8)
+		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
+		'Режим', 'Температура', 'Оттенок', 'Величина', 'Радиус', 'Порог', 'Маска краёв'], 8)
 	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
-		'-4.00', '100'], 8)
+		'-4.00', '100', '12000 K', '-150', '3.00 px'], 8)
 
 	mut st := &State{}
 	st.settings = settings
@@ -1082,6 +1109,15 @@ fn main() {
 	// пересветы - перепроявка превью.
 	tone_fx := fn [mut st, mut cv, mut hist] () {
 		apply_pipeline(mut st, mut cv, mut hist)
+	}
+	st.tone_fx = tone_fx
+	st.cv = cv
+	// Пипетка баланса белого (wb_ui.v): щелчок левой кнопкой по снимку.
+	// Панорама - средней и правой кнопками, левая холсту не нужна.
+	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
+		if st.wb_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
+			wb_pick_at(mut st, ev.x, ev.y)
+		}
 	}
 	// Шумодав и ореолы - подготовка сырья (~1 с на превью, в фоне): LibRaw
 	// и коррекция объектива не перезапускаются - сырьё в raw_linear.
@@ -1406,6 +1442,75 @@ fn main() {
 		hsl_tabs.add_tab(hsl_modes[m], section(rows))
 	}
 
+	// ── Резкость: unsharp mask по люме (pipeline/sharpen.v) - последний
+	// шаг пайплайна, тональный пересчёт по отпусканию. Радиус - в
+	// пикселях полного кадра (на превью половинного размера - вдвое меньше)
+	mut sh_amount := edit_slider(mut st, SliderCfg{
+		label:  'Величина'
+		hname:  'Резкость: величина'
+		max:    150
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.amount
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.amount = v
+		}
+		fx:     tone_fx
+	})
+	mut sh_radius := edit_slider(mut st, SliderCfg{
+		label:  'Радиус'
+		hname:  'Резкость: радиус'
+		min:    0.5
+		max:    3
+		def:    1
+		signed: false
+		show:   fn (v f32) string {
+			return '${v:.2f} px'
+		}
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.radius
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.radius = v
+		}
+		fx:     tone_fx
+	})
+	mut sh_detail := edit_slider(mut st, SliderCfg{
+		label:  'Порог'
+		hname:  'Резкость: порог'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.detail
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.detail = v
+		}
+		fx:     tone_fx
+	})
+	mut sh_mask := edit_slider(mut st, SliderCfg{
+		label:  'Маска краёв'
+		hname:  'Резкость: маска краёв'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.masking
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.masking = v
+		}
+		fx:     tone_fx
+	})
+	mut sharp_hint := vgui.label('Оценивать в масштабе 100% (1:1)')
+	st.hint_labels << sharp_hint
+	sharp_hint.font_size = 12
+	// Баланс белого: режим, пипетка, температура, оттенок (wb_ui.v)
+	wb_rows := build_wb_section(mut st, lbl_w, val_w)
+
 	// ── История правок: список, текущая запись выделена ──
 	// Щелчок (или стрелки в списке) - откат к записи, более поздняя -
 	// возврат вперёд; новая правка после отката отрезает «будущее».
@@ -1471,6 +1576,9 @@ fn main() {
 		st.lens_dirty = false
 		lens_lb.text = 'поиск профиля объектива...'
 		lens_cb.enabled = false
+		// Цвет камеры - сразу (есть после open): ББ снимков и ползунков
+		set_cam_color(mut st, cam_color(nd.color()))
+		set_wb_pick(mut st, false)
 		// Правки и история из сайдкара (производные поля снимков - по
 		// камерной кривой - заполнит on_load_done)
 		st.side_path = sidecar_path(path)
@@ -1559,11 +1667,11 @@ fn main() {
 		st.curve = res.curve
 		crv_cb.enabled = st.curve.len > 0
 		// Производные поля снимков - по камерной кривой этого кадра
-		st.edit = with_derived(st.edit, st.curve)
+		st.edit = with_derived(st.edit, st.curve, st.cam)
 		st.history = st.history.map(HistEntry{
 			name:  it.name
 			key:   it.key
-			state: with_derived(it.state, st.curve)
+			state: with_derived(it.state, st.curve, st.cam)
 		})
 		show_viewer(mut cv, mut placeholder)
 		sync_view_bg(mut st)
@@ -1669,6 +1777,8 @@ fn main() {
 		st.mask = []u16{}
 		st.curve = []f32{}
 		st.side_path = ''
+		set_cam_color(mut st, pipeline.CamColor{})
+		set_wb_pick(mut st, false)
 		set_edit(mut st, neutral_edit())
 		st.history = []HistEntry{}
 		st.hist_pos = 0
@@ -1830,7 +1940,11 @@ fn main() {
 	// отменяется Ctrl+Z. Пункт меню «Правка - Сбросить тон».
 	reset_tone := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
 		mut e := st.edit.clone()
-		e.params = pipeline.Params{}
+		// Баланс белого (в EditState, не в params) и резкость - не тон,
+		// «Сброс» их не трогает, как шумодав
+		e.params = pipeline.Params{
+			sharp: st.edit.params.sharp
+		}
 		e.curve_pts = neutral_edit().curve_pts
 		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
 		record(mut st, 'reset', 'Сброс', false)
@@ -1940,6 +2054,10 @@ fn main() {
 	mut nrl_row := edit_row(mut st, mut nrl, lbl_w, val_w)
 	mut nrc_row := edit_row(mut st, mut nrc, lbl_w, val_w)
 	mut df_row := edit_row(mut st, mut df, lbl_w, val_w)
+	mut sha_row := edit_row(mut st, mut sh_amount, lbl_w, val_w)
+	mut shr_row := edit_row(mut st, mut sh_radius, lbl_w, val_w)
+	mut shd_row := edit_row(mut st, mut sh_detail, lbl_w, val_w)
+	mut shm_row := edit_row(mut st, mut sh_mask, lbl_w, val_w)
 	// AI-шумодав - блок над классическими ползунками (ai_nr.v). Сила -
 	// обычная настройка кадра (история, сайдкар): смешение с результатом
 	// модели в подготовке сырья, мгновенно - модель не пересчитывается.
@@ -1981,6 +2099,7 @@ fn main() {
 		SectionRow{crv_cb, 26},
 		SectionRow{hl_row, 26},
 	]))
+	acc.add_section_expanded('Баланс белого', section(wb_rows))
 	acc.add_section_expanded('Экспозиция и тон', section([
 		SectionRow{exp_row, 26},
 		SectionRow{sh_row, 26},
@@ -2014,6 +2133,13 @@ fn main() {
 		SectionRow{nrl_row, 26},
 		SectionRow{nrc_row, 26},
 		SectionRow{df_row, 26},
+	]))
+	acc.add_section('Резкость', section([
+		SectionRow{sha_row, 26},
+		SectionRow{shr_row, 26},
+		SectionRow{shd_row, 26},
+		SectionRow{shm_row, 26},
+		SectionRow{sharp_hint, 16},
 	]))
 	// История - последней секцией, открыта: 8 строк списка и подсказка
 	acc.add_section_expanded('История', section([

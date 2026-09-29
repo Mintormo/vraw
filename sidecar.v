@@ -44,6 +44,15 @@ struct SideState {
 	nr            []f32 // импульсный, яркостный, цветовой, ореолы
 	ai            f32   // AI-шумодав 0..100 (в старых файлах нет - 0)
 	ai_model      string // модель AI (id из ai.models)
+	// Баланс белого и резкость (в старых файлах нет: '' - «как снято»,
+	// нули - резкость выключена, радиус 0 читается как 1)
+	wb_mode       string
+	wb_temp       f32
+	wb_tint       f32
+	sharp_amount  f32
+	sharp_radius  f32
+	sharp_detail  f32
+	sharp_masking f32
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -100,11 +109,18 @@ fn side_state(e EditState) SideState {
 		nr:            e.nr[..].clone()
 		ai:            e.ai
 		ai_model:      e.ai_model
+		wb_mode:       e.wb_mode
+		wb_temp:       e.wb_temp
+		wb_tint:       e.wb_tint
+		sharp_amount:  p.sharp.amount
+		sharp_radius:  p.sharp.radius
+		sharp_detail:  p.sharp.detail
+		sharp_masking: p.sharp.masking
 	}
 }
 
 // edit_state - обратно в EditState с проверкой размеров массивов.
-// Производные поля (params.curve, tc_*) заполняет with_derived.
+// Производные поля (params.curve, tc_*, wb) заполняет with_derived.
 fn edit_state(s SideState) !EditState {
 	s.validate()!
 	mut e := EditState{
@@ -115,12 +131,21 @@ fn edit_state(s SideState) !EditState {
 			saturation:    s.saturation
 			sh_shadows:    s.sh_shadows
 			sh_highlights: s.sh_highlights
+			sharp:         pipeline.Sharpen{
+				amount:  s.sharp_amount
+				radius:  if s.sharp_radius > 0 { s.sharp_radius } else { f32(1.0) }
+				detail:  s.sharp_detail
+				masking: s.sharp_masking
+			}
 		}
 		highlight: s.highlight
 		lens_corr: s.lens_corr
 		use_curve: s.use_curve
 		ai:        s.ai
 		ai_model:  s.ai_model
+		wb_mode:   s.wb_mode
+		wb_temp:   s.wb_temp
+		wb_tint:   s.wb_tint
 	}
 	for i in 0 .. 5 {
 		e.params.eq[i] = s.eq[i]
@@ -236,15 +261,16 @@ fn sidecar_error(mut st State, err IError) {
 }
 
 // with_derived заполняет производные поля снимка: камерную кривую
-// кадра (при use_curve) и таблицы кривых из точек. Нужна снимкам из
-// файла - иначе сравнение с живым st.edit (record) всегда давало бы
-// «изменилось».
-fn with_derived(e EditState, cam_curve []f32) EditState {
+// кадра (при use_curve), таблицы кривых из точек и матрицу баланса
+// белого по цвету камеры кадра. Нужна снимкам из файла - иначе
+// сравнение с живым st.edit (record) всегда давало бы «изменилось».
+fn with_derived(e EditState, cam_curve []f32, cam pipeline.CamColor) EditState {
 	mut d := e.clone()
 	d.params.curve = if e.use_curve { cam_curve.clone() } else { []f32{} }
 	d.params.tc_rgb = tone_lut(e.curve_pts[0])
 	d.params.tc_r = tone_lut(e.curve_pts[1])
 	d.params.tc_g = tone_lut(e.curve_pts[2])
 	d.params.tc_b = tone_lut(e.curve_pts[3])
+	wb_derive(mut d, cam)
 	return d
 }

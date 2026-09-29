@@ -42,12 +42,21 @@ pub struct C.libraw_thumbnail_list_t {
 	thumblist  [8]C.libraw_thumbnail_item_t
 }
 
+// Цветовые данные камеры (заполняются уже в open - при разборе файла)
+@[typedef]
+pub struct C.libraw_colordata_t {
+	cam_mul [4]f32    // множители ББ «как снято» (R, G, B, G2)
+	rgb_cam [3][4]f32 // камера (после ББ) -> линейный sRGB
+	cam_xyz [4][3]f32 // XYZ -> камера (Adobe ColorMatrix); нули - камера неизвестна
+}
+
 @[typedef]
 pub struct C.libraw_data_t {
 mut:
 	params      C.libraw_output_params_t
 	sizes       C.libraw_image_sizes_t
 	thumbs_list C.libraw_thumbnail_list_t
+	color       C.libraw_colordata_t
 }
 
 @[typedef]
@@ -259,6 +268,38 @@ pub fn (d &Developer) meta() Meta {
 		lens:      unsafe { cstring_to_vstring(&char(&li.Lens[0])) }
 		focal:     ot.focal_len
 		aperture:  ot.aperture
+	}
+}
+
+// ColorData - цвет камеры для баланса белого: множители «как снято» и
+// матрицы LibRaw (строки - выход, по три значения подряд)
+pub struct ColorData {
+pub:
+	cam_mul [3]f32 // R, G, B
+	rgb_cam [9]f32 // камера -> линейный sRGB
+	cam_xyz [9]f32 // XYZ -> камера
+}
+
+// color - цветовые данные кадра; доступны сразу после open()
+pub fn (d &Developer) color() ColorData {
+	if isnil(d.lr) {
+		return ColorData{}
+	}
+	c := d.lr.color
+	mut mul := [3]f32{}
+	mut rc := [9]f32{}
+	mut cx := [9]f32{}
+	for i in 0 .. 3 {
+		mul[i] = c.cam_mul[i]
+		for j in 0 .. 3 {
+			rc[i * 3 + j] = c.rgb_cam[i][j]
+			cx[i * 3 + j] = c.cam_xyz[i][j]
+		}
+	}
+	return ColorData{
+		cam_mul: mul
+		rgb_cam: rc
+		cam_xyz: cx
 	}
 }
 

@@ -5,6 +5,8 @@ module main
 // пустом State сразу выходят - проверяются только снимки и записи.
 import os
 import vgui
+import math
+import pipeline
 
 // new_state - State с двумя ползунками (экспозиция, яркостный шумодав)
 // и списком истории, как в main; открыт «файл» (запись «Открыт файл»).
@@ -235,7 +237,7 @@ fn test_roundtrip() {
 		'Шумодав: яркостный 35', 'Разное']
 	// Снимки совпадают с исходными (с производными полями - как в живом State)
 	for i, h in loaded.history {
-		assert with_derived(h.state, st.curve) == st.history[i].state
+		assert with_derived(h.state, st.curve, st.cam) == st.history[i].state
 	}
 	last := loaded.history[3].state
 	assert last.curve_pts[2].len == 3
@@ -258,7 +260,7 @@ fn test_loaded_history_no_spurious_record() {
 	st2.history = loaded.history.map(HistEntry{
 		name:  it.name
 		key:   it.key
-		state: with_derived(it.state, st2.curve)
+		state: with_derived(it.state, st2.curve, st2.cam)
 	})
 	st2.hist_pos = loaded.current
 	jump(mut st2, 0)
@@ -414,4 +416,63 @@ fn test_sidecar_ai_field() {
 	assert loaded.history[1].state.ai == 70
 	assert loaded.history[1].state.ai_model == 'scunet_real_gan'
 	assert loaded.history[1].state.params.exposure == f32(0.3)
+}
+
+// Баланс белого и резкость в сайдкаре: пишутся и читаются; старый файл
+// без этих полей - «как снято», резкость выключена, радиус 1
+fn test_sidecar_wb_sharp_fields() {
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('wb')
+	st.edit.wb_mode = 'cloudy'
+	st.edit.wb_temp = 6500
+	st.edit.wb_tint = 10
+	st.edit.params.sharp = pipeline.Sharpen{
+		amount:  60
+		radius:  1.5
+		detail:  20
+		masking: 30
+	}
+	drag(mut exp, 0.3)
+	text := os.read_file(st.side_path)!
+	loaded := decode_sidecar(text)!
+	e := loaded.history[1].state
+	assert e.wb_mode == 'cloudy' && e.wb_temp == 6500 && e.wb_tint == 10
+	assert e.params.sharp.amount == 60 && e.params.sharp.radius == f32(1.5)
+	assert e.params.sharp.detail == 20 && e.params.sharp.masking == 30
+	// Старый файл: полей нет (чужие ключи json2 пропускает)
+	mut old := text
+	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
+		'sharp_masking'] {
+		old = old.replace('"${key}"', '"old_${key}"')
+	}
+	assert !old.contains('"wb_mode"')
+	legacy := decode_sidecar(old)!
+	o := legacy.history[1].state
+	assert o.wb_mode == '' && o.params.sharp.amount == 0 && o.params.sharp.radius == 1
+	assert o.params.sharp == neutral_edit().params.sharp
+}
+
+// Режим «как снято» - без матрицы; другой режим - матрица по цвету камеры
+fn test_wb_derive() {
+	cam := pipeline.CamColor{
+		shot:    [f32(2068), 1024, 1436]!
+		rgb_cam: [f32(1.705885), -0.775013, 0.069128, -0.159320, 1.633560, -0.474240, 0.000133,
+			-0.614919, 1.614786]!
+		cam_xyz: [f32(0.8293), -0.1789, -0.1094, -0.5025, 1.2925, 0.2327, -0.1199, 0.2769, 0.6108]!
+	}
+	mut e := neutral_edit()
+	d0 := with_derived(e, []f32{}, cam)
+	assert !d0.params.wb_on
+	e.wb_mode = 'tungsten'
+	e.wb_temp = 2850
+	d1 := with_derived(e, []f32{}, cam)
+	assert d1.params.wb_on
+	// Лампа накаливания: серое становится синее (B-строка больше R-строки)
+	m := d1.params.wb
+	assert m[6] + m[7] + m[8] > m[0] + m[1] + m[2]
+	// Ползунок температуры: положение <-> K
+	for t in [f32(2000), 3200, 5000, 6500, 12000] {
+		assert math.abs(pos_to_temp(temp_to_pos(t)) - t) < 0.5
+	}
+	assert temp_text(5230) == '5250 K'
 }
