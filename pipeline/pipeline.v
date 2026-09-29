@@ -68,6 +68,11 @@ pub mut:
 	// «как снято», матрицы нет.
 	wb_on bool
 	wb    [9]f32
+	// Удаление дымки (dehaze.v, только в apply_image - нужна карта кадра):
+	// сила -100..100 (минус - добавить дымку), глубина 0..100 - насколько
+	// близко к камере действует (25 - как у тёмного канала без поправки)
+	haze       f32
+	haze_depth f32 = 25
 	// Резкость (sharpen.v) - последний шаг, только в apply_image
 	sharp Sharpen
 }
@@ -518,7 +523,7 @@ fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8) (f32, 
 // nil допустим - тогда sh_shadows/sh_highlights игнорируются.
 // Резкость apply не делает (ей нужны размеры кадра) - это apply_image.
 pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int) {
-	render(src, mask, npix, p, mut dst, dst_stride, unsafe { nil })
+	render(src, mask, unsafe { nil }, npix, p, mut dst, dst_stride, unsafe { nil })
 }
 
 // Защита светов при ББ: от этого уровня входа до клипа матрица плавно
@@ -530,8 +535,16 @@ const wb_hl_k = f32(1.0 / (0.1 * 65535.0))
 // render - пайплайн по пикселям. tone == nil - 8-битный результат в dst;
 // иначе тоновые значения (0..255, ×256 в u16, без квантования и дизера)
 // в tone - для резкости, которая досчитает и запишет dst сама.
-fn render(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int, tone &u16) {
+fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16) {
 	mlut := build_mlut(&p)
+	haze_on := p.haze != 0 && !isnil(haze) && haze.d.len == npix
+	hlut := if haze_on { build_hlut(&p) } else { []f32{} }
+	ha := if haze_on { haze.a } else { [f32(0), 0, 0]! }
+	ha0 := ha[0] * 65535.0
+	ha1 := ha[1] * 65535.0
+	ha2 := ha[2] * 65535.0
+	hd := if haze_on { unsafe { &u16(haze.d.data) } } else { unsafe { &u16(nil) } }
+	hl := unsafe { &f32(hlut.data) }
 	flut_r, flut_g, flut_b := channel_luts(&p, build_flut(&p))
 	use_hsl := hsl_active(&p)
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
@@ -571,6 +584,23 @@ fn render(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int,
 			mut cg := f32(s[1])
 			mut cb := f32(s[2])
 			mut y := 0
+			if haze_on {
+				// Дымка: I = J·t + A·(1 - t); таблица - множитель к (I - A):
+				// 1/t при удалении, t при добавлении
+				k := hl[hd[i]]
+				cr = (cr - ha0) * k + ha0
+				cg = (cg - ha1) * k + ha1
+				cb = (cb - ha2) * k + ha2
+				if cr < 0 {
+					cr = 0
+				}
+				if cg < 0 {
+					cg = 0
+				}
+				if cb < 0 {
+					cb = 0
+				}
+			}
 			if wb_on {
 				// Баланс белого - матрица по линейному сырью
 				ir := cr
@@ -598,6 +628,8 @@ fn render(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int,
 					cg += (wb_hl_s * ig - cg) * w
 					cb += (wb_hl_s * ib - cb) * w
 				}
+			}
+			if wb_on || haze_on {
 				yf := 0.2126 * cr + 0.7152 * cg + 0.0722 * cb
 				y = if yf >= 65535.0 { 65535 } else { int(yf) }
 			} else {

@@ -29,7 +29,7 @@ fn render_sharp(src []u16, w int, h int, s Sharpen) []u8 {
 		sharp:  s
 	}
 	mut out := []u8{len: w * h * 3}
-	apply_image(unsafe { &u16(src.data) }, unsafe { nil }, w, h, p, 1.0, mut out, 3)
+	apply_image(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w, h, p, 1.0, mut out, 3)
 	return out
 }
 

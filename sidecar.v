@@ -53,6 +53,10 @@ struct SideState {
 	sharp_radius  f32
 	sharp_detail  f32
 	sharp_masking f32
+	// Удаление дымки (в старых файлах нет: сила 0 - выключено, глубина
+	// при нулевой силе 0 читается как 25 - по умолчанию)
+	haze       f32
+	haze_depth f32
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -116,6 +120,8 @@ fn side_state(e EditState) SideState {
 		sharp_radius:  p.sharp.radius
 		sharp_detail:  p.sharp.detail
 		sharp_masking: p.sharp.masking
+		haze:          p.haze
+		haze_depth:    p.haze_depth
 	}
 }
 
@@ -131,6 +137,8 @@ fn edit_state(s SideState) !EditState {
 			saturation:    s.saturation
 			sh_shadows:    s.sh_shadows
 			sh_highlights: s.sh_highlights
+			haze:          s.haze
+			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			sharp:         pipeline.Sharpen{
 				amount:  s.sharp_amount
 				radius:  if s.sharp_radius > 0 { s.sharp_radius } else { f32(1.0) }

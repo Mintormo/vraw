@@ -170,6 +170,11 @@ mut:
 	wb_pick     bool
 	cv          &vgui.Canvas = unsafe { nil }
 	tone_fx     fn () = unsafe { nil }
+	// Удаление дымки: карта кадра по st.linear (считается при первой
+	// надобности, сбрасывается с каждым новым linear), показ карты вместо
+	// снимка (флажок, вид - не правка)
+	haze      pipeline.HazeMap
+	haze_show bool
 }
 
 // Превью - половинного размера (LibRaw half-size): радиус резкости задан
@@ -203,8 +208,16 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if st.suppress || st.linear.len == 0 {
 		return
 	}
-	pipeline.apply_image(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) }, st.pw,
-		st.ph, st.edit.params, preview_scale, mut cv.pixels, 4)
+	npix := st.pw * st.ph
+	if (st.edit.params.haze != 0 || st.haze_show) && st.haze.d.len != npix {
+		st.haze = pipeline.haze_map(unsafe { &u16(st.linear.data) }, st.pw, st.ph)
+	}
+	if st.haze_show {
+		pipeline.haze_view(&st.haze, st.edit.params.haze_depth, mut cv.pixels, 4)
+	} else {
+		pipeline.apply_image(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) },
+			&st.haze, st.pw, st.ph, st.edit.params, preview_scale, mut cv.pixels, 4)
+	}
 	cv.mark_dirty()
 	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
 	update_curve_histogram(mut st)
@@ -355,6 +368,7 @@ fn take_prep(mut st State, res PrepResult) {
 	}
 	st.linear = res.linear
 	st.mask = res.mask
+	st.haze = pipeline.HazeMap{}
 	st.nr_applied = res.nr
 	st.ai_applied = res.ai_s
 }
@@ -1012,7 +1026,7 @@ fn main() {
 	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
 		'Контраст', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
 		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
-		'Режим', 'Температура', 'Оттенок', 'Величина', 'Радиус', 'Порог', 'Маска краёв'], 8)
+		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв'], 8)
 	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
 		'-4.00', '100', '12000 K', '-150', '3.00 px'], 8)
 
@@ -1508,6 +1522,47 @@ fn main() {
 	mut sharp_hint := vgui.label('Оценивать в масштабе 100% (1:1)')
 	st.hint_labels << sharp_hint
 	sharp_hint.font_size = 12
+	// ── Удаление дымки (как в RawTherapee): тёмный канал, pipeline/dehaze.v.
+	// Карта дымки - по сырью кадра, сила и глубина - живые (apply)
+	mut hz_str := edit_slider(mut st, SliderCfg{
+		label:  'Сила'
+		hname:  'Дымка: сила'
+		min:    -100
+		max:    100
+		digits: 0
+		get:    fn (e &EditState) f32 {
+			return e.params.haze
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.haze = v
+		}
+		fx:     tone_fx
+	})
+	mut hz_depth := edit_slider(mut st, SliderCfg{
+		label:  'Глубина'
+		hname:  'Дымка: глубина'
+		max:    100
+		def:    25
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.haze_depth
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.haze_depth = v
+		}
+		fx:     tone_fx
+	})
+	// Карта глубины вместо снимка - вид, не правка (в историю не пишется)
+	mut hz_map_cb := vgui.checkbox('Показать карту глубины')
+	hz_map_cb.on_change = fn [mut st, tone_fx] (v bool) {
+		st.haze_show = v
+		tone_fx()
+	}
+	mut hz_hint := vgui.label('Минус - добавить дымку; глубина - насколько близко к камере')
+	st.hint_labels << hz_hint
+	hz_hint.font_size = 12
+
 	// Баланс белого: режим, пипетка, температура, оттенок (wb_ui.v)
 	wb_rows := build_wb_section(mut st, lbl_w, val_w)
 
@@ -1572,6 +1627,7 @@ fn main() {
 		st.raw_linear = []u16{}
 		st.linear = []u16{}
 		st.mask = []u16{}
+		st.haze = pipeline.HazeMap{}
 		st.curve = []f32{}
 		st.lens_dirty = false
 		lens_lb.text = 'поиск профиля объектива...'
@@ -1660,6 +1716,7 @@ fn main() {
 		st.raw_linear = res.raw_linear
 		st.linear = res.linear
 		st.mask = res.mask
+		st.haze = pipeline.HazeMap{}
 		st.nr_applied = [f32(0), 0, 0, 0]!
 		st.ai_applied = 0
 		st.lens_dirty = false
@@ -1775,6 +1832,7 @@ fn main() {
 		st.raw_linear = []u16{}
 		st.linear = []u16{}
 		st.mask = []u16{}
+		st.haze = pipeline.HazeMap{}
 		st.curve = []f32{}
 		st.side_path = ''
 		set_cam_color(mut st, pipeline.CamColor{})
@@ -2058,6 +2116,8 @@ fn main() {
 	mut shr_row := edit_row(mut st, mut sh_radius, lbl_w, val_w)
 	mut shd_row := edit_row(mut st, mut sh_detail, lbl_w, val_w)
 	mut shm_row := edit_row(mut st, mut sh_mask, lbl_w, val_w)
+	mut hzs_row := edit_row(mut st, mut hz_str, lbl_w, val_w)
+	mut hzd_row := edit_row(mut st, mut hz_depth, lbl_w, val_w)
 	// AI-шумодав - блок над классическими ползунками (ai_nr.v). Сила -
 	// обычная настройка кадра (история, сайдкар): смешение с результатом
 	// модели в подготовке сырья, мгновенно - модель не пересчитывается.
@@ -2105,6 +2165,12 @@ fn main() {
 		SectionRow{sh_row, 26},
 		SectionRow{con_row, 26},
 		SectionRow{sat_row, 26},
+	]))
+	acc.add_section('Удаление дымки', section([
+		SectionRow{hzs_row, 26},
+		SectionRow{hzd_row, 26},
+		SectionRow{hz_map_cb, 26},
+		SectionRow{hz_hint, 16},
 	]))
 	acc.add_section('Тени/Света', section([
 		SectionRow{hlt_row, 26},

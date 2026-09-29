@@ -15,17 +15,18 @@ module pipeline
 // ореол у светлого и тёмного края. Половинное превью - радиус × scale.
 import math
 
-// apply_image - пайплайн кадра w x h с резкостью. scale - масштаб кадра
+// apply_image - пайплайн кадра w x h с дымкой и резкостью. haze - карта
+// дымки кадра (haze_map; nil - без удаления дымки). scale - масштаб кадра
 // относительно полного (превью half-size - 0.5): радиус резкости задан в
 // пикселях полного кадра. Без резкости - то же, что apply.
-pub fn apply_image(src &u16, mask &u16, w int, h int, p Params, scale f32, mut dst []u8, dst_stride int) {
+pub fn apply_image(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, scale f32, mut dst []u8, dst_stride int) {
 	npix := w * h
 	if p.sharp.amount <= 0 || w < 3 || h < 3 {
-		render(src, mask, npix, p, mut dst, dst_stride, unsafe { nil })
+		render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil })
 		return
 	}
 	mut tone := []u16{len: npix * 3}
-	render(src, mask, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) })
+	render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) })
 	sharpen_tone(tone, w, h, p.sharp, scale, p.dither, mut dst, dst_stride)
 }
 
