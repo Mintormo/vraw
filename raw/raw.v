@@ -380,6 +380,11 @@ pub fn (mut d Developer) thumb_min(min_side int) ![]u8 {
 	return d.thumb_jpeg()
 }
 
+// full_size - полный размер кадра в ориентации вывода (снят в open)
+pub fn (d &Developer) full_size() (int, int) {
+	return d.full_w, d.full_h
+}
+
 // flip - ориентация кадра (EXIF через LibRaw): 0 - как есть, 3 - 180°,
 // 5 - 90° против часовой, 6 - 90° по часовой. Встроенные превью лежат
 // в ориентации сенсора - поворачивать их по flip.

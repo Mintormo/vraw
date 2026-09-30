@@ -7,7 +7,7 @@ module main
 // Порядок - как в превью: LibRaw (демозаика, камерный ББ, режим
 // пересветов) -> коррекция объектива (виньетирование, затем дисторсия +
 // TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> Capture-резкость
-// -> маска
+// -> маска -> кадрирование и поворот (сырьё и маска) -> pipeline -> размер
 // «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит.
 import raw
 import lens
@@ -228,17 +228,37 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	if !progress(.tone, 0, 0) {
 		return ExportCancelled{}
 	}
-	mask := pipeline.blur_luma(buf, w, h)
-	src := if dc.len > 0 { unsafe { &u16(dc.data) } } else { buf }
-	// Карта дымки - по полному кадру (рабочая копия та же ~1024 px, что у
-	// превью, - карты совпадают)
-	haze := if e.params.haze != 0 { pipeline.haze_map(src, w, h) } else { pipeline.HazeMap{} }
-	mut rgb := []u8{len: w * h * 3}
-	pipeline.apply_image(src, unsafe { &u16(mask.data) }, &haze, w, h, e.params, 1.0, mut rgb,
-		3)
+	mask0 := pipeline.blur_luma(buf, w, h)
+	mut src := if dc.len > 0 { unsafe { &u16(dc.data) } } else { buf }
+	// Кадрирование и поворот - как в превью: после подготовки сырья, сырьё
+	// и маска «Тени/Света» одной геометрией
+	mut gw := w
+	mut gh := h
+	mut glin := []u16{}
+	mask := if e.geom.is_identity() {
+		mask0
+	} else {
+		m, _, _ := pipeline.geom_apply(unsafe { &u16(mask0.data) }, w, h, 1, out_geom(&e), true)
+		m
+	}
+	if !e.geom.is_identity() {
+		glin, gw, gh = pipeline.geom_apply(src, w, h, 3, out_geom(&e), true)
+		src = unsafe { &u16(glin.data) }
+	}
+	// Карта дымки - по кадру после кадрирования (рабочая копия та же
+	// ~1024 px, что у превью, - карты совпадают)
+	haze := if e.params.haze != 0 { pipeline.haze_map(src, gw, gh) } else { pipeline.HazeMap{} }
+	mut rgb := []u8{len: gw * gh * 3}
+	pipeline.apply_image(src, unsafe { &u16(mask.data) }, &haze, gw, gh, e.params, 1.0, mut
+		rgb, 3)
+	// Размер на выход (точный или по длинной стороне)
+	fw, fh := final_size(&e, gw, gh)
+	if fw != gw || fh != gh {
+		rgb = pipeline.resize_rgb(rgb, gw, gh, fw, fh)
+	}
 	return Image{
-		width:  w
-		height: h
+		width:  fw
+		height: fh
 		rgb:    rgb
 	}
 }

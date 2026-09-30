@@ -32,9 +32,11 @@ struct LoadJob {
 	db        &lens.Database = unsafe { nil } // общая база lensfun (nil - без коррекции)
 	highlight int
 	lens_corr bool
-	// Размер холста для быстрого превью: 0 - по размеру превью; иначе
-	// превью вписывается в текущий холст, и если итоговый кадр того же
-	// размера - зум и панорама не сбрасываются (сравнение соседних кадров)
+	// Быстрое превью - сразу с геометрией кадра (кадрирование, поворот)
+	// и размером итогового превью tw x th (0 - по размеру превью камеры):
+	// если холст того же размера, зум и панорама не сбрасываются
+	// (сравнение соседних кадров), картинка не прыгает после проявки
+	geom pipeline.Geom
 	tw   int
 	th   int
 	stop &StopFlag = unsafe { nil }
@@ -151,19 +153,24 @@ fn quick_preview(mut d raw.Developer, job LoadJob) ?LoadPreview {
 	defer {
 		img.free()
 	}
-	flip := d.flip()
-	mut w := if flip & 4 != 0 { img.height } else { img.width }
-	mut h := if flip & 4 != 0 { img.width } else { img.height }
-	if job.tw > 0 && job.th > 0 {
-		w = job.tw
-		h = job.th
-	}
+	fl := d.flip()
+	ow := if fl & 4 != 0 { img.height } else { img.width }
+	oh := if fl & 4 != 0 { img.width } else { img.height }
 	src := unsafe { img.data.vbytes(img.width * img.height * 3) }
+	pix := fit_thumb(src, img.width, img.height, fl, ow, oh)
+	if job.tw <= 0 || job.th <= 0 || (job.geom.is_identity() && job.tw == ow && job.th == oh) {
+		return LoadPreview{
+			gen: job.gen
+			w:   ow
+			h:   oh
+			pix: pix
+		}
+	}
 	return LoadPreview{
 		gen: job.gen
-		w:   w
-		h:   h
-		pix: fit_thumb(src, img.width, img.height, flip, w, h)
+		w:   job.tw
+		h:   job.th
+		pix: pipeline.geom_rgba(pix, ow, oh, job.geom, true, job.tw, job.th)
 	}
 }
 

@@ -10,6 +10,7 @@ module main
 // в «файловом» виде (SideState - только исходные значения, массивы
 // списками); здесь же перевод SideState <-> EditState.
 import os
+import math
 import json2
 import vgui
 import pipeline
@@ -66,14 +67,35 @@ struct SideState {
 	dc_amount   f32
 	dc_radius   f32
 	dc_contrast f32
+	// Кадрирование и поворот (в старых файлах нет: без поворота, рамка
+	// пуста - весь кадр, свободная пропорция; нули своей пропорции и
+	// размеров читаются как 3:2, 1920 x 1080 и 2048)
+	rot90         int
+	flip_h        bool
+	flip_v        bool
+	angle         f32
+	crop          []f32 // x0, y0, x1, y1 в долях; пусто - весь кадр
+	crop_aspect   string
+	crop_aw       int
+	crop_ah       int
+	crop_portrait bool
+	size_mode     int
+	size_w        int
+	size_h        int
+	size_long     int
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
 // выход за границы при применении)
 fn (s SideState) validate() ! {
 	if s.eq.len != 5 || s.hsl_hue.len != 8 || s.hsl_sat.len != 8 || s.hsl_lum.len != 8
-		|| s.nr.len != 4 || s.curves.len != 4 {
+		|| s.nr.len != 4 || s.curves.len != 4 || (s.crop.len != 0 && s.crop.len != 4) {
 		return error('неверный размер массивов настроек')
+	}
+	// С допуском: доли у края кадра - 1 ± погрешность f32
+	if s.crop.len == 4 && !(s.crop[0] >= -0.001 && s.crop[0] < s.crop[2] && s.crop[2] <= 1.001
+		&& s.crop[1] >= -0.001 && s.crop[1] < s.crop[3] && s.crop[3] <= 1.001) {
+		return error('неверная рамка кадрирования')
 	}
 	for c in s.curves {
 		if c.len < 2 {
@@ -136,6 +158,19 @@ fn side_state(e EditState) SideState {
 		dc_amount:     p.sharp.dc_amount
 		dc_radius:     p.sharp.dc_radius
 		dc_contrast:   p.sharp.dc_contrast
+		rot90:         e.geom.rot90
+		flip_h:        e.geom.flip_h
+		flip_v:        e.geom.flip_v
+		angle:         e.geom.angle
+		crop:          [e.geom.x0, e.geom.y0, e.geom.x1, e.geom.y1]
+		crop_aspect:   e.crop_aspect
+		crop_aw:       e.crop_aw
+		crop_ah:       e.crop_ah
+		crop_portrait: e.crop_portrait
+		size_mode:     e.size_mode
+		size_w:        e.size_w
+		size_h:        e.size_h
+		size_long:     e.size_long
 	}
 }
 
@@ -177,6 +212,24 @@ fn edit_state(s SideState) !EditState {
 		wb_mode:   s.wb_mode
 		wb_temp:   s.wb_temp
 		wb_tint:   s.wb_tint
+		geom:      pipeline.Geom{
+			rot90:  ((s.rot90 % 4) + 4) % 4
+			flip_h: s.flip_h
+			flip_v: s.flip_v
+			angle:  if math.abs(s.angle) <= pipeline.geom_angle_max { s.angle } else { f32(0) }
+			x0:     if s.crop.len == 4 { clamp01f(s.crop[0]) } else { f32(0) }
+			y0:     if s.crop.len == 4 { clamp01f(s.crop[1]) } else { f32(0) }
+			x1:     if s.crop.len == 4 { clamp01f(s.crop[2]) } else { f32(1) }
+			y1:     if s.crop.len == 4 { clamp01f(s.crop[3]) } else { f32(1) }
+		}
+		crop_aspect:   if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
+		crop_aw:       if s.crop_aw > 0 { s.crop_aw } else { 3 }
+		crop_ah:       if s.crop_ah > 0 { s.crop_ah } else { 2 }
+		crop_portrait: s.crop_portrait
+		size_mode:     if s.size_mode >= 0 && s.size_mode <= 2 { s.size_mode } else { 0 }
+		size_w:        if s.size_w > 0 { s.size_w } else { 1920 }
+		size_h:        if s.size_h > 0 { s.size_h } else { 1080 }
+		size_long:     if s.size_long > 0 { s.size_long } else { 2048 }
 	}
 	for i in 0 .. 5 {
 		e.params.eq[i] = s.eq[i]
@@ -300,6 +353,10 @@ fn sidecar_error(mut st State, err IError) {
 		mut nm := st.nm
 		nm.show_warning('Правки не сохранены рядом с RAW: ${err.msg()}')
 	}
+}
+
+fn clamp01f(v f32) f32 {
+	return if v < 0 { 0 } else if v > 1 { 1 } else { v }
 }
 
 // with_derived заполняет производные поля снимка: камерную кривую

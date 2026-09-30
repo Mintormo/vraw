@@ -33,6 +33,20 @@ mut:
 	wb_mode string
 	wb_temp f32
 	wb_tint f32
+	// Кадрирование и поворот (crop.v): геометрия (ориентация, угол, рамка
+	// в долях кадра), ограничение рамки - пропорция (ключ crop_aspects,
+	// '' - свободно; своя - crop_aw:crop_ah; portrait - вертикальная) и
+	// размер на выход (size_mode: 0 - как есть, 1 - точно size_w x
+	// size_h, 2 - длинная сторона size_long)
+	geom          pipeline.Geom
+	crop_aspect   string
+	crop_aw       int = 3
+	crop_ah       int = 2
+	crop_portrait bool
+	size_mode     int
+	size_w        int = 1920
+	size_h        int = 1080
+	size_long     int = 2048
 }
 
 // neutral_edit - настройки только что открытого файла (запись «Открыт файл»)
@@ -212,6 +226,7 @@ fn set_edit(mut st State, e EditState) {
 	}
 	sync_curve_editor(mut st)
 	sync_wb_mode(mut st)
+	sync_crop_ui(mut st)
 }
 
 // restore_edit - откат/возврат к снимку: виджеты (set_edit) и ровно нужные

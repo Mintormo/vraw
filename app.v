@@ -182,6 +182,21 @@ mut:
 	sharp_show   bool
 	sharp_drag   pipeline.SharpView
 	sharp_rgb_cb &vgui.CheckBox = unsafe { nil }
+	// Кадрирование и поворот (crop.v). Геометрия превью - glin/gmask
+	// (gw x gh) из linear/mask: пересчёт, когда меняется сырьё (lin_gen),
+	// геометрия или режим (geom_key). В режиме кадрирования - весь
+	// повёрнутый кадр, рамка поверх холста.
+	glin        []u16
+	gmask       []u16
+	gw          int
+	gh          int
+	lin_gen     int
+	geom_key    GeomKey
+	crop_mode   bool
+	horizon     bool // инструмент «линия горизонта»
+	crop_drag   CropDrag
+	crop_before EditState // настройки при входе в режим (Esc)
+	crop_ui     &CropUi = unsafe { nil }
 	// Копирование настроек и пресеты (presets.v): буфер настроек и его
 	// группы (пусто - ничего не скопировано), пункт «Вставить настройки»,
 	// меню (номер пункта «Пресеты» в нём), вставка в кадры (paste_settings
@@ -227,6 +242,41 @@ fn highlight_name(h int) string {
 	}
 }
 
+// GeomKey - от чего зависит геометрия превью (glin)
+struct GeomKey {
+	lin_gen int
+	geom    pipeline.Geom
+	crop    bool
+	valid   bool
+}
+
+// ensure_geom - геометрия превью (glin, gmask) по текущему сырью и
+// настройкам; холст - под её размер (смена размера вписывает заново)
+fn ensure_geom(mut st State, mut cv vgui.Canvas) {
+	key := GeomKey{
+		lin_gen: st.lin_gen
+		geom:    st.edit.geom
+		crop:    !st.crop_mode
+		valid:   true
+	}
+	if key != st.geom_key || st.glin.len == 0 {
+		st.glin, st.gw, st.gh = pipeline.geom_apply(unsafe { &u16(st.linear.data) }, st.pw,
+			st.ph, 3, key.geom, key.crop)
+		st.gmask = if st.mask.len == st.pw * st.ph {
+			m, _, _ := pipeline.geom_apply(unsafe { &u16(st.mask.data) }, st.pw, st.ph,
+				1, key.geom, key.crop)
+			m
+		} else {
+			[]u16{}
+		}
+		st.haze = pipeline.HazeMap{}
+		st.geom_key = key
+	}
+	if cv.width != st.gw || cv.height != st.gh {
+		set_canvas_size(mut cv, st.gw, st.gh)
+	}
+}
+
 // apply_pipeline прогоняет превью через пайплайн в холст и обновляет
 // гистограмму. Вызывается при отпускании тонального ползунка и на каждое
 // одиночное изменение (колесо, клавиши, сброс), поэтому никаких
@@ -235,9 +285,10 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if st.suppress || st.linear.len == 0 {
 		return
 	}
-	npix := st.pw * st.ph
+	ensure_geom(mut st, mut cv)
+	npix := st.gw * st.gh
 	if (st.edit.params.haze != 0 || st.haze_show) && st.haze.d.len != npix {
-		st.haze = pipeline.haze_map(unsafe { &u16(st.linear.data) }, st.pw, st.ph)
+		st.haze = pipeline.haze_map(unsafe { &u16(st.glin.data) }, st.gw, st.gh)
 	}
 	if st.haze_show {
 		pipeline.haze_view(&st.haze, st.edit.params.haze_depth, mut cv.pixels, 4)
@@ -249,8 +300,9 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		} else {
 			pipeline.SharpView.off
 		}
-		pipeline.apply_image_view(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) },
-			&st.haze, st.pw, st.ph, st.edit.params, preview_scale, view, mut cv.pixels, 4)
+		mask := if st.gmask.len == npix { unsafe { &u16(st.gmask.data) } } else { unsafe { &u16(nil) } }
+		pipeline.apply_image_view(unsafe { &u16(st.glin.data) }, mask, &st.haze, st.gw,
+			st.gh, st.edit.params, preview_scale, view, mut cv.pixels, 4)
 	}
 	// Показ работы резкости - вид поверх снимка: гистограмма остаётся
 	// снимка (последняя посчитанная), подсветки клипа нет
@@ -258,7 +310,13 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		cv.mark_dirty()
 		return
 	}
-	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
+	// В режиме кадрирования гистограмма - только по рамке (без того, что
+	// будет отрезано, и без пустых углов поворота)
+	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, if st.crop_mode {
+		box_pixels(st, cv.pixels, cv.width, cv.height)
+	} else {
+		cv.pixels
+	})
 	update_curve_histogram(mut st)
 	// Пересветы и провалы (clipping.v): треугольники по гистограмме
 	// результата, подсветка - поверх уже посчитанной гистограммы
@@ -268,6 +326,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if !st.haze_show {
 		mark_clipping(mut cv.pixels, st.clip_hi, st.clip_lo)
 	}
+	sync_crop_total(mut st)
 	cv.mark_dirty()
 }
 
@@ -298,12 +357,9 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	img.free()
 	st.lens_dirty = true
 
-	if resized {
-		// При перепроявке того же файла (смена режима пересветов) размер
-		// не меняется - зум и панораму не сбрасываем
-		set_canvas_size(mut cv, st.pw, st.ph)
-	}
-
+	// Холст под новый размер подгонит apply_pipeline (ensure_geom): при
+	// перепроявке того же файла (смена режима пересветов) размер не
+	// меняется - зум и панорама не сбрасываются
 	if async && !resized {
 		request_prep(mut st, mut app, true)
 	} else {
@@ -436,6 +492,7 @@ fn take_prep(mut st State, res PrepResult) {
 	}
 	st.linear = res.linear
 	st.mask = res.mask
+	st.lin_gen++
 	st.haze = pipeline.HazeMap{}
 	st.nr_applied = res.nr
 	st.dc_applied = dc_key(res.dc)
@@ -737,6 +794,9 @@ struct SliderCfg {
 	// Показ с Alt при перетаскивании (ползунки резкости): вместо снимка -
 	// маска краёв или добавка резкости, пока зажат Alt; off - нет
 	drag_view pipeline.SharpView
+	// live: пересчёт и по ходу перетаскивания (угол поворота - видно
+	// горизонт), запись в истории - по отпусканию
+	live bool
 }
 
 // EditSlider - собранный ползунок: подпись, ползунок, значение
@@ -787,6 +847,9 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 				st.sharp_drag = if alt { cfg.drag_view } else { pipeline.SharpView.off }
 				cfg.fx()
 			}
+		}
+		if sl.dragging && !st.suppress && cfg.live {
+			cfg.fx()
 		}
 		if st.suppress || sl.dragging {
 			return
@@ -1228,7 +1291,15 @@ fn main() {
 	// Холсту нужна только мышь: клавиши в фокусе не забирает - иначе после
 	// щелчка по снимку не работали бы меню (J) и ←/→ ленты
 	cv.take_keys = false
+	// Рамка кадрирования, ручки и сетка - поверх снимка, без пересчёта
+	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
+		crop_overlay(mut st, mut ctx)
+	}
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
+		// Режим кадрирования (crop.v): рамка, ручки, линия горизонта
+		if crop_input(mut st, ev) {
+			return
+		}
 		if st.wb_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
 			wb_pick_at(mut st, ev.x, ev.y)
 		}
@@ -1377,7 +1448,12 @@ fn main() {
 		if st.linear.len == 0 {
 			return
 		}
-		ev := auto_exposure_ev(st.linear, st.pw * st.ph)
+		// По кадру после кадрирования (glin), до первого apply - по всему
+		ev := if st.glin.len == st.gw * st.gh * 3 && st.glin.len > 0 {
+			auto_exposure_ev(st.glin, st.gw * st.gh)
+		} else {
+			auto_exposure_ev(st.linear, st.pw * st.ph)
+		}
 		st.hist_label = 'Авто-экспозиция ${fmt_signed(ev, 2)}'
 		exp_sl.set_value(ev)
 		st.hist_label = ''
@@ -1755,6 +1831,8 @@ fn main() {
 
 	// Баланс белого: режим, пипетка, температура, оттенок (wb_ui.v)
 	wb_rows := build_wb_section(mut st, lbl_w, val_w)
+	// Кадрирование и поворот (crop.v)
+	crop_rows := build_crop_section(mut st, lbl_w, val_w)
 
 	// ── История правок: список, текущая запись выделена ──
 	// Щелчок (или стрелки в списке) - откат к записи, более поздняя -
@@ -1789,7 +1867,7 @@ fn main() {
 	// Быстрая часть - здесь, в главном потоке: файл, настройки и история
 	// из сайдкара, лента. Проявка, коррекция и камерная кривая - в фоне
 	// (load_worker), кадр сразу виден по встроенному превью камеры.
-	open_file := fn [mut st, mut cv, mut nm, mut app, mut lens_cb, mut lens_lb] (path_arg string) {
+	open_file := fn [mut st, mut nm, mut app, mut lens_cb, mut lens_lb] (path_arg string) {
 		// Полный путь: по нему лента ищет кадр и узнаёт смену папки
 		path := os.real_path(path_arg)
 		mut nd := raw.open(path) or {
@@ -1817,6 +1895,10 @@ fn main() {
 		st.raw_linear = []u16{}
 		st.linear = []u16{}
 		st.mask = []u16{}
+		st.lin_gen++
+		st.glin = []u16{}
+		st.gmask = []u16{}
+		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
 		st.curve = []f32{}
 		st.lens_dirty = false
@@ -1847,17 +1929,20 @@ fn main() {
 		show_frame(mut st, path, mut app)
 		stop := &StopFlag{}
 		st.load_stop = stop
-		// Холст с картинкой - превью впишется в него (зум сохранится, если
-		// кадр того же размера); пустой холст (4x3) - по размеру превью
-		has_img := cv.width * cv.height > 12
+		// Быстрое превью - сразу размером будущего превью с геометрией кадра
+		// (полный кадр / 2 после кадрирования): тот же размер холста - зум
+		// сохранится
+		full_w, full_h := nd.full_size()
+		tw, th := st.edit.geom.out_size(full_w / 2, full_h / 2, true)
 		job := LoadJob{
 			gen:       st.file_gen
 			dev:       nd
 			db:        st.lens_db
 			highlight: st.edit.highlight
 			lens_corr: st.edit.lens_corr
-			tw:        if has_img { cv.width } else { 0 }
-			th:        if has_img { cv.height } else { 0 }
+			geom:      st.edit.geom
+			tw:        if full_w > 0 { tw } else { 0 }
+			th:        if full_h > 0 { th } else { 0 }
 			stop:      stop
 		}
 		st.load_threads << spawn load_worker(job, mut app, st.on_load_pv, st.on_load_done)
@@ -1897,15 +1982,14 @@ fn main() {
 		st.corr = res.corr
 		show_lens(st, mut lens_cb, mut lens_lb)
 		st.hl_developed = res.highlight
-		if res.w != cv.width || res.h != cv.height {
-			set_canvas_size(mut cv, res.w, res.h)
-		}
+		// Холст - под размер кадра после геометрии (ensure_geom в apply)
 		st.pw = res.w
 		st.ph = res.h
 		st.dev_linear = res.dev_linear
 		st.raw_linear = res.raw_linear
 		st.linear = res.linear
 		st.mask = res.mask
+		st.lin_gen++
 		st.haze = pipeline.HazeMap{}
 		st.nr_applied = [f32(0), 0, 0, 0]!
 		st.dc_applied = dc_key(pipeline.Sharpen{})
@@ -1983,6 +2067,21 @@ fn main() {
 	st.strip_bar = strip_bar
 	// ←/→, Home/End - соседний, первый, последний кадр (если фокус не у
 	// ползунка: его стрелки двигают значение)
+	// Кадрирование: Enter - применить, Esc - отменить правки режима
+	win.bind_hotkey('Enter', fn [mut st] () {
+		if st.crop_mode {
+			set_crop_mode(mut st, false)
+		}
+	})
+	win.bind_hotkey('Escape', fn [mut st] () {
+		if st.horizon {
+			st.horizon = false
+			st.crop_drag = CropDrag{}
+			sync_crop_ui(mut st)
+		} else {
+			crop_cancel(mut st)
+		}
+	})
 	win.bind_hotkey('Left', fn [mut st, goto_frame] () {
 		goto_frame(st.frame_idx - 1)
 	})
@@ -2029,6 +2128,10 @@ fn main() {
 		st.raw_linear = []u16{}
 		st.linear = []u16{}
 		st.mask = []u16{}
+		st.lin_gen++
+		st.glin = []u16{}
+		st.gmask = []u16{}
+		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
 		st.curve = []f32{}
 		st.side_path = ''
@@ -2258,8 +2361,15 @@ fn main() {
 		}
 	}
 	st.m_paste = m_paste
+	// Режим кадрирования (crop.v): R, как в Lightroom
+	mut m_crop := vgui.menu_checkbox('Кадрирование', false)
+	m_crop.shortcut = 'R'
+	m_crop.on_toggle = fn [mut st] (v bool) {
+		set_crop_mode(mut st, v)
+	}
+	st.crop_ui.m_crop = m_crop
 	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
-		vgui.menu_separator(), m_reset, vgui.menu_separator(), m_settings])
+		vgui.menu_separator(), m_crop, m_reset, vgui.menu_separator(), m_settings])
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {
@@ -2448,6 +2558,7 @@ fn main() {
 		SectionRow{crv_cb, 26},
 		SectionRow{hl_row, 26},
 	]))
+	acc.add_section('Кадрирование и поворот', section(crop_rows))
 	acc.add_section_expanded('Баланс белого', section(wb_rows))
 	acc.add_section_expanded('Экспозиция и тон', section([
 		SectionRow{exp_row, 26},

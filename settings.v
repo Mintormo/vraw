@@ -27,7 +27,11 @@ mut:
 	export_no_ai bool
 	// группы настроек в окне «Копировать настройки» и «Сохранить пресет»
 	// (presets.v) - последний выбор; нет в файле - все
-	copy_groups []string = copy_groups.clone()
+	copy_groups []string = default_copy_groups.clone()
+	// кадрирование (crop.v): последняя выбранная пропорция - по умолчанию
+	// для кадра без рамки; сетка поверх рамки
+	crop_aspect string
+	crop_grid   string = 'thirds'
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -75,8 +79,10 @@ fn load_settings() Settings {
 		copy_groups:   if known_groups(s.copy_groups).len > 0 {
 			known_groups(s.copy_groups)
 		} else {
-			copy_groups.clone()
+			default_copy_groups.clone()
 		}
+		crop_aspect: if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
+		crop_grid:   if s.crop_grid in crop_grids { s.crop_grid } else { 'thirds' }
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {
 			s.jpeg_quality

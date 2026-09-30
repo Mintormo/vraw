@@ -130,10 +130,11 @@ fn set_wb_pick(mut st State, on bool) {
 	}
 }
 
-// wb_pick_at - пипетка: среднее пятна превью «как снято» (st.linear) ->
+// wb_pick_at - пипетка: среднее пятна превью «как снято» после геометрии
+// (st.glin - то, что на холсте) ->
 // температура и оттенок, при которых оно серое
 fn wb_pick_at(mut st State, x int, y int) {
-	if st.linear.len == 0 {
+	if st.glin.len != st.gw * st.gh * 3 || st.glin.len == 0 {
 		return
 	}
 	mut sr := 0.0
@@ -143,18 +144,18 @@ fn wb_pick_at(mut st State, x int, y int) {
 	mut n := 0
 	for yy in y - wb_pick_r .. y + wb_pick_r + 1 {
 		for xx in x - wb_pick_r .. x + wb_pick_r + 1 {
-			if xx < 0 || yy < 0 || xx >= st.pw || yy >= st.ph {
+			if xx < 0 || yy < 0 || xx >= st.gw || yy >= st.gh {
 				continue
 			}
-			i := (yy * st.pw + xx) * 3
+			i := (yy * st.gw + xx) * 3
 			for c in 0 .. 3 {
-				if int(st.linear[i + c]) > mx {
-					mx = int(st.linear[i + c])
+				if int(st.glin[i + c]) > mx {
+					mx = int(st.glin[i + c])
 				}
 			}
-			sr += f64(st.linear[i])
-			sg += f64(st.linear[i + 1])
-			sb += f64(st.linear[i + 2])
+			sr += f64(st.glin[i])
+			sg += f64(st.glin[i + 1])
+			sb += f64(st.glin[i + 2])
 			n++
 		}
 	}
@@ -172,6 +173,11 @@ fn wb_pick_at(mut st State, x int, y int) {
 
 // wb_auto - «Авто»: серый мир по превью (без чёрного и пересветов)
 fn wb_auto(st &State) (f32, f32) {
+	// По кадру после кадрирования (glin), до первого apply - по всему
+	if st.glin.len > 0 && st.glin.len == st.gw * st.gh * 3 {
+		r, g, b := pipeline.gray_world(unsafe { &u16(st.glin.data) }, st.gw * st.gh)
+		return st.cam.neutral_temp_tint(r, g, b)
+	}
 	r, g, b := pipeline.gray_world(unsafe { &u16(st.linear.data) }, st.pw * st.ph)
 	return st.cam.neutral_temp_tint(r, g, b)
 }
