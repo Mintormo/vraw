@@ -6,7 +6,8 @@ module main
 //
 // Порядок - как в превью: LibRaw (демозаика, камерный ББ, режим
 // пересветов) -> коррекция объектива (виньетирование, затем дисторсия +
-// TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> маска
+// TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> Capture-резкость
+// -> маска
 // «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит.
 import raw
 import lens
@@ -42,6 +43,7 @@ enum ExportStage {
 	impulse
 	denoise
 	defringe
+	capture
 	tone
 	write // запись файла - в save_worker, после develop_full
 }
@@ -54,6 +56,7 @@ fn stage_title(s ExportStage) string {
 		.impulse { 'Импульсный шум' }
 		.denoise { 'Шумодав' }
 		.defringe { 'Ореолы' }
+		.capture { 'Capture-резкость' }
 		.tone { 'Тон и цвет' }
 		.write { 'Запись файла' }
 	}
@@ -105,6 +108,10 @@ fn export_plan(e EditState, ai_secs f64, f imgio.Format) StagePlan {
 	if e.nr[3] > 0 {
 		st << .defringe
 		w << 2.0
+	}
+	if e.params.sharp.dc_amount > 0 {
+		st << .capture
+		w << 2.6
 	}
 	st << .tone
 	w << 1.6
@@ -209,15 +216,25 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		}
 		pipeline.defringe(buf, w, h, e.nr[3])
 	}
+	// Capture-резкость - как в превью: после шумодава; маска «Тени/Света» -
+	// по сырью до неё
+	mut dc := []u16{}
+	if e.params.sharp.dc_amount > 0 {
+		if !progress(.capture, 0, 0) {
+			return ExportCancelled{}
+		}
+		dc = pipeline.deconvolve(buf, w, h, e.params.sharp, 1.0)
+	}
 	if !progress(.tone, 0, 0) {
 		return ExportCancelled{}
 	}
 	mask := pipeline.blur_luma(buf, w, h)
+	src := if dc.len > 0 { unsafe { &u16(dc.data) } } else { buf }
 	// Карта дымки - по полному кадру (рабочая копия та же ~1024 px, что у
 	// превью, - карты совпадают)
-	haze := if e.params.haze != 0 { pipeline.haze_map(buf, w, h) } else { pipeline.HazeMap{} }
+	haze := if e.params.haze != 0 { pipeline.haze_map(src, w, h) } else { pipeline.HazeMap{} }
 	mut rgb := []u8{len: w * h * 3}
-	pipeline.apply_image(buf, unsafe { &u16(mask.data) }, &haze, w, h, e.params, 1.0, mut rgb,
+	pipeline.apply_image(src, unsafe { &u16(mask.data) }, &haze, w, h, e.params, 1.0, mut rgb,
 		3)
 	return Image{
 		width:  w

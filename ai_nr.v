@@ -153,8 +153,10 @@ fn ai_effective(st &State) f32 {
 }
 
 // prep_stale - подготовленное сырьё не соответствует настройкам шумодава
+// (и Capture-резкости)
 fn prep_stale(st &State) bool {
 	return st.nr_applied != st.edit.nr || st.ai_applied != ai_effective(st)
+		|| st.dc_applied != dc_key(st.edit.params.sharp)
 }
 
 // raw_changed - в State новый raw_linear (коррекция объектива, другой

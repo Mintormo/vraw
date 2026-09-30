@@ -26,6 +26,11 @@ fn test_export_plan() {
 	e.nr[1] = 10
 	p2 := export_plan(e, 0, .jpeg)
 	assert p2.stages == [ExportStage.decode, .lens, .denoise, .tone, .write]
+	// Capture-резкость - после шумодава, перед тоном
+	mut e3 := e
+	e3.params.sharp.dc_amount = 50
+	assert export_plan(e3, 0, .jpeg).stages == [ExportStage.decode, .lens, .denoise, .capture,
+		.tone, .write]
 	mut c := ExportCtl{
 		plan:  p2
 		stage: .decode

@@ -10,28 +10,49 @@ module pipeline
 //   маска:  d'' = d' · e²/(e² + te²), e - градиент размытой люмы B,
 //           te = masking · 0.15 - на ровном (небо, кожа) e мал, резкости нет;
 //   выход:  R, G, B += amount/100 · d'' - одна добавка на все каналы:
-//           резкость только по яркости, без цветных ореолов.
+//           резкость только по яркости, без цветных ореолов;
+//           по каналам (rgb) - деталь каждого канала от его размытия,
+//           маска краёв та же (по люме).
 // Перцептивное пространство - как в RawTherapee (USM по L*): одинаковый
 // ореол у светлого и тёмного края. Половинное превью - радиус × scale.
 import math
+import runtime
+
+// SharpView - показ работы резкости вместо снимка (с Alt при
+// перетаскивании ползунка или флажком): mask - маска краёв (белое -
+// резкость действует, чёрное - нет), detail - добавка резкости на сером
+// 128 (×8; по каналам RGB - цветная)
+pub enum SharpView {
+	off
+	mask
+	detail
+}
 
 // apply_image - пайплайн кадра w x h с дымкой и резкостью. haze - карта
 // дымки кадра (haze_map; nil - без удаления дымки). scale - масштаб кадра
 // относительно полного (превью half-size - 0.5): радиус резкости задан в
 // пикселях полного кадра. Без резкости - то же, что apply.
 pub fn apply_image(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, scale f32, mut dst []u8, dst_stride int) {
+	apply_image_view(src, mask, haze, w, h, p, scale, .off, mut dst, dst_stride)
+}
+
+// apply_image_view - apply_image с показом работы резкости (view != off):
+// в dst вместо снимка - маска краёв или добавка резкости
+pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, scale f32, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
-	if p.sharp.amount <= 0 || w < 3 || h < 3 {
+	if (p.sharp.amount <= 0 && view == .off) || w < 3 || h < 3 {
 		render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil })
 		return
 	}
 	mut tone := []u16{len: npix * 3}
 	render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) })
-	sharpen_tone(tone, w, h, p.sharp, scale, p.dither, mut dst, dst_stride)
+	sharpen_tone(tone, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
 }
 
-// sharpen_tone - резкость по тоновому буферу (×256) и запись 8 бит в dst
-fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, mut dst []u8, dst_stride int) {
+// sharpen_tone - резкость по тоновому буферу (×256) и запись 8 бит в dst.
+// Маска краёв - всегда по размытой люме; добавка - одна на все каналы
+// (по люме) или своя у каждого канала (s.rgb).
+fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
 	mut l := []f32{len: npix}
 	for i in 0 .. npix {
@@ -43,6 +64,17 @@ fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, mut
 		sigma = 0.25
 	}
 	b := gauss_blur(l, w, h, sigma)
+	// По каналам: размытые плоскости R, G, B (детали - от своего канала)
+	mut cb := [][]f32{}
+	if s.rgb {
+		for c in 0 .. 3 {
+			mut pl := []f32{len: npix}
+			for i in 0 .. npix {
+				pl[i] = f32(tone[3 * i + c]) * f32(1.0 / 256.0)
+			}
+			cb << gauss_blur(pl, w, h, sigma)
+		}
+	}
 	amount := s.amount / 100
 	t := s.detail * 0.06
 	t2 := t * t
@@ -59,42 +91,85 @@ fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, mut
 			dn := if y < h - 1 { row + w } else { row }
 			for x in 0 .. w {
 				i := row + x
-				mut dd := pl[i] - pb[i]
-				if t2 > 0 {
-					q := dd * dd
-					dd *= q / (q + t2)
-				}
+				mut m := f32(1)
 				if te2 > 0 {
 					xl := if x > 0 { i - 1 } else { i }
 					xr := if x < w - 1 { i + 1 } else { i }
 					gx := pb[xr] - pb[xl]
 					gy := pb[dn + x] - pb[up + x]
 					e2 := gx * gx + gy * gy
-					dd *= e2 / (e2 + te2)
+					m = e2 / (e2 + te2)
 				}
-				add := amount * dd
 				j := 3 * i
-				mut vr := f32(pt[j]) * f32(1.0 / 256.0) + add
-				mut vg := f32(pt[j + 1]) * f32(1.0 / 256.0) + add
-				mut vb := f32(pt[j + 2]) * f32(1.0 / 256.0) + add
-				vr = clamp255(vr)
-				vg = clamp255(vg)
-				vb = clamp255(vb)
-				put_px(d, i, vr, vg, vb, dither, dst_stride)
+				vr0 := f32(pt[j]) * f32(1.0 / 256.0)
+				vg0 := f32(pt[j + 1]) * f32(1.0 / 256.0)
+				vb0 := f32(pt[j + 2]) * f32(1.0 / 256.0)
+				mut ar := f32(0)
+				mut ag := f32(0)
+				mut ab := f32(0)
+				if s.rgb {
+					ar = amount * m * soft_threshold(vr0 - cb[0][i], t2)
+					ag = amount * m * soft_threshold(vg0 - cb[1][i], t2)
+					ab = amount * m * soft_threshold(vb0 - cb[2][i], t2)
+				} else {
+					add := amount * m * soft_threshold(pl[i] - pb[i], t2)
+					ar = add
+					ag = add
+					ab = add
+				}
+				match view {
+					.off {
+						put_px(d, i, clamp255(vr0 + ar), clamp255(vg0 + ag), clamp255(vb0 + ab),
+							dither, dst_stride)
+					}
+					.mask {
+						g := m * 255
+						put_px(d, i, g, g, g, false, dst_stride)
+					}
+					.detail {
+						put_px(d, i, clamp255(128 + 8 * ar), clamp255(128 + 8 * ag), clamp255(128 +
+							8 * ab), false, dst_stride)
+					}
+				}
 				d += dst_stride
 			}
 		}
 	}
 }
 
+// soft_threshold - мягкий порог детали: d · d²/(d² + t²) (t2 = 0 - без порога)
+@[inline]
+fn soft_threshold(d f32, t2 f32) f32 {
+	if t2 <= 0 {
+		return d
+	}
+	q := d * d
+	return d * q / (q + t2)
+}
+
 @[inline]
 fn clamp255(v f32) f32 {
-	return if v < 0 { 0 } else if v > 255.0 { 255.0 } else { v }
+	return if v < 0 {
+		0
+	} else if v > 255.0 {
+		255.0
+	} else {
+		v
+	}
 }
 
 // gauss_blur - гауссово размытие плоскости w x h (разделимое: строки,
 // затем столбцы; у краёв - повтор крайнего пикселя)
 fn gauss_blur(src []f32, w int, h int, sigma f32) []f32 {
+	k := gauss_kernel(sigma)
+	mut tmp := []f32{len: w * h}
+	mut out := []f32{len: w * h}
+	gauss_into(src, mut out, mut tmp, w, h, k)
+	return out
+}
+
+// gauss_kernel - нормированное ядро гаусса радиуса ⌈3σ⌉
+fn gauss_kernel(sigma f32) []f32 {
 	kr := int(math.ceil(3 * sigma))
 	mut k := []f32{len: 2 * kr + 1}
 	mut sum := f32(0)
@@ -106,34 +181,92 @@ fn gauss_blur(src []f32, w int, h int, sigma f32) []f32 {
 	for i in 0 .. k.len {
 		k[i] /= sum
 	}
-	mut tmp := []f32{len: w * h}
-	mut out := []f32{len: w * h}
+	return k
+}
+
+// gauss_into - размытие src ядром k в out через рабочий буфер tmp (оба
+// w * h, выделены заранее - деконволюция размывает десятки раз).
+// Большие кадры - полосами строк в несколько потоков.
+fn gauss_into(src []f32, mut out []f32, mut tmp []f32, w int, h int, k []f32) {
+	ps := unsafe { &f32(src.data) }
+	pt := unsafe { &f32(tmp.data) }
+	po := unsafe { &f32(out.data) }
+	pk := unsafe { &f32(k.data) }
+	nt := bands(w, h)
+	if nt <= 1 {
+		gauss_rows(ps, pt, w, 0, h, pk, k.len)
+		gauss_cols(pt, po, w, h, 0, h, pk, k.len)
+		return
+	}
+	step := (h + nt - 1) / nt
+	mut ts := []thread{}
+	for y0 := 0; y0 < h; y0 += step {
+		ts << spawn gauss_rows(ps, pt, w, y0, imin(h, y0 + step), pk, k.len)
+	}
+	ts.wait()
+	ts.clear()
+	// Столбцы - после всех строк: полоса читает строки соседних полос
+	for y0 := 0; y0 < h; y0 += step {
+		ts << spawn gauss_cols(pt, po, w, h, y0, imin(h, y0 + step), pk, k.len)
+	}
+	ts.wait()
+}
+
+// bands - сколько потоков давать проходу по кадру w x h (мелкие - один)
+fn bands(w int, h int) int {
+	if w * h < 250000 {
+		return 1
+	}
+	n := runtime.nr_cpus()
+	return if n > 16 { 16 } else { n }
+}
+
+@[inline]
+fn imin(a int, b int) int {
+	return if a < b { a } else { b }
+}
+
+// gauss_rows - размытие строк y0..y1 по x (src -> dst), ядро pk из kn
+// элементов; середина строки без проверок края
+fn gauss_rows(ps &f32, pt &f32, w int, y0 int, y1 int, pk &f32, kn int) {
+	kr := kn / 2
 	unsafe {
-		ps := &f32(src.data)
-		pt := &f32(tmp.data)
-		po := &f32(out.data)
-		pk := &f32(k.data)
-		// По строкам
-		for y in 0 .. h {
+		for y in y0 .. y1 {
 			row := y * w
 			for x in 0 .. w {
 				mut acc := f32(0)
-				for j in -kr .. kr + 1 {
-					mut xx := x + j
-					if xx < 0 {
-						xx = 0
-					} else if xx >= w {
-						xx = w - 1
+				if x >= kr && x < w - kr {
+					base := row + x - kr
+					for j in 0 .. kn {
+						acc += ps[base + j] * pk[j]
 					}
-					acc += ps[row + xx] * pk[j + kr]
+				} else {
+					for j in -kr .. kr + 1 {
+						mut xx := x + j
+						if xx < 0 {
+							xx = 0
+						} else if xx >= w {
+							xx = w - 1
+						}
+						acc += ps[row + xx] * pk[j + kr]
+					}
 				}
 				pt[row + x] = acc
 			}
 		}
-		// По столбцам: строка результата - взвешенная сумма строк
-		// (последовательный доступ к памяти)
-		for y in 0 .. h {
+	}
+}
+
+// gauss_cols - размытие по y строк результата y0..y1: строка - взвешенная
+// сумма строк tmp (последовательный доступ к памяти)
+fn gauss_cols(pt &f32, po &f32, w int, h int, y0 int, y1 int, pk &f32, kn int) {
+	kr := kn / 2
+	unsafe {
+		for y in y0 .. y1 {
 			row := y * w
+			for x in 0 .. w {
+				po[row + x] = 0
+			}
 			for j in -kr .. kr + 1 {
 				mut yy := y + j
 				if yy < 0 {
@@ -149,5 +282,4 @@ fn gauss_blur(src []f32, w int, h int, sigma f32) []f32 {
 			}
 		}
 	}
-	return out
 }

@@ -206,6 +206,10 @@ fn set_edit(mut st State, e EditState) {
 		mut cb := st.crv_cb
 		cb.set_checked(e.use_curve)
 	}
+	if !isnil(st.sharp_rgb_cb) {
+		mut cb := st.sharp_rgb_cb
+		cb.set_checked(e.params.sharp.rgb)
+	}
 	sync_curve_editor(mut st)
 	sync_wb_mode(mut st)
 }

@@ -53,11 +53,11 @@ fn wb_mode_idx(mode string) int {
 fn wb_derive(mut e EditState, cam pipeline.CamColor) {
 	if e.wb_mode == '' || e.wb_temp <= 0 {
 		e.params.wb_on = false
-		e.params.wb = [9]f32{}
+		e.params.wb = pipeline.WbXform{}
 		return
 	}
 	e.params.wb_on = true
-	e.params.wb = cam.wb_matrix(e.wb_temp, e.wb_tint)
+	e.params.wb = cam.wb_xform(e.wb_temp, e.wb_tint)
 }
 
 // wb_values - температура и оттенок, которые показывает панель: у «как
@@ -123,6 +123,10 @@ fn set_wb_pick(mut st State, on bool) {
 		mut cv := st.cv
 		cv.brush_cursor = on
 		cv.brush_radius = wb_pick_r
+		// Пятно 9x9 превью при вписанном кадре - 2-3 экранных пикселя:
+		// кольцо не меньше 7 px, без заливки - видно, что под ним
+		cv.brush_min_px = 7
+		cv.brush_ring = true
 	}
 }
 

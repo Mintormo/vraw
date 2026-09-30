@@ -98,7 +98,11 @@ fn test_wb_in_pipeline() {
 		dither: false
 		wb_on:  true
 	}
-	id.wb = [f32(1), 0, 0, 0, 1, 0, 0, 0, 1]!
+	id.wb = WbXform{
+		cam: [f32(1), 0, 0, 0, 1, 0, 0, 0, 1]!
+		d:   [f32(1), 1, 1]!
+		rgb: [f32(1), 0, 0, 0, 1, 0, 0, 0, 1]!
+	}
 	mut b := []u8{len: npix * 3}
 	apply(unsafe { &u16(src.data) }, nomask, npix, id, mut b, 3)
 	for i in 0 .. a.len {
@@ -109,8 +113,106 @@ fn test_wb_in_pipeline() {
 		dither: false
 		wb_on:  true
 	}
-	warm.wb = r8_color().wb_matrix(3000, 0)
+	warm.wb = r8_color().wb_xform(3000, 0)
 	mut o := []u8{len: 3}
 	apply(unsafe { &u16(white.data) }, nomask, 1, warm, mut o, 3)
 	assert o[0] == 255 && o[1] == 255 && o[2] == 255, '${o}'
+}
+
+// Разложение по шагам даёт ту же матрицу; «как снято» почти тождественно
+// и у самого клипа
+fn test_wb_xform_matches_matrix() {
+	c := r8_color()
+	for t in [f32(2800), 5000, 9000] {
+		m := c.wb_matrix(t, 20)
+		x := c.wb_xform(t, 20).matrix()
+		for i in 0 .. 9 {
+			assert math.abs(m[i] - x[i]) < 1e-4
+		}
+	}
+	// Канал, клипающийся только на сенсоре, - G (наименьший множитель R8)
+	assert c.wb_xform(5000, 0).g == 1
+	t, tint := c.as_shot()
+	npix := 512
+	mut src := []u16{len: npix * 3}
+	for i in 0 .. npix {
+		// Светлое у клипа: разные сочетания каналов 60000..65535
+		src[i * 3] = u16(60000 + (i * 37) % 5536)
+		src[i * 3 + 1] = u16(60000 + (i * 91) % 5536)
+		src[i * 3 + 2] = u16(60000 + (i * 53) % 5536)
+	}
+	nomask := &u16(unsafe { nil })
+	mut a := []u8{len: npix * 3}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut a, 3)
+	shot := Params{
+		dither: false
+		wb_on:  true
+		wb:     c.wb_xform(t, tint)
+	}
+	mut b := []u8{len: npix * 3}
+	apply(unsafe { &u16(src.data) }, nomask, npix, shot, mut b, 3)
+	for i in 0 .. a.len {
+		assert math.abs(int(a[i]) - int(b[i])) <= 2, '${i}: ${a[i]} ${b[i]}'
+	}
+}
+
+// Небо у предела: голубой цвет камеры, синий канал подходит к клипу и
+// клипается. После ББ 3000 K переход гладкий - без пятен (прежняя защита
+// смешивала по уровню входа выше 90% и давала бело-голубые пятна)
+fn test_wb_clip_smooth() {
+	c := r8_color()
+	k := c.wb_xform(3000, 0)
+	n := 200
+	mut src := []u16{len: n * 3}
+	for i in 0 .. n {
+		// В камере: R 0.45, G 0.75, B от 0.85 до 1.15 (выше 1 - клип)
+		cam := [f32(0.45), 0.75, math.min(f32(1), 0.85 + f32(i) * 0.3 / f32(n))]
+		for ch in 0 .. 3 {
+			v := (k.rgb[ch * 3] * cam[0] + k.rgb[ch * 3 + 1] * cam[1] + k.rgb[ch * 3 + 2] * cam[2]) * 65535
+			src[i * 3 + ch] = u16(math.max(0, math.min(65535, v)))
+		}
+	}
+	p := Params{
+		dither: false
+		wb_on:  true
+		wb:     k
+	}
+	mut o := []u8{len: n * 3}
+	apply(unsafe { &u16(src.data) }, &u16(unsafe { nil }), n, p, mut o, 3)
+	for i in 1 .. n {
+		for ch in 0 .. 3 {
+			assert math.abs(int(o[i * 3 + ch]) - int(o[(i - 1) * 3 + ch])) <= 3, 'px ${i} ch ${ch}'
+		}
+	}
+}
+
+// Быстрый путь (одна матрица) и путь по шагам стыкуются без шва: плавный
+// подъём яркости насыщенного цвета от тьмы до клипа
+fn test_wb_fast_path_seamless() {
+	c := r8_color()
+	for t in [f32(2600), 9000] {
+		k := c.wb_xform(t, 30)
+		assert k.lim > 0 && k.lim < 65535
+		n := 2000
+		mut src := []u16{len: n * 3}
+		for i in 0 .. n {
+			v := f64(i) / f64(n - 1) * 65535
+			src[i * 3] = u16(v)
+			src[i * 3 + 1] = u16(v * 0.55)
+			src[i * 3 + 2] = u16(v * 0.2)
+		}
+		p := Params{
+			dither: false
+			wb_on:  true
+			wb:     k
+		}
+		mut o := []u8{len: n * 3}
+		apply(unsafe { &u16(src.data) }, &u16(unsafe { nil }), n, p, mut o, 3)
+		// От ~5% яркости: у самой тьмы гамма круто растёт и шаг больше
+		for i in n / 20 .. n {
+			for ch in 0 .. 3 {
+				assert math.abs(int(o[i * 3 + ch]) - int(o[(i - 1) * 3 + ch])) <= 3, 'T ${t} px ${i} ch ${ch}'
+			}
+		}
+	}
 }

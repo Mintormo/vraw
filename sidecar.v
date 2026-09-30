@@ -59,6 +59,13 @@ struct SideState {
 	haze_depth f32
 	// Сочность (в старых файлах нет - 0)
 	vibrance f32
+	// Резкость по каналам и Capture-резкость (в старых файлах нет: по
+	// люме, сила 0; радиус 0 читается как 0.75, порог при нулевой силе -
+	// как 10)
+	sharp_rgb   bool
+	dc_amount   f32
+	dc_radius   f32
+	dc_contrast f32
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -125,6 +132,10 @@ fn side_state(e EditState) SideState {
 		haze:          p.haze
 		haze_depth:    p.haze_depth
 		vibrance:      p.vibrance
+		sharp_rgb:     p.sharp.rgb
+		dc_amount:     p.sharp.dc_amount
+		dc_radius:     p.sharp.dc_radius
+		dc_contrast:   p.sharp.dc_contrast
 	}
 }
 
@@ -144,10 +155,18 @@ fn edit_state(s SideState) !EditState {
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			sharp:         pipeline.Sharpen{
-				amount:  s.sharp_amount
-				radius:  if s.sharp_radius > 0 { s.sharp_radius } else { f32(1.0) }
-				detail:  s.sharp_detail
-				masking: s.sharp_masking
+				amount:      s.sharp_amount
+				radius:      if s.sharp_radius > 0 { s.sharp_radius } else { f32(1.0) }
+				detail:      s.sharp_detail
+				masking:     s.sharp_masking
+				rgb:         s.sharp_rgb
+				dc_amount:   s.dc_amount
+				dc_radius:   if s.dc_radius > 0 { s.dc_radius } else { f32(0.75) }
+				dc_contrast: if s.dc_contrast > 0 || s.dc_amount > 0 {
+					s.dc_contrast
+				} else {
+					f32(10)
+				}
 			}
 		}
 		highlight: s.highlight

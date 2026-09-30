@@ -44,6 +44,7 @@ mut:
 	corr         &lens.Corrector = unsafe { nil } // профиль lensfun или nil
 	curve        []f32 // камерная кривая кадра (match_curve), пустая - нет превью
 	nr_applied   [4]f32 = [f32(-1), -1, -1, -1]! // значения последней подготовки сырья
+	dc_applied   [3]f32 = [f32(-1), -1, -1]! // Capture-резкость последней подготовки (dc_key)
 	save_threads []thread // хендлы фоновых сохранений: wait после app.run()
 	// Подготовка сырья в фоне (prep_worker): не больше одного воркера.
 	// Запрос во время работы только меняет настройки - prep_done сверит
@@ -175,6 +176,12 @@ mut:
 	// снимка (флажок, вид - не правка)
 	haze      pipeline.HazeMap
 	haze_show bool
+	// Показ работы резкости вместо снимка (вид, не правка): флажок «маска
+	// краёв» и временный показ с Alt при перетаскивании ползунка резкости
+	// (sharp_drag - его режим, off - нет)
+	sharp_show   bool
+	sharp_drag   pipeline.SharpView
+	sharp_rgb_cb &vgui.CheckBox = unsafe { nil }
 	// Копирование настроек и пресеты (presets.v): буфер настроек и его
 	// группы (пусто - ничего не скопировано), пункт «Вставить настройки»,
 	// меню (номер пункта «Пресеты» в нём), вставка в кадры (paste_settings
@@ -235,8 +242,21 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if st.haze_show {
 		pipeline.haze_view(&st.haze, st.edit.params.haze_depth, mut cv.pixels, 4)
 	} else {
-		pipeline.apply_image(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) },
-			&st.haze, st.pw, st.ph, st.edit.params, preview_scale, mut cv.pixels, 4)
+		view := if st.sharp_drag != .off {
+			st.sharp_drag
+		} else if st.sharp_show {
+			pipeline.SharpView.mask
+		} else {
+			pipeline.SharpView.off
+		}
+		pipeline.apply_image_view(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) },
+			&st.haze, st.pw, st.ph, st.edit.params, preview_scale, view, mut cv.pixels, 4)
+	}
+	// Показ работы резкости - вид поверх снимка: гистограмма остаётся
+	// снимка (последняя посчитанная), подсветки клипа нет
+	if st.sharp_show || st.sharp_drag != .off {
+		cv.mark_dirty()
+		return
 	}
 	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
 	update_curve_histogram(mut st)
@@ -310,6 +330,7 @@ struct PrepJob {
 	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
 	ai_src    []u16  // результат модели по тому же сырью (копия) или пусто
 	ai_s      f32    // сила AI 0..100 (0 - без AI)
+	dc        pipeline.Sharpen // Capture-резкость (поля dc_*)
 }
 
 struct PrepResult {
@@ -319,6 +340,7 @@ struct PrepResult {
 	mask       []u16
 	nr         [4]f32
 	ai_s       f32
+	dc         pipeline.Sharpen
 }
 
 // make_prep_job снимает параметры подготовки с State (главный поток)
@@ -343,12 +365,23 @@ fn make_prep_job(mut st State) PrepJob {
 		nr:        st.edit.nr
 		ai_src:    if ai_s > 0 { st.ai_linear.clone() } else { []u16{} }
 		ai_s:      ai_s
+		dc:        st.edit.params.sharp
 	}
+}
+
+// dc_key - настройки Capture-резкости, от которых зависит подготовленное
+// сырьё (при выключенной радиус и порог не важны)
+fn dc_key(s pipeline.Sharpen) [3]f32 {
+	if s.dc_amount <= 0 {
+		return [f32(0), 0, 0]!
+	}
+	return [s.dc_amount, s.dc_radius, s.dc_contrast]!
 }
 
 // prep_compute - сама подготовка сырья, без обращений к State и vgui:
 // выполняется и в фоне (prep_worker), и напрямую (открытие файла).
 // Коррекция объектива ~0.6 с, импульсы ~1 с, шумодав ~1 с, ореолы ~0.5 с,
+// Capture-резкость ~0.6 с,
 // маска ~0.35 с на превью.
 fn prep_compute(job PrepJob) PrepResult {
 	buf := unsafe { &u16(job.src.data) }
@@ -373,16 +406,23 @@ fn prep_compute(job PrepJob) PrepResult {
 	if job.nr[3] > 0 {
 		pipeline.defringe(buf, job.w, job.h, job.nr[3])
 	}
+	// Capture-резкость - после шумодава (не усиливать шум), в свой буфер
+	lin := if job.dc.dc_amount > 0 {
+		pipeline.deconvolve(buf, job.w, job.h, job.dc, preview_scale)
+	} else {
+		job.src
+	}
 	// Маска «Тени/Света» зависит только от сырья (после коррекции
 	// объектива и шумодава!), поэтому считается здесь, а не на каждый ползунок.
 	mask := pipeline.blur_luma(buf, job.w, job.h)
 	return PrepResult{
 		gen:        job.gen
 		raw_linear: raw_linear
-		linear:     job.src
+		linear:     lin
 		mask:       mask
 		nr:         job.nr
 		ai_s:       job.ai_s
+		dc:         job.dc
 	}
 }
 
@@ -398,6 +438,7 @@ fn take_prep(mut st State, res PrepResult) {
 	st.mask = res.mask
 	st.haze = pipeline.HazeMap{}
 	st.nr_applied = res.nr
+	st.dc_applied = dc_key(res.dc)
 	st.ai_applied = res.ai_s
 }
 
@@ -693,6 +734,9 @@ struct SliderCfg {
 	get    fn (&EditState) f32     = unsafe { nil } // значение в снимке (откат)
 	set    fn (mut e EditState, v f32) = unsafe { nil } // запись значения в st.edit
 	fx     fn ()                   = unsafe { nil } // пересчёт после завершённой правки
+	// Показ с Alt при перетаскивании (ползунки резкости): вместо снимка -
+	// маска краёв или добавка резкости, пока зажат Alt; off - нет
+	drag_view pipeline.SharpView
 }
 
 // EditSlider - собранный ползунок: подпись, ползунок, значение
@@ -736,6 +780,14 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 	sl.on_change = fn [mut st, mut vl, mut sl, cfg, key] (v f32) {
 		cfg.set(mut st.edit, v)
 		vl.text = slider_text(cfg, v)
+		if sl.dragging && !st.suppress && cfg.drag_view != .off {
+			// Alt зажат - показ работы резкости сразу, по ходу драга
+			alt := vgui.key_mods() & vgui.sdl_kmod_alt != 0
+			if alt || st.sharp_drag != .off {
+				st.sharp_drag = if alt { cfg.drag_view } else { pipeline.SharpView.off }
+				cfg.fx()
+			}
+		}
 		if st.suppress || sl.dragging {
 			return
 		}
@@ -743,6 +795,7 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 		record(mut st, key, '${key} ${slider_hist_text(cfg, v)}', true)
 	}
 	sl.on_release = fn [mut st, cfg, key] (v f32) {
+		st.sharp_drag = .off
 		cfg.fx()
 		record(mut st, key, '${key} ${slider_hist_text(cfg, v)}', false)
 	}
@@ -1534,6 +1587,7 @@ fn main() {
 			e.params.sharp.amount = v
 		}
 		fx:     tone_fx
+		drag_view: .detail
 	})
 	mut sh_radius := edit_slider(mut st, SliderCfg{
 		label:  'Радиус'
@@ -1552,6 +1606,7 @@ fn main() {
 			e.params.sharp.radius = v
 		}
 		fx:     tone_fx
+		drag_view: .detail
 	})
 	mut sh_detail := edit_slider(mut st, SliderCfg{
 		label:  'Порог'
@@ -1566,6 +1621,7 @@ fn main() {
 			e.params.sharp.detail = v
 		}
 		fx:     tone_fx
+		drag_view: .detail
 	})
 	mut sh_mask := edit_slider(mut st, SliderCfg{
 		label:  'Маска краёв'
@@ -1580,10 +1636,82 @@ fn main() {
 			e.params.sharp.masking = v
 		}
 		fx:     tone_fx
+		drag_view: .mask
 	})
-	mut sharp_hint := vgui.label('Оценивать в масштабе 100% (1:1)')
+	// По каналам RGB - правка кадра (история, сайдкар)
+	mut sh_rgb_cb := vgui.checkbox('По каналам RGB')
+	sh_rgb_cb.on_change = fn [mut st, tone_fx] (v bool) {
+		st.edit.params.sharp.rgb = v
+		tone_fx()
+		record(mut st, 'sharp_rgb', 'Резкость по каналам RGB: ${on_off(v)}', false)
+	}
+	st.sharp_rgb_cb = sh_rgb_cb
+	// Маска краёв вместо снимка - вид, не правка (в историю не пишется)
+	mut sh_show_cb := vgui.checkbox('Показать маску краёв')
+	sh_show_cb.on_change = fn [mut st, tone_fx] (v bool) {
+		st.sharp_show = v
+		tone_fx()
+	}
+	mut sharp_hint := vgui.label('Оценивать в 100%. Alt при перетаскивании - маска или детали')
 	st.hint_labels << sharp_hint
 	sharp_hint.font_size = 12
+	// ── Capture-резкость: деконволюция Ричардсона-Люси по линейному сырью
+	// (pipeline/deconv.v) - подготовка сырья, как шумодав: пересчёт в фоне
+	// по отпусканию (prep_fx)
+	mut dc_amount := edit_slider(mut st, SliderCfg{
+		label:  'Сила'
+		hname:  'Capture-резкость: сила'
+		max:    100
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.dc_amount
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.dc_amount = v
+		}
+		fx:     prep_fx
+	})
+	mut dc_radius := edit_slider(mut st, SliderCfg{
+		label:  'Радиус'
+		hname:  'Capture-резкость: радиус'
+		min:    0.4
+		max:    1.5
+		def:    0.75
+		signed: false
+		show:   fn (v f32) string {
+			return '${v:.2f} px'
+		}
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.dc_radius
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.dc_radius = v
+		}
+		fx:     prep_fx
+	})
+	mut dc_contrast := edit_slider(mut st, SliderCfg{
+		label:  'Порог'
+		hname:  'Capture-резкость: порог'
+		max:    100
+		def:    10
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.sharp.dc_contrast
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.sharp.dc_contrast = v
+		}
+		fx:     prep_fx
+	})
+	mut usm_caption := vgui.label('Нерезкое маскирование')
+	usm_caption.font_style = .bold
+	mut dc_caption := vgui.label('Capture-резкость (деконволюция)')
+	dc_caption.font_style = .bold
+	mut dc_hint := vgui.label('Возвращает резкость оптики; порог бережёт ровное и шум')
+	st.hint_labels << dc_hint
+	dc_hint.font_size = 12
 	// ── Удаление дымки (как в RawTherapee): тёмный канал, pipeline/dehaze.v.
 	// Карта дымки - по сырью кадра, сила и глубина - живые (apply)
 	mut hz_str := edit_slider(mut st, SliderCfg{
@@ -1780,6 +1908,7 @@ fn main() {
 		st.mask = res.mask
 		st.haze = pipeline.HazeMap{}
 		st.nr_applied = [f32(0), 0, 0, 0]!
+		st.dc_applied = dc_key(pipeline.Sharpen{})
 		st.ai_applied = 0
 		st.lens_dirty = false
 		st.raw_pending = false
@@ -2273,6 +2402,9 @@ fn main() {
 	mut shr_row := edit_row(mut st, mut sh_radius, lbl_w, val_w)
 	mut shd_row := edit_row(mut st, mut sh_detail, lbl_w, val_w)
 	mut shm_row := edit_row(mut st, mut sh_mask, lbl_w, val_w)
+	mut dca_row := edit_row(mut st, mut dc_amount, lbl_w, val_w)
+	mut dcr_row := edit_row(mut st, mut dc_radius, lbl_w, val_w)
+	mut dcc_row := edit_row(mut st, mut dc_contrast, lbl_w, val_w)
 	mut hzs_row := edit_row(mut st, mut hz_str, lbl_w, val_w)
 	mut hzd_row := edit_row(mut st, mut hz_depth, lbl_w, val_w)
 	// AI-шумодав - блок над классическими ползунками (ai_nr.v). Сила -
@@ -2359,10 +2491,19 @@ fn main() {
 		SectionRow{df_row, 26},
 	]))
 	acc.add_section('Резкость', section([
+		SectionRow{dc_caption, 16},
+		SectionRow{dca_row, 26},
+		SectionRow{dcr_row, 26},
+		SectionRow{dcc_row, 26},
+		SectionRow{dc_hint, 16},
+		SectionRow{vgui.separator(), 9},
+		SectionRow{usm_caption, 16},
 		SectionRow{sha_row, 26},
 		SectionRow{shr_row, 26},
 		SectionRow{shd_row, 26},
 		SectionRow{shm_row, 26},
+		SectionRow{sh_rgb_cb, 26},
+		SectionRow{sh_show_cb, 26},
 		SectionRow{sharp_hint, 16},
 	]))
 	// История - последней секцией, открыта: 8 строк списка и подсказка

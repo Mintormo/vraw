@@ -108,3 +108,76 @@ fn test_gauss_blur_preserves_mean() {
 	assert math.abs(s - 100) < 0.01
 	assert b[7 * w + 10] < 100 && b[7 * w + 10] > b[7 * w + 11]
 }
+
+fn test_sharpen_rgb_gray_matches_luma() {
+	// На сером кадре резкость по каналам совпадает с резкостью по люме
+	w, h := 40, 20
+	src := edge_frame(w, h, 0)
+	a := render_sharp(src, w, h, Sharpen{ amount: 100 })
+	b := render_sharp(src, w, h, Sharpen{ amount: 100, rgb: true })
+	for i in 0 .. a.len {
+		assert math.abs(int(a[i]) - int(b[i])) <= 1
+	}
+}
+
+fn test_sharpen_rgb_colored_edge() {
+	// Край красное | зелёное при равной люме: по люме добавки почти нет,
+	// по каналам - красный у края ещё краснее
+	w, h := 40, 20
+	mut src := []u16{len: w * h * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			i := (y * w + x) * 3
+			if x < w / 2 {
+				src[i] = 30000
+				src[i + 1] = 4000
+			} else {
+				src[i] = 4000
+				src[i + 1] = 12000
+			}
+			src[i + 2] = 4000
+		}
+	}
+	base := render_sharp(src, w, h, Sharpen{})
+	rgb := render_sharp(src, w, h, Sharpen{ amount: 100, rgb: true })
+	i := (10 * w + w / 2 - 1) * 3
+	assert int(rgb[i]) > int(base[i]) + 3
+	assert rgb[i + 1] <= base[i + 1]
+}
+
+fn test_sharpen_views() {
+	w, h := 40, 20
+	src := edge_frame(w, h, 0)
+	p := Params{
+		dither: false
+		sharp:  Sharpen{
+			amount:  100
+			masking: 50
+		}
+	}
+	mut m := []u8{len: w * h * 3}
+	apply_image_view(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w, h, p,
+		1.0, .mask, mut m, 3)
+	mut d := []u8{len: w * h * 3}
+	apply_image_view(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w, h, p,
+		1.0, .detail, mut d, 3)
+	row := 10 * w
+	// Маска: у края светлая, на ровном - чёрная
+	assert m[(row + w / 2) * 3] > 200
+	assert m[(row + 3) * 3] == 0
+	// Детали: на ровном - серое 128, у края - отклонение в обе стороны
+	assert d[(row + 3) * 3] == 128
+	assert d[(row + w / 2 - 1) * 3] < 128
+	assert d[(row + w / 2) * 3] > 128
+	// Показ без резкости (amount 0) - маска всё равно видна
+	mut m0 := []u8{len: w * h * 3}
+	p0 := Params{
+		dither: false
+		sharp:  Sharpen{
+			masking: 50
+		}
+	}
+	apply_image_view(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w, h, p0,
+		1.0, .mask, mut m0, 3)
+	assert m0 == m
+}

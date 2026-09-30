@@ -65,12 +65,12 @@ pub mut:
 	// Дизеринг финального квантования в 8 бит (TPDF ±1 LSB) - убирает
 	// полосы (banding) на гладких градиентах (небо). Включён по умолчанию.
 	dither bool = true
-	// Баланс белого (wb.v): матрица 3x3 в линейном sRGB, строки - выход;
-	// накладывается на сырьё первой. Производное поле - считается из
-	// температуры и оттенка кадра (CamColor.wb_matrix); wb_on = false -
-	// «как снято», матрицы нет.
+	// Баланс белого (wb.v): матрица по шагам через пространство камеры с
+	// клипом каналов там (WbXform); накладывается на сырьё первой.
+	// Производное поле - считается из температуры и оттенка кадра
+	// (CamColor.wb_xform); wb_on = false - «как снято», матрицы нет.
 	wb_on bool
-	wb    [9]f32
+	wb    WbXform
 	// Удаление дымки (dehaze.v, только в apply_image - нужна карта кадра):
 	// сила -100..100 (минус - добавить дымку), глубина 0..100 - насколько
 	// близко к камере действует (25 - как у тёмного канала без поправки)
@@ -80,13 +80,22 @@ pub mut:
 	sharp Sharpen
 }
 
-// Sharpen - резкость: unsharp mask по люме в тоновом пространстве
+// Sharpen - резкость: unsharp mask в тоновом пространстве (по люме или
+// по каналам RGB) и Capture-резкость - деконволюция Ричардсона-Люси по
+// линейной люме (deconv.v, до тона)
 pub struct Sharpen {
 pub mut:
 	amount  f32        // величина 0..150 (%), 0 - выключена
 	radius  f32 = 1.0 // радиус размытия, px полного кадра (0.5..3)
 	detail  f32        // порог 0..100: слабые перепады (шум) не усиливаются
 	masking f32        // маска по краям 0..100: ровные области не трогаются
+	rgb     bool       // по каналам RGB (резче цветные края, возможны цветные ореолы)
+	// Capture-резкость: сила 0..100 (0 - выключена), радиус размытия
+	// оптики (px полного кадра, 0.4..1.5), порог контраста 0..100 -
+	// ровные и шумные места не трогаются
+	dc_amount   f32
+	dc_radius   f32 = 0.75
+	dc_contrast f32 = 10
 }
 
 const inv_gamma = f32(1.0 / 2.2)
@@ -583,11 +592,13 @@ pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride i
 	render(src, mask, unsafe { nil }, npix, p, mut dst, dst_stride, unsafe { nil })
 }
 
-// Защита светов при ББ: от этого уровня входа до клипа матрица плавно
-// уступает масштабу (иначе клипнутое белое после матрицы ББ окрашивается -
-// розовые или голубые пятна вместо белого)
-const wb_hl_lo = f32(0.9 * 65535.0)
-const wb_hl_k = f32(1.0 / (0.1 * 65535.0))
+// Клип ББ в пространстве камеры (wb.v, WbXform): предел канала и порог
+// «канал у предела» - от wb_sat_lo до почти 65535 вес пересвета плавно
+// растёт 0 -> 1 (по сырью «как снято» клипнутое значение чуть ниже
+// 65535 - демозаика, клип выхода LibRaw)
+const wb_clip = f32(65535.0)
+const wb_sat_lo = f32(0.98 * 65535.0)
+const wb_sat_k = f32(1.0 / (0.018 * 65535.0))
 
 // render - пайплайн по пикселям. tone == nil - 8-битный результат в dst;
 // иначе тоновые значения (0..255, ×256 в u16, без квантования и дизера)
@@ -610,18 +621,13 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	sat := p.saturation
 	vib := p.vibrance / 100.0
 	wb_on := p.wb_on
-	m := p.wb
-	// Защита светов: у клипа матрица плавно сменяется на «как снято» ×
-	// наибольшая сумма строки - клипнутое белое уходит в клип всеми
-	// каналами и остаётся белым, а яркий насыщенный цвет без смены ББ
-	// (тождественная матрица) не меняется
-	mut wb_hl_s := f32(1)
-	for r in 0 .. 3 {
-		rs := m[r * 3] + m[r * 3 + 1] + m[r * 3 + 2]
-		if rs > wb_hl_s {
-			wb_hl_s = rs
-		}
-	}
+	wx := p.wb
+	wc := wx.cam
+	wd := wx.d
+	wr := wx.rgb
+	wg := wx.g
+	wm := wx.m
+	wl := wx.lim
 	to_tone := !isnil(tone)
 	unsafe {
 		mut s := &u16(src)
@@ -659,14 +665,15 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 					cb = 0
 				}
 			}
-			if wb_on {
-				// Баланс белого - матрица по линейному сырью
+			mx_in := if cr > cg { if cr > cb { cr } else { cb } } else { if cg > cb { cg } else { cb } }
+			if wb_on && mx_in < wl {
+				// Далеко от клипа - одной матрицей
 				ir := cr
 				ig := cg
 				ib := cb
-				cr = m[0] * ir + m[1] * ig + m[2] * ib
-				cg = m[3] * ir + m[4] * ig + m[5] * ib
-				cb = m[6] * ir + m[7] * ig + m[8] * ib
+				cr = wm[0] * ir + wm[1] * ig + wm[2] * ib
+				cg = wm[3] * ir + wm[4] * ig + wm[5] * ib
+				cb = wm[6] * ir + wm[7] * ig + wm[8] * ib
 				if cr < 0 {
 					cr = 0
 				}
@@ -676,15 +683,43 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 				if cb < 0 {
 					cb = 0
 				}
-				mx_in := if ir > ig { if ir > ib { ir } else { ib } } else { if ig > ib { ig } else { ib } }
-				if mx_in > wb_hl_lo {
-					mut w := (mx_in - wb_hl_lo) * wb_hl_k
-					if w > 1 {
-						w = 1
+			} else if wb_on {
+				// Светлое: по шагам (wb.v) - в камеру, множители, клип
+				// каналов в камере, обратно в sRGB
+				mut c := [3]f32{}
+				c[0] = wc[0] * cr + wc[1] * cg + wc[2] * cb
+				c[1] = wc[3] * cr + wc[4] * cg + wc[5] * cb
+				c[2] = wc[6] * cr + wc[7] * cg + wc[8] * cb
+				// Пересвет на сенсоре: канал, клипающийся только там, у предела
+				sens := (c[wg] - wb_sat_lo) * wb_sat_k
+				mut o := [3]f32{}
+				for ch in 0 .. 3 {
+					mut v := c[ch] * wd[ch]
+					if sens > 0 {
+						// Клипнутый канал пересвеченного пикселя - в предел
+						// (под новым ББ он тоже за пределом)
+						mut q := (c[ch] - wb_sat_lo) * wb_sat_k
+						if q > 0 {
+							q = if q > 1 { 1 } else { q }
+							sw := if sens > 1 { f32(1) } else { sens }
+							v += (wb_clip - v) * sw * q
+						}
 					}
-					cr += (wb_hl_s * ir - cr) * w
-					cg += (wb_hl_s * ig - cg) * w
-					cb += (wb_hl_s * ib - cb) * w
+					// Отрицательные (вне охвата) не трогаем - как у матрицы
+					// быстрого пути, без шва на границе
+					o[ch] = if v > wb_clip { wb_clip } else { v }
+				}
+				cr = wr[0] * o[0] + wr[1] * o[1] + wr[2] * o[2]
+				cg = wr[3] * o[0] + wr[4] * o[1] + wr[5] * o[2]
+				cb = wr[6] * o[0] + wr[7] * o[1] + wr[8] * o[2]
+				if cr < 0 {
+					cr = 0
+				}
+				if cg < 0 {
+					cg = 0
+				}
+				if cb < 0 {
+					cb = 0
 				}
 			}
 			if wb_on || haze_on {

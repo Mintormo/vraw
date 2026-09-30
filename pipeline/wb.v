@@ -14,7 +14,16 @@ module pipeline
 // 1667..25000 K), оттенок - сдвиг поперёк неё в CIE 1960 uv (Duv, как в
 // Lightroom/DNG SDK: 1 единица оттенка = 1/3000 Duv, плюс - источник
 // зеленее, поэтому картинка пурпурнее). Всё - на один кадр (камера),
-// вызывается при смене настроек, на пиксель - только матрица.
+// вызывается при смене настроек.
+//
+// На пиксель матрица M идёт по шагам (WbXform): в пространство камеры
+// (rgb_cam⁻¹), множители m_T / m_shot, клип каналов, обратно (rgb_cam) -
+// так же, как проявил бы LibRaw с множителями m_T (user_mul): канал,
+// ушедший за предел, клипается в камере, а не красит светлое в sRGB.
+// Канал с наименьшим множителем «как снято» (обычно G) клипается только
+// на сенсоре - когда он у предела, пиксель пересвечен на сенсоре, и
+// остальные его клипнутые каналы тоже уходят в предел (белое остаётся
+// белым). Сравнение с user_mul на 21 кадре при 3000 K - ROADMAP.
 import math
 
 pub const wb_temp_min = f32(2000)
@@ -180,6 +189,84 @@ pub fn (c CamColor) wb_matrix(temp f32, tint f32) [9]f32 {
 	mut out := [9]f32{}
 	for i in 0 .. 9 {
 		out[i] = f32(m[i])
+	}
+	return out
+}
+
+// WbXform - баланс белого по шагам (см. начало файла): c = cam · in,
+// o = c · d с клипом в камере, out = rgb · o. g - канал, клипающийся только
+// на сенсоре (наименьший множитель «как снято»).
+pub struct WbXform {
+pub:
+	cam [9]f32 // rgb_cam⁻¹: линейный sRGB -> камера (после ББ «как снято»)
+	d   [3]f32 // m_T / m_shot, нормированы по G
+	rgb [9]f32 // rgb_cam: камера -> линейный sRGB
+	g   int
+	// Быстрый путь: при max(вход) < lim ни один канал камеры не дойдёт до
+	// клипа и порога пересвета - хватает готовой матрицы m (rgb·d·cam)
+	m   [9]f32
+	lim f32
+}
+
+// wb_xform - ББ под источник T, оттенок по шагам для пайплайна
+pub fn (c CamColor) wb_xform(temp f32, tint f32) WbXform {
+	k := c.cam()
+	resp := mat_vec(k.cam_xyz, illum_xyz(temp, tint))
+	mut d := [f32(1), 1, 1]!
+	if resp[0] > 0 && resp[1] > 0 && resp[2] > 0 {
+		for i in 0 .. 3 {
+			d[i] = f32((resp[1] / resp[i]) / k.shot[i])
+		}
+	}
+	mut g := 0
+	for i in 1 .. 3 {
+		if k.shot[i] < k.shot[g] {
+			g = i
+		}
+	}
+	mut cm := [9]f32{}
+	mut rm := [9]f32{}
+	for i in 0 .. 9 {
+		cm[i] = f32(k.cam_rgb[i])
+		rm[i] = f32(k.rgb_cam[i])
+	}
+	mut x := WbXform{
+		cam: cm
+		d:   d
+		rgb: rm
+		g:   g
+	}
+	// |c_i · d_i| <= max(вход) · Σ_j |cam_ij| · max(d_i, 1); порог пересвета
+	// wb_sat_lo ниже клипа - по нему
+	mut b := f32(0)
+	for i in 0 .. 3 {
+		mut s := f32(0)
+		for j in 0 .. 3 {
+			s += f32(math.abs(cm[i * 3 + j]))
+		}
+		s *= if d[i] > 1 { d[i] } else { f32(1) }
+		if s > b {
+			b = s
+		}
+	}
+	return WbXform{
+		...x
+		m:   x.matrix()
+		lim: if b > 0 { wb_sat_lo / b } else { 0 }
+	}
+}
+
+// matrix - та же матрица M одним куском (без клипа в камере)
+pub fn (x WbXform) matrix() [9]f32 {
+	mut out := [9]f32{}
+	for i in 0 .. 3 {
+		for j in 0 .. 3 {
+			mut s := f32(0)
+			for k in 0 .. 3 {
+				s += x.rgb[i * 3 + k] * x.d[k] * x.cam[k * 3 + j]
+			}
+			out[i * 3 + j] = s
+		}
 	}
 	return out
 }

@@ -430,10 +430,14 @@ fn test_sidecar_wb_sharp_fields() {
 	st.edit.params.haze_depth = 0
 	st.edit.params.vibrance = 35
 	st.edit.params.sharp = pipeline.Sharpen{
-		amount:  60
-		radius:  1.5
-		detail:  20
-		masking: 30
+		amount:      60
+		radius:      1.5
+		detail:      20
+		masking:     30
+		rgb:         true
+		dc_amount:   70
+		dc_radius:   1.1
+		dc_contrast: 0
 	}
 	drag(mut exp, 0.3)
 	text := os.read_file(st.side_path)!
@@ -444,10 +448,13 @@ fn test_sidecar_wb_sharp_fields() {
 	assert e.params.sharp.detail == 20 && e.params.sharp.masking == 30
 	assert e.params.haze == 40 && e.params.haze_depth == 0
 	assert e.params.vibrance == 35
+	assert e.params.sharp.rgb && e.params.sharp.dc_amount == 70
+	assert e.params.sharp.dc_radius == f32(1.1) && e.params.sharp.dc_contrast == 0
 	// Старый файл: полей нет (чужие ключи json2 пропускает)
 	mut old := text
 	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
-		'sharp_masking', 'haze', 'haze_depth', 'vibrance'] {
+		'sharp_masking', 'haze', 'haze_depth', 'vibrance', 'sharp_rgb', 'dc_amount', 'dc_radius',
+		'dc_contrast'] {
 		old = old.replace('"${key}"', '"old_${key}"')
 	}
 	assert !old.contains('"wb_mode"')
@@ -475,7 +482,7 @@ fn test_wb_derive() {
 	d1 := with_derived(e, []f32{}, cam)
 	assert d1.params.wb_on
 	// Лампа накаливания: серое становится синее (B-строка больше R-строки)
-	m := d1.params.wb
+	m := d1.params.wb.matrix()
 	assert m[6] + m[7] + m[8] > m[0] + m[1] + m[2]
 	// Ползунок температуры: положение <-> K
 	for t in [f32(2000), 3200, 5000, 6500, 12000] {
