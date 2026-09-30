@@ -191,6 +191,10 @@ mut:
 	import_presets fn ()       = unsafe { nil }
 	export_presets fn (Preset) = unsafe { nil }
 	groups_ui    &GroupsUi       = unsafe { nil }
+	// Показ пересветов и провалов (clipping.v) - вид, не правка; пункт меню
+	clip_hi    bool
+	clip_lo    bool
+	m_clipwarn &vgui.MenuItem = unsafe { nil }
 }
 
 // Превью - половинного размера (LibRaw half-size): радиус резкости задан
@@ -234,9 +238,17 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		pipeline.apply_image(unsafe { &u16(st.linear.data) }, unsafe { &u16(st.mask.data) },
 			&st.haze, st.pw, st.ph, st.edit.params, preview_scale, mut cv.pixels, 4)
 	}
-	cv.mark_dirty()
 	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, cv.pixels)
 	update_curve_histogram(mut st)
+	// Пересветы и провалы (clipping.v): треугольники по гистограмме
+	// результата, подсветка - поверх уже посчитанной гистограммы
+	hi_seen := st.hist_r[255] + st.hist_g[255] + st.hist_b[255] > 0
+	lo_seen := st.hist_r[0] + st.hist_g[0] + st.hist_b[0] > 0
+	draw_clip_marks(mut hist, hi_seen, lo_seen, st.clip_hi, st.clip_lo)
+	if !st.haze_show {
+		mark_clipping(mut cv.pixels, st.clip_hi, st.clip_lo)
+	}
+	cv.mark_dirty()
 }
 
 // load_preview перепроявляет открытый RAW в линейное 16-битное превью
@@ -1072,6 +1084,22 @@ fn main() {
 	hist.set_wheel_zoom(false)
 	hist.set_pan_buttons(0)
 	hist.fill(vgui.Color{16, 16, 18, 255})
+	// Треугольники в верхних углах (clipping.v): левый - провалы, правый -
+	// пересветы; щелчок включает/выключает показ своего края
+	hist.take_keys = false
+	hist.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
+		if ev.kind != .pointer_down || ev.button != 1 {
+			return
+		}
+		match clip_hit_test(ev.x, ev.y, 256) {
+			1 { set_clip_warn(mut st, !st.clip_hi, st.clip_lo) }
+			-1 { set_clip_warn(mut st, st.clip_hi, !st.clip_lo) }
+			else {}
+		}
+	}
+	mut hist_tip := vgui.tooltip('Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба')
+	hist_tip.attach(hist)
+	st.tips << hist_tip
 
 	// Уведомления (тосты) вместо статусной строки: начало/окончание
 	// обработки, ошибки. NotificationManager добавляется напрямую в окно
@@ -1144,6 +1172,9 @@ fn main() {
 	st.cv = cv
 	// Пипетка баланса белого (wb_ui.v): щелчок левой кнопкой по снимку.
 	// Панорама - средней и правой кнопками, левая холсту не нужна.
+	// Холсту нужна только мышь: клавиши в фокусе не забирает - иначе после
+	// щелчка по снимку не работали бы меню (J) и ←/→ ленты
+	cv.take_keys = false
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
 		if st.wb_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
 			wb_pick_at(mut st, ev.x, ev.y)
@@ -2183,6 +2214,13 @@ fn main() {
 		set_strip_open(mut st, v)
 	}
 	st.m_strip = m_strip
+	// Пересветы и провалы (clipping.v): J - оба сразу, как в Lightroom
+	mut m_clipwarn := vgui.menu_checkbox('Пересветы и провалы', false)
+	m_clipwarn.shortcut = 'J'
+	m_clipwarn.on_toggle = fn [mut st] (v bool) {
+		set_clip_warn(mut st, v, v)
+	}
+	st.m_clipwarn = m_clipwarn
 	// Фон вокруг снимка: пункты-флажки, работают как переключатель
 	// (отмечен ровно один - set_viewer_bg)
 	mut m_bg := vgui.menu_submenu('Фон вокруг снимка')
@@ -2204,8 +2242,8 @@ fn main() {
 		st.m_theme << it
 		m_themes.add(it)
 	}
-	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, vgui.menu_separator(), m_strip,
-		m_bg, m_themes])
+	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, vgui.menu_separator(), m_clipwarn,
+		m_strip, m_bg, m_themes])
 
 	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
