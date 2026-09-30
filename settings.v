@@ -25,6 +25,9 @@ mut:
 	// Отрицание нарочно: в settings.json старой версии поля нет, json2
 	// даст false - AI при экспорте остаётся включённым
 	export_no_ai bool
+	// группы настроек в окне «Копировать настройки» и «Сохранить пресет»
+	// (presets.v) - последний выбор; нет в файле - все
+	copy_groups []string = copy_groups.clone()
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -69,6 +72,11 @@ fn load_settings() Settings {
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()
 		export_no_ai:  s.export_no_ai
+		copy_groups:   if known_groups(s.copy_groups).len > 0 {
+			known_groups(s.copy_groups)
+		} else {
+			copy_groups.clone()
+		}
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {
 			s.jpeg_quality

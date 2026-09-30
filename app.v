@@ -175,6 +175,22 @@ mut:
 	// снимка (флажок, вид - не правка)
 	haze      pipeline.HazeMap
 	haze_show bool
+	// Копирование настроек и пресеты (presets.v): буфер настроек и его
+	// группы (пусто - ничего не скопировано), пункт «Вставить настройки»,
+	// меню (номер пункта «Пресеты» в нём), вставка в кадры (paste_settings
+	// с холстами и тостами) и окно групп (true - сохранение пресета)
+	clip         EditState
+	clip_groups  []string
+	m_paste      &vgui.MenuItem = unsafe { nil }
+	bar          &vgui.MenuBar  = unsafe { nil }
+	presets_menu int = -1
+	paste_fn     fn (EditState, []string, string) = unsafe { nil }
+	show_groups  fn (bool)       = unsafe { nil }
+	// импорт (системный диалог выбора файлов) и экспорт пресета
+	// (Preset{} - всех в папку); создаются в main - им нужны окно и App
+	import_presets fn ()       = unsafe { nil }
+	export_presets fn (Preset) = unsafe { nil }
+	groups_ui    &GroupsUi       = unsafe { nil }
 }
 
 // Превью - половинного размера (LibRaw half-size): радиус резкости задан
@@ -1784,6 +1800,12 @@ fn main() {
 	strip.on_dbl_click = fn [goto_frame] (idx int, text string) {
 		goto_frame(idx)
 	}
+	// Ctrl/Shift+щелчок - несколько кадров: в них вставляются настройки
+	// (presets.v); число выделенных - в подписи над лентой
+	strip.multi_select = true
+	strip.on_select = fn [mut st] (idx int, text string) {
+		strip_info_text(mut st)
+	}
 	st.strip = strip
 	mut strip_info := vgui.label('')
 	st.secondary_labels << strip_info
@@ -2054,8 +2076,89 @@ fn main() {
 	m_settings.on_click = fn [mut st] () {
 		st.open_settings()
 	}
-	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_reset,
-		vgui.menu_separator(), m_settings])
+	// Копирование настроек и пресеты (presets.v): окно групп, вставка в
+	// открытый кадр или в выделенные в ленте
+	st.paste_fn = fn [mut st, mut cv, mut hist, mut nm, mut app] (src EditState, groups []string, name string) {
+		paste_settings(mut st, src, groups, name, mut cv, mut hist, mut nm, mut app)
+	}
+	st.show_groups = fn [mut st, mut app, win] (preset bool) {
+		show_groups(mut st, mut app, win, preset)
+	}
+	mut m_copy := vgui.menu_action('Копировать настройки...')
+	m_copy.shortcut = 'Ctrl+Shift+C'
+	m_copy.on_click = fn [mut st] () {
+		st.show_groups(false)
+	}
+	mut m_paste := vgui.menu_action('Вставить настройки')
+	m_paste.shortcut = 'Ctrl+Shift+V'
+	m_paste.enabled = false
+	m_paste.on_click = fn [mut st] () {
+		if st.clip_groups.len > 0 {
+			st.paste_fn(st.clip, st.clip_groups, 'Вставка настроек')
+		}
+	}
+	st.m_paste = m_paste
+	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
+		vgui.menu_separator(), m_reset, vgui.menu_separator(), m_settings])
+	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
+	st.bar = bar
+	st.import_presets = fn [mut st, mut app, win, mut nm] () {
+		files := vgui.native_open_files_dialog(win, mut app, vgui.NativeFileDialogConfig{
+			filter_names:    ['Пресеты vraw', 'Все файлы']
+			filter_patterns: ['json', '*']
+		})
+		if files.len == 0 {
+			return
+		}
+		mut names := []string{}
+		mut failed := []string{}
+		for f in files {
+			names << import_preset(f, presets_dir()) or {
+				failed << '${os.file_name(f)}: ${err.msg()}'
+				continue
+			}
+		}
+		rebuild_presets_menu(mut st)
+		if failed.len > 0 {
+			nm.show_error('Не импортировано ${failed.len} из ${files.len}: ${failed[0]}')
+		} else if names.len == 1 {
+			nm.show_success('Пресет «${names[0]}» импортирован')
+		} else {
+			nm.show_success('Импортировано пресетов: ${names.len}')
+		}
+	}
+	st.export_presets = fn [mut app, win, mut nm] (p Preset) {
+		if p.path.len > 0 {
+			dst := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
+				default_name:    '${p.name}.json'
+				filter_names:    ['Пресеты vraw']
+				filter_patterns: ['json']
+			})
+			if dst.len == 0 {
+				return
+			}
+			path := if dst.to_lower().ends_with('.json') { dst } else { dst + '.json' }
+			export_preset(p, path) or {
+				nm.show_error('Пресет не экспортирован: ${err.msg()}')
+				return
+			}
+			nm.show_success('Пресет «${p.name}» сохранён: ${os.file_name(path)}')
+			return
+		}
+		all := list_presets(presets_dir())
+		dir := vgui.native_select_folder_dialog(win, mut app, vgui.NativeFileDialogConfig{})
+		if dir.len == 0 {
+			return
+		}
+		n := export_presets(all, dir) or {
+			nm.show_error('Пресеты не экспортированы: ${err.msg()}')
+			return
+		}
+		nm.show_success('Экспортировано пресетов: ${n} в ${os.file_name(dir)}')
+	}
+	st.presets_menu = bar.entries.len
+	bar.add_menu('Пресеты', []&vgui.MenuItem{})
+	rebuild_presets_menu(mut st)
 
 	mut m_fit := vgui.menu_action('Вписать')
 	m_fit.shortcut = 'Ctrl+0'

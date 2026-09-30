@@ -178,11 +178,17 @@ fn edit_state(s SideState) !EditState {
 
 // encode_sidecar - история State как JSON-документ сайдкара
 fn encode_sidecar(st &State) string {
+	return encode_history(st.history, st.hist_pos)
+}
+
+// encode_history - история и текущая позиция как JSON-документ сайдкара
+// (и для кадра, который не открыт: вставка настроек, presets.v)
+fn encode_history(history []HistEntry, pos int) string {
 	mut f := SideFile{
-		state:   side_state(st.history[st.hist_pos].state)
-		current: st.hist_pos
+		state:   side_state(history[pos].state)
+		current: pos
 	}
-	for h in st.history {
+	for h in history {
 		f.history << SideEntry{
 			name:  h.name
 			key:   h.key
@@ -248,17 +254,22 @@ fn sync_sidecar(mut st State) {
 	if st.history.len == 1 && !os.exists(st.side_path) {
 		return
 	}
-	tmp := st.side_path + '.tmp'
-	os.write_file(tmp, encode_sidecar(st)) or {
-		sidecar_error(mut st, err)
-		return
-	}
-	os.mv(tmp, st.side_path) or {
-		os.rm(tmp) or {}
+	write_atomic(st.side_path, encode_sidecar(st)) or {
 		sidecar_error(mut st, err)
 		return
 	}
 	mark_edited(mut st) // отметка «изменён» на миниатюре ленты
+}
+
+// write_atomic - запись через временный файл и переименование: сбой
+// посреди записи не оставит обрезанный файл
+fn write_atomic(path string, text string) ! {
+	tmp := path + '.tmp'
+	os.write_file(tmp, text)!
+	os.mv(tmp, path) or {
+		os.rm(tmp) or {}
+		return err
+	}
 }
 
 fn sidecar_error(mut st State, err IError) {

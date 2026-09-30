@@ -375,11 +375,23 @@ fn sync_strip(mut st State) {
 		l.font_style = if cur { vgui.FontStyle.bold } else { vgui.FontStyle.regular }
 	}
 	center_strip(mut st)
-	if !isnil(st.strip_info) {
-		mut info := st.strip_info
-		pos := if st.frame_idx >= 0 { '${st.frame_idx + 1} из ${st.frames.len}' } else { '${st.frames.len} кадров' }
-		info.text = '${os.file_name(st.folder)}  ·  ${pos}'
+	strip_info_text(mut st)
+}
+
+// strip_info_text - подпись над лентой: папка, «N из M», при выделении
+// нескольких кадров (Ctrl/Shift+щелчок) - «выделено K»
+fn strip_info_text(mut st State) {
+	if isnil(st.strip_info) || isnil(st.strip) {
+		return
 	}
+	mut info := st.strip_info
+	pos := if st.frame_idx >= 0 { '${st.frame_idx + 1} из ${st.frames.len}' } else { '${st.frames.len} кадров' }
+	mut text := '${os.file_name(st.folder)}  ·  ${pos}'
+	n := st.strip.get_selection().len
+	if n > 1 {
+		text += '  ·  выделено ${n}'
+	}
+	info.text = text
 }
 
 // strip_item_width - ширина ячейки ленты под высоту её панели pane_h
