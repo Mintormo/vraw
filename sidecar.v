@@ -57,6 +57,8 @@ struct SideState {
 	// при нулевой силе 0 читается как 25 - по умолчанию)
 	haze       f32
 	haze_depth f32
+	// Сочность (в старых файлах нет - 0)
+	vibrance f32
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -122,6 +124,7 @@ fn side_state(e EditState) SideState {
 		sharp_masking: p.sharp.masking
 		haze:          p.haze
 		haze_depth:    p.haze_depth
+		vibrance:      p.vibrance
 	}
 }
 
@@ -135,6 +138,7 @@ fn edit_state(s SideState) !EditState {
 			shadows:       s.shadows
 			contrast:      s.contrast
 			saturation:    s.saturation
+			vibrance:      s.vibrance
 			sh_shadows:    s.sh_shadows
 			sh_highlights: s.sh_highlights
 			haze:          s.haze

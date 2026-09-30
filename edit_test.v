@@ -428,6 +428,7 @@ fn test_sidecar_wb_sharp_fields() {
 	st.edit.wb_tint = 10
 	st.edit.params.haze = 40
 	st.edit.params.haze_depth = 0
+	st.edit.params.vibrance = 35
 	st.edit.params.sharp = pipeline.Sharpen{
 		amount:  60
 		radius:  1.5
@@ -442,10 +443,11 @@ fn test_sidecar_wb_sharp_fields() {
 	assert e.params.sharp.amount == 60 && e.params.sharp.radius == f32(1.5)
 	assert e.params.sharp.detail == 20 && e.params.sharp.masking == 30
 	assert e.params.haze == 40 && e.params.haze_depth == 0
+	assert e.params.vibrance == 35
 	// Старый файл: полей нет (чужие ключи json2 пропускает)
 	mut old := text
 	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
-		'sharp_masking', 'haze', 'haze_depth'] {
+		'sharp_masking', 'haze', 'haze_depth', 'vibrance'] {
 		old = old.replace('"${key}"', '"old_${key}"')
 	}
 	assert !old.contains('"wb_mode"')
@@ -454,6 +456,7 @@ fn test_sidecar_wb_sharp_fields() {
 	assert o.wb_mode == '' && o.params.sharp.amount == 0 && o.params.sharp.radius == 1
 	assert o.params.sharp == neutral_edit().params.sharp
 	assert o.params.haze == 0 && o.params.haze_depth == 25
+	assert o.params.vibrance == 0
 }
 
 // Режим «как снято» - без матрицы; другой режим - матрица по цвету камеры

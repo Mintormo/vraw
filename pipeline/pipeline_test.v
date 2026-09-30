@@ -311,3 +311,44 @@ fn test_hsl_equalizer() {
 	assert r3[0] >= r3[1]
 	assert px1(20000, 20000, 20000, ph) == gray
 }
+
+// Сочность: блёклый цвет поднимается сильнее насыщенного, тон кожи -
+// слабее такого же блёклого голубого, серое не меняется, минус - к серому
+fn test_vibrance() {
+	// Размах каналов (max - min) пикселя тонового пространства
+	spread := fn (r f32, g f32, b f32) f32 {
+		mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
+		mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
+		return mx - mn
+	}
+	// Серое не трогается
+	gr, gg, gb := vibrance_pixel(120, 120, 120, 1)
+	assert gr == 120 && gg == 120 && gb == 120
+	// Блёклый голубой (s ~ 0.2) против насыщенного (s ~ 0.8)
+	mr, mg, mb := vibrance_pixel(100, 115, 125, 1)
+	sr, sg, sb := vibrance_pixel(30, 90, 150, 1)
+	gain_muted := spread(mr, mg, mb) / spread(100, 115, 125)
+	gain_sat := spread(sr, sg, sb) / spread(30, 90, 150)
+	assert gain_muted > 1.5
+	assert gain_sat < 1.1 && gain_sat >= 1
+	// Кожа (оранжевый ~30°, та же насыщенность, что у голубого) - подъём меньше
+	kr, kg, kb := vibrance_pixel(125, 112, 100, 1)
+	gain_skin := spread(kr, kg, kb) / spread(125, 112, 100)
+	assert gain_skin > 1 && gain_skin < gain_muted
+	// Яркий цвет не клипается
+	br, bg, bb := vibrance_pixel(250, 200, 180, 1)
+	assert br <= 255 && bg <= 255 && bb >= 0
+	// Минус приглушает: блёклое сильнее насыщенного
+	nr, ng, nb := vibrance_pixel(100, 115, 125, -1)
+	xr, xg, xb := vibrance_pixel(30, 90, 150, -1)
+	assert spread(nr, ng, nb) < 0.5 * spread(100, 115, 125)
+	assert spread(xr, xg, xb) > 0.9 * spread(30, 90, 150)
+	// Через apply: vibrance 0 - как без сочности
+	nomask := &u16(unsafe { nil })
+	col := [u16(30000), 26000, 22000]
+	mut a := []u8{len: 3}
+	mut b := []u8{len: 3}
+	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ dither: false }, mut a, 3)
+	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ vibrance: 100, dither: false }, mut b, 3)
+	assert int(b[0]) - int(b[2]) > int(a[0]) - int(a[2])
+}

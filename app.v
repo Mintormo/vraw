@@ -1024,7 +1024,7 @@ fn main() {
 	// крайние числа ползунков). Новая подпись длиннее нынешних просто
 	// расширит колонку - наездов на ползунок не будет.
 	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
-		'Контраст', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
+		'Контраст', 'Сочность', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
 		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
 		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв'], 8)
 	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
@@ -1306,6 +1306,21 @@ fn main() {
 			e.params.contrast = v
 		}
 		fx:    tone_fx
+	})
+	// Сочность - бережная насыщенность (pipeline.vibrance_pixel): блёклые
+	// цвета сильнее насыщенных, тона кожи защищены
+	mut vib := edit_slider(mut st, SliderCfg{
+		label:  'Сочность'
+		min:    -100
+		max:    100
+		digits: 0
+		get:    fn (e &EditState) f32 {
+			return e.params.vibrance
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.vibrance = v
+		}
+		fx:     tone_fx
 	})
 	mut sat := edit_slider(mut st, SliderCfg{
 		label:  'Насыщенность'
@@ -2105,6 +2120,7 @@ fn main() {
 	exp_row.add_fixed(b_expreset, 26)
 	mut sh_row := edit_row(mut st, mut sh, lbl_w, val_w)
 	mut con_row := edit_row(mut st, mut con, lbl_w, val_w)
+	mut vib_row := edit_row(mut st, mut vib, lbl_w, val_w)
 	mut sat_row := edit_row(mut st, mut sat, lbl_w, val_w)
 	mut hlt_row := edit_row(mut st, mut hlt, lbl_w, val_w)
 	mut sht_row := edit_row(mut st, mut sht, lbl_w, val_w)
@@ -2164,6 +2180,7 @@ fn main() {
 		SectionRow{exp_row, 26},
 		SectionRow{sh_row, 26},
 		SectionRow{con_row, 26},
+		SectionRow{vib_row, 26},
 		SectionRow{sat_row, 26},
 	]))
 	acc.add_section('Удаление дымки', section([

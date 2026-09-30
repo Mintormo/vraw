@@ -9,7 +9,7 @@ module pipeline
 //     -> маска по люме (тени + тон-эквалайзер)
 //     -> гамма 1/2.2 + камерная кривая + контраст (S-кривая)
 //     -> тональные кривые (общая RGB, затем по каналу) -> насыщенность
-//     -> HSL-эквалайзер -> резкость (sharpen.v, apply_image) -> 8 бит
+//     -> сочность -> HSL-эквалайзер -> резкость (sharpen.v, apply_image) -> 8 бит
 //
 // Ради живых ползунков всё тяжёлое вынесено в две таблицы, которые
 // перестраиваются за ~130К операций при изменении любого параметра:
@@ -35,7 +35,10 @@ pub struct Params {
 pub mut:
 	exposure   f32 // экспозиция, EV (-3..+3)
 	contrast   f32 // контраст (-1..+1), S-кривая в тоновом пространстве
-	saturation f32 = 1.0 // насыщенность (0..2), 1 = как есть
+	saturation f32 = 1.0 // насыщенность (0..4), 1 = как есть
+	// Сочность (vibrance) -100..100: бережная насыщенность - блёклые цвета
+	// меняются сильнее насыщенных, тона кожи при подъёме защищены
+	vibrance f32
 	shadows    f32 // проявка теней, EV (-1..+2), маска (1-t)^2
 	eq         [5]f32 // тон-эквалайзер, EV: чёрные, тени, средние, света, белые
 	sh_shadows    f32 // «Тени/Света»: подъём теней 0..100 (по размытой маске)
@@ -516,6 +519,60 @@ fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8) (f32, 
 	}
 }
 
+// Защита тонов кожи при подъёме сочности: оттенки 0..60° (R >= G >= B)
+// с центром около 30° (оранжевый) получают вдвое меньший подъём
+const vib_skin_c = f32(0.5) // центр защиты в секстанте R-G (0..1 = 0..60°)
+const vib_skin_w = f32(1.0 / 0.4) // полуширина 0.4 секстанта (~24°)
+const vib_skin_k = f32(0.5) // доля подъёма, которую снимает защита
+
+// vibrance_pixel - сочность одного пикселя в тоновом пространстве
+// (0..255): множитель насыщенности 1 + a·(1 - s)², где s - насыщенность
+// HSV: блёклые пиксели получают почти полный множитель, чистые цвета
+// почти не меняются. При a > 0 тона кожи защищены (vib_skin_*), и
+// множитель ограничен так, чтобы канал не ушёл за 0..255 (без клипа
+// насыщенных цветов). Раздвигаем каналы от люмы - как насыщенность.
+@[inline]
+fn vibrance_pixel(r f32, g f32, b f32, a f32) (f32, f32, f32) {
+	mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
+	mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
+	c := mx - mn
+	if c < 0.5 {
+		return r, g, b
+	}
+	s := c / mx
+	u := 1 - s
+	mut amt := a * u * u
+	if a > 0 {
+		if r >= g && g >= b {
+			// Оттенок в секстанте R-G: 0 - красный, 1 - жёлтый
+			h := (g - b) / c
+			d := if h > vib_skin_c { h - vib_skin_c } else { vib_skin_c - h }
+			w := 1 - d * vib_skin_w
+			if w > 0 {
+				amt *= 1 - vib_skin_k * w
+			}
+		}
+	}
+	mut k := 1 + amt
+	l := 0.2126 * r + 0.7152 * g + 0.0722 * b
+	if k > 1 {
+		// Ограничение: ни один канал не выходит за 0..255
+		if mx > l {
+			lim := (255.0 - l) / (mx - l)
+			if k > lim {
+				k = if lim > 1 { lim } else { 1 }
+			}
+		}
+		if mn < l {
+			lim := l / (l - mn)
+			if k > lim {
+				k = if lim > 1 { lim } else { 1 }
+			}
+		}
+	}
+	return l + k * (r - l), l + k * (g - l), l + k * (b - l)
+}
+
 // apply прогоняет линейный 16-битный RGB (плотный, npix пикселей) через
 // пайплайн и пишет 8-битный результат: dst_stride 4 - RGBA для холста
 // (альфа 255), 3 - RGB для JPEG. dst должен вмещать npix * dst_stride байт.
@@ -551,6 +608,7 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
 	sat := p.saturation
+	vib := p.vibrance / 100.0
 	wb_on := p.wb_on
 	m := p.wb
 	// Защита светов: у клипа матрица плавно сменяется на «как снято» ×
@@ -660,6 +718,9 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 				vr = l + sat * (vr - l)
 				vg = l + sat * (vg - l)
 				vb = l + sat * (vb - l)
+			}
+			if vib != 0 {
+				vr, vg, vb = vibrance_pixel(vr, vg, vb, vib)
 			}
 			if use_hsl {
 				vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact)
