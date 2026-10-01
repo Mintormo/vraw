@@ -7,6 +7,7 @@ module main
 // снова. Итог - в диалоге, если он открыт, иначе тостом в главном окне.
 // Создаётся при первом экспорте и живёт до выхода: закрытие только прячет.
 import os
+import math
 import time
 import vgui
 import imgio
@@ -32,34 +33,48 @@ mut:
 	total   int
 	eta     f64 = -1 // AI: секунд до конца, < 0 - неизвестно
 	started i64 // unix мс
-	// Пакет (batch.v): кадров всего и номер текущего (с 0); у одиночного
-	// экспорта n = 1. src/dst/plan/ai_skipped - текущего кадра
-	n   int = 1
-	idx int
+	// Пакет (batch.v): кадров всего (у одиночного экспорта 1), готовых,
+	// кадры в работе (по номеру) и нагрузка - всё пишет главный поток
+	n        int = 1
+	finished int
+	frames   map[int]FrameProg
+	load     string
 }
 
-// fraction - общая доля готового: у пакета - готовые кадры плюс доля
-// текущего (кадры считаются равными: этапы у них разные, а время
+// FrameProg - кадр пакета в работе: имя, план этапов и где он сейчас
+struct FrameProg {
+	name  string
+	plan  StagePlan
+	stage ExportStage
+	done  int
+	total int
+}
+
+// fraction - общая доля готового: у пакета - готовые кадры плюс доли
+// кадров в работе (кадры считаются равными: этапы у них разные, а время
 // большей частью одно - демозаика, тон, запись)
 fn (c &ExportCtl) fraction() f64 {
-	f := c.frame_fraction()
 	if c.n <= 1 {
-		return f
+		return plan_fraction(c.plan, c.stage, c.done, c.total)
 	}
-	return (f64(c.idx) + f) / f64(c.n)
+	mut f := f64(c.finished)
+	for _, p in c.frames {
+		f += plan_fraction(p.plan, p.stage, p.done, p.total)
+	}
+	return math.min(1.0, f / f64(c.n))
 }
 
-// frame_fraction - доля готового текущего кадра по весам этапов
-fn (c &ExportCtl) frame_fraction() f64 {
+// plan_fraction - доля готового кадра по весам этапов плана
+fn plan_fraction(plan StagePlan, stage ExportStage, done int, total int) f64 {
 	mut all := 0.0
 	mut ready := 0.0
-	for i, s in c.plan.stages {
-		w := c.plan.weights[i]
+	for i, s in plan.stages {
+		w := plan.weights[i]
 		all += w
-		if int(s) < int(c.stage) {
+		if int(s) < int(stage) {
 			ready += w
-		} else if s == c.stage && c.total > 0 {
-			ready += w * f64(c.done) / f64(c.total)
+		} else if s == stage && total > 0 {
+			ready += w * f64(done) / f64(total)
 		}
 	}
 	return if all > 0 { ready / all } else { 0 }
@@ -206,7 +221,8 @@ fn export_started(mut st State) {
 	sync_export_ui(mut st)
 }
 
-// sync_export_files - что проявляется и куда (у пакета - «Кадр 3 из 12»)
+// sync_export_files - что проявляется и куда (у пакета - сколько готово
+// и какие кадры в работе)
 fn sync_export_files(mut st State) {
 	if isnil(st.eui) || isnil(st.exp) {
 		return
@@ -214,34 +230,80 @@ fn sync_export_files(mut st State) {
 	mut u := st.eui
 	c := st.exp
 	mut f := u.files
-	no_ai := if c.ai_skipped { '  ·  без AI-шумодава' } else { '' }
-	pos := if c.n > 1 { 'Кадр ${c.idx + 1} из ${c.n}:  ' } else { '' }
-	f.text = if c.dst == '' {
-		'${pos}${os.file_name(c.src)}${no_ai}'
+	if c.n > 1 {
+		f.text = 'Готово ${c.finished} из ${c.n} ${plural(c.n, 'кадра', 'кадров', 'кадров')}  ·  нагрузка: ${load_title(c.load)}'
 	} else {
-		'${pos}${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
+		no_ai := if c.ai_skipped { '  ·  без AI-шумодава' } else { '' }
+		f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
 	}
 	if c.dst != '' {
 		u.folder.set('Папка: ', os.dir(c.dst))
 	}
 }
 
-// batch_frame - начало кадра пакета (из воркера через app.post)
-fn batch_frame(mut st State, ctl &ExportCtl, fr BatchFrame) {
+// batch_event - событие пакета из воркера (через app.post): кадр начат,
+// сменил этап, закончен
+fn batch_event(mut st State, ctl &ExportCtl, ev BatchEvent) {
 	mut c := unsafe { ctl }
-	c.idx = fr.idx
-	c.src = fr.src
-	c.dst = fr.dst
-	c.plan = fr.plan
-	c.ai_skipped = fr.ai_skipped
-	c.stage = .decode
-	c.done = 0
-	c.total = 0
-	c.eta = -1
+	match ev.kind {
+		.start {
+			c.frames[ev.idx] = FrameProg{
+				name: os.file_name(ev.src)
+				plan: ev.plan
+			}
+			c.dst = ev.dst
+		}
+		.stage {
+			if p := c.frames[ev.idx] {
+				c.frames[ev.idx] = FrameProg{
+					...p
+					stage: ev.stage
+					done:  ev.done
+					total: ev.total
+				}
+			}
+		}
+		.end {
+			c.frames.delete(ev.idx)
+			c.finished++
+		}
+	}
 	if st.exp == ctl {
 		sync_export_files(mut st)
 		sync_export_ui(mut st)
 	}
+}
+
+// stage_text - этап словами («AI-шумодав - плитка 3 из 40», «Запись PNG»)
+fn stage_text(stage ExportStage, done int, total int, f imgio.Format) string {
+	name := stage_title(stage)
+	return match stage {
+		.ai {
+			if total == 0 { '${name} - загрузка модели...' } else { '${name} - плитка ${done} из ${total}' }
+		}
+		.write {
+			if f == .gif { 'Палитра и запись GIF' } else { 'Запись ${f.name()}' }
+		}
+		else {
+			name
+		}
+	}
+}
+
+// batch_stage_text - что идёт в пакете: один кадр - его этап, несколько -
+// их имена
+fn batch_stage_text(c &ExportCtl) string {
+	mut idx := c.frames.keys()
+	idx.sort()
+	if idx.len == 0 {
+		return 'Подготовка...'
+	}
+	if idx.len == 1 {
+		p := c.frames[idx[0]] or { return '' }
+		return '${p.name}: ${stage_text(p.stage, p.done, p.total, c.fmt)}'
+	}
+	names := idx.map(c.frames[it] or { FrameProg{} }.name)
+	return 'В работе ${idx.len} ${plural(idx.len, 'кадр', 'кадра', 'кадров')}: ${names.join(', ')}'
 }
 
 // sync_export_ui - этап, полоса и время по st.exp (главный поток)
@@ -255,17 +317,11 @@ fn sync_export_ui(mut st State) {
 		return // «Отмена...» уже написано
 	}
 	mut s := u.stage
-	mut name := stage_title(c.stage)
-	if c.stage == .ai {
-		name = if c.total == 0 {
-			'${name} - загрузка модели...'
-		} else {
-			'${name} - плитка ${c.done} из ${c.total}'
-		}
-	} else if c.stage == .write {
-		name = if c.fmt == .gif { 'Палитра и запись GIF' } else { 'Запись ${c.fmt.name()}' }
+	s.text = if c.n > 1 {
+		batch_stage_text(c)
+	} else {
+		'Этап ${c.stage_no()} из ${c.plan.stages.len}: ${stage_text(c.stage, c.done, c.total, c.fmt)}'
 	}
-	s.text = 'Этап ${c.stage_no()} из ${c.plan.stages.len}: ${name}'
 	frac := c.fraction()
 	mut bar := u.bar
 	bar.set_value(f32(frac))

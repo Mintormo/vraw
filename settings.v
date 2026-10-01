@@ -39,6 +39,9 @@ mut:
 	export_w        int = 1920
 	export_h        int = 1080
 	export_pct      int = 50
+	// нагрузка экспорта (batch.v, load_keys): кадров одновременно и
+	// приоритет потоков
+	export_load string = 'normal'
 	// группы настроек в окне «Копировать настройки» и «Сохранить пресет»
 	// (presets.v) - последний выбор; нет в файле - все
 	copy_groups []string = default_copy_groups.clone()
@@ -99,6 +102,7 @@ fn load_settings() Settings {
 		export_w:        clamp_px(s.export_w, 1920)
 		export_h:        clamp_px(s.export_h, 1080)
 		export_pct:      if s.export_pct >= 1 && s.export_pct <= 100 { s.export_pct } else { 50 }
+		export_load:     if s.export_load in load_keys { s.export_load } else { 'normal' }
 		copy_groups:   if known_groups(s.copy_groups).len > 0 {
 			known_groups(s.copy_groups)
 		} else {

@@ -4,12 +4,17 @@ module main
 // папка) с настройками окна «Экспорт». У каждого кадра - свои правки из
 // сайдкара (нет сайдкара - нейтральные), у открытого - текущие из окна.
 //
-// Один фоновый поток проявляет кадры по очереди: полный кадр 24 Мп в u16
-// ~145 МБ плюс копии на шумодав и коррекцию - параллельная проявка
-// упирается в память, а по времени кадр и так грузит все ядра в
-// многопоточных этапах. Ошибка кадра не останавливает пакет; отмена -
-// весь пакет. Прогресс - тот же диалог экспорта (export_ui.v): «Кадр 3
-// из 12», этап кадра, общая полоса.
+// Координатор (batch_worker) раздаёт кадры потокам: одновременно не
+// больше, чем позволяет нагрузка (load_level: 1-3 кадра; полный кадр
+// 24 Мп в u16 ~145 МБ плюс копии - упор в память), кадр с AI-шумодавом -
+// всегда один (модель и так занимает все ядра и много памяти). Замер
+// (-prod, 3 кадра, шумодав): по одному 9.4 с, по два 6.7 с, по три
+// 4.7 с - большая часть этапов однопоточна. Потоки экспорта - с
+// пониженным приоритетом (nice), у «фоновой» нагрузки ещё и OpenMP
+// LibRaw на четверть ядер: дольше, но компьютер свободен. Ошибка кадра
+// не останавливает пакет; отмена - весь пакет. Прогресс - тот же диалог
+// экспорта (export_ui.v): сколько готово, какие кадры в работе, общая
+// полоса.
 //
 // Камерная кривая в сайдкаре не хранится - для неоткрытого кадра она
 // считается как у загрузчика (loader.v): по превью ПОЛОВИННОГО размера
@@ -17,6 +22,8 @@ module main
 // кадру кривая заметно другая (IMG_0817: до 11 из 255 в средних тонах).
 import os
 import time
+import math
+import runtime
 import vgui
 import raw
 import lens
@@ -40,19 +47,88 @@ struct BatchJob {
 	// AI-шумодав: модели кадров (общие, только чтение) и оценки секунд
 	ai_caches map[string]&ai.Cache
 	ai_secs   map[string]f64
-	no_ai     []bool // у кадра AI есть, но при экспорте отключён
 	ctl       &ExportCtl = unsafe { nil }
-	on_stage  fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
-	on_frame  fn (&ExportCtl, BatchFrame) = unsafe { nil }
+	on_event  fn (&ExportCtl, BatchEvent) = unsafe { nil }
 }
 
-// BatchFrame - начало очередного кадра (в главный поток)
-struct BatchFrame {
-	idx        int
-	src        string
-	dst        string
-	plan       StagePlan
-	ai_skipped bool
+enum BatchEventKind {
+	start
+	stage
+	end
+}
+
+// BatchEvent - кадр пакета начат / сменил этап / закончен (в главный поток)
+struct BatchEvent {
+	kind  BatchEventKind
+	idx   int
+	src   string
+	dst   string
+	plan  StagePlan
+	stage ExportStage
+	done  int
+	total int
+}
+
+// BatchDone - итог кадра (поток кадра -> координатор)
+struct BatchDone {
+	idx       int
+	err       string // не пусто - ошибка кадра
+	cancelled bool
+}
+
+// ── Нагрузка ──
+
+#include <sys/resource.h>
+#include <unistd.h>
+#include <omp.h>
+#flag -lgomp
+
+fn C.setpriority(which int, who u32, prio int) int
+fn C.gettid() int
+fn C.omp_set_num_threads(n int)
+
+// Нагрузка экспорта: ключи (Settings.export_load) и названия
+const load_keys = ['low', 'normal', 'high']
+const load_names = ['Фоновая', 'Обычная', 'Максимальная']
+const load_notes = ['По одному кадру, низкий приоритет - другие программы не тормозят',
+	'2 кадра одновременно, приоритет ниже других программ',
+	'3 кадра одновременно - быстрее всего, компьютер занят']
+
+fn load_title(key string) string {
+	return match key {
+		'low' { 'фоновая' }
+		'high' { 'максимальная' }
+		else { 'обычная' }
+	}
+}
+
+// LoadLevel - что значит нагрузка: кадров одновременно, nice потоков
+// экспорта (0..19, больше - уступчивее), потоков OpenMP LibRaw (0 - все)
+struct LoadLevel {
+	par  int
+	nice int
+	omp  int
+}
+
+fn load_level(key string) LoadLevel {
+	return match key {
+		'low' { LoadLevel{1, 19, math.max(1, runtime.nr_cpus() / 4)} }
+		'high' { LoadLevel{3, 0, 0} }
+		else { LoadLevel{2, 10, 0} }
+	}
+}
+
+// apply_load - приоритет и OpenMP вызывающего потока; потоки, которые он
+// создаст (деконволюция, резкость, OpenMP LibRaw), наследуют приоритет.
+// Повысить приоритет без прав нельзя - только понизить, поэтому вызывать
+// лишь в потоках экспорта, не в главном.
+fn apply_load(l LoadLevel) {
+	if l.nice > 0 {
+		C.setpriority(0, u32(C.gettid()), l.nice) // 0 - PRIO_PROCESS: для потока по tid
+	}
+	if l.omp > 0 {
+		C.omp_set_num_threads(l.omp)
+	}
 }
 
 // batch_derive - производные поля настроек неоткрытого кадра: цвет
@@ -117,79 +193,145 @@ fn batch_items(st &State, paths []string) ([]BatchItem, []string) {
 	return items, bad
 }
 
-// batch_worker выполняется в spawn: кадры по очереди; итог - report
+// BatchTally - счёт итогов кадров у координатора
+struct BatchTally {
+mut:
+	saved     int
+	failed    []string
+	cancelled bool
+}
+
+fn (mut t BatchTally) add(r BatchDone) {
+	if r.cancelled {
+		t.cancelled = true
+	} else if r.err != '' {
+		t.failed << r.err
+	} else {
+		t.saved++
+	}
+}
+
+// batch_worker выполняется в spawn: координатор - кадры потокам
+// (batch_frame_job), не больше level.par одновременно, AI - по одному;
+// итог - report
 fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
-	mut c := unsafe { job.ctl }
-	progress := export_progress_fn(mut app, job.ctl, job.on_stage)
-	mut saved := 0
-	mut failed := []string{}
-	mut cancelled := false
+	level := load_level(job.settings.export_load)
+	apply_load(level)
+	c := job.ctl
 	n := job.items.len
+	ch := chan BatchDone{cap: n}
+	mut threads := []thread{}
+	mut tally := BatchTally{}
+	mut running := 0
+	// Пути - здесь и заранее занятые: два кадра одновременно с одним
+	// именем (IMG.CR3 и IMG.DNG) иначе получили бы один файл
+	mut taken := map[string]bool{}
 	for i, it in job.items {
-		if c.cancel {
-			cancelled = true
+		alone := it.edit.ai > 0
+		for running > 0 && (running >= level.par || alone) {
+			tally.add(<-ch)
+			running--
+		}
+		if c.cancel || tally.cancelled {
 			break
 		}
-		name := os.file_name(it.src)
+		dst := export_path_taken(&job.settings, it.src, job.format, taken)
+		taken[dst] = true
 		e0 := it.edit
 		ai_secs := if e0.ai > 0 { job.ai_secs[e0.ai_model] or { 0 } } else { 0 }
-		// Путь - здесь, а не заранее: «добавить номер» видит файлы,
-		// записанные этим же пакетом (IMG.CR3 и IMG.DNG -> IMG, IMG-2)
-		dst := export_path(&job.settings, it.src, job.format)
-		fr := BatchFrame{
-			idx:        i
-			src:        it.src
-			dst:        dst
-			plan:       export_plan(e0, ai_secs, job.format)
-			ai_skipped: i < job.no_ai.len && job.no_ai[i]
-		}
-		on_frame := job.on_frame
-		ctl := job.ctl
-		app.post(fn [on_frame, ctl, fr] () {
-			on_frame(ctl, fr)
+		post_batch(mut app, job, BatchEvent{
+			kind: .start
+			idx:  i
+			src:  it.src
+			dst:  dst
+			plan: export_plan(e0, ai_secs, job.format)
 		})
-		c.t1 = 0 // оценка AI - заново для каждого кадра
-		c.n1 = 0
-		if !progress(.decode, 0, 0) {
-			cancelled = true
-			break
+		cache := if e0.ai > 0 { job.ai_caches[e0.ai_model] or { unsafe { nil } } } else { unsafe { nil } }
+		threads << spawn batch_frame_job(job, i, dst, cache, level, mut app, ch)
+		running++
+		if alone {
+			tally.add(<-ch)
+			running--
 		}
-		e := if it.derived {
-			e0
-		} else {
-			batch_derive(it.src, e0, job.db) or {
-				failed << '${name}: ${err.msg()}'
-				continue
-			}
-		}
-		img := develop_full(it.src, e, job.db,
-			ai_cache: if e.ai > 0 { job.ai_caches[e.ai_model] or { unsafe { nil } } } else { unsafe { nil } }
-			progress: progress
-			size:     job.settings.export_size_opts()
-		) or {
-			if err is ExportCancelled {
-				cancelled = true
-				break
-			}
-			failed << '${name}: ${err.msg()}'
-			continue
-		}
-		if !progress(.write, 0, 0) {
-			cancelled = true
-			break
-		}
-		imgio.write(dst, job.format, img.width, img.height, img.rgb,
-			quality: job.settings.jpeg_quality
-		) or {
-			failed << '${name}: не удалось сохранить (${err})'
-			continue
-		}
-		saved++
+	}
+	for running > 0 {
+		tally.add(<-ch)
+		running--
+	}
+	for t in threads {
+		t.wait()
 	}
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	res, msg := batch_outcome(n, saved, failed, cancelled, job.format, sec)
+	res, msg := batch_outcome(n, tally.saved, tally.failed, tally.cancelled || c.cancel,
+		job.format, sec)
 	report(mut app, on_done, res, msg)
+}
+
+fn post_batch(mut app vgui.App, job BatchJob, ev BatchEvent) {
+	on_event := job.on_event
+	ctl := job.ctl
+	app.post(fn [on_event, ctl, ev] () {
+		on_event(ctl, ev)
+	})
+}
+
+// batch_frame_job выполняется в spawn: один кадр пакета - производные
+// поля, проявка, запись; итог - в канал координатору (и событие «кадр
+// закончен» в главный поток)
+fn batch_frame_job(job BatchJob, i int, dst string, cache &ai.Cache, level LoadLevel, mut app vgui.App, ch chan BatchDone) {
+	apply_load(level)
+	it := job.items[i]
+	name := os.file_name(it.src)
+	ctl := job.ctl
+	progress := fn [mut app, job, i, ctl] (stage ExportStage, done int, total int) bool {
+		post_batch(mut app, job, BatchEvent{
+			kind:  .stage
+			idx:   i
+			stage: stage
+			done:  done
+			total: total
+		})
+		return !ctl.cancel
+	}
+	r := batch_frame_run(it, dst, job, cache, progress) or {
+		if err is ExportCancelled {
+			BatchDone{
+				idx:       i
+				cancelled: true
+			}
+		} else {
+			BatchDone{
+				idx: i
+				err: '${name}: ${err.msg()}'
+			}
+		}
+	}
+	post_batch(mut app, job, BatchEvent{
+		kind: .end
+		idx:  i
+	})
+	ch <- r
+}
+
+// batch_frame_run - проявка и запись кадра; ExportCancelled - отмена
+fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, progress fn (ExportStage, int, int) bool) !BatchDone {
+	if !progress(.decode, 0, 0) {
+		return ExportCancelled{}
+	}
+	e := if it.derived { it.edit } else { batch_derive(it.src, it.edit, job.db)! }
+	img := develop_full(it.src, e, job.db,
+		ai_cache: cache
+		progress: progress
+		size:     job.settings.export_size_opts()
+	)!
+	if !progress(.write, 0, 0) {
+		return ExportCancelled{}
+	}
+	imgio.write(dst, job.format, img.width, img.height, img.rgb,
+		quality: job.settings.jpeg_quality
+	) or { return error('не удалось сохранить (${err})') }
+	return BatchDone{}
 }
 
 // batch_outcome - итог пакета: вид уведомления и текст

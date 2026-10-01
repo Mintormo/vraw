@@ -171,7 +171,7 @@ mut:
 	// Пакетный экспорт (batch.v): запуск по путям кадров и приёмник
 	// начала очередного кадра в главном потоке
 	export_batch fn ([]string) = unsafe { nil }
-	exp_frame    fn (&ExportCtl, BatchFrame) = unsafe { nil }
+	exp_event    fn (&ExportCtl, BatchEvent) = unsafe { nil }
 	// Баланс белого (wb_ui.v): цвет камеры кадра и его ББ «как снято»,
 	// виджеты секции, режим пипетки; холст и тональный пересчёт - для
 	// обработчиков секции
@@ -591,6 +591,7 @@ struct SaveJob {
 	format    imgio.Format
 	quality   int  // JPEG
 	size      ExportSize // размер на выход
+	load      LoadLevel  // нагрузка: приоритет потока экспорта
 	no_ai     bool // AI у кадра есть, но при экспорте отключён (для итога)
 	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
 	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
@@ -619,6 +620,7 @@ fn report(mut app vgui.App, on_done fn (SaveOutcome, string), res SaveOutcome, m
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
+	apply_load(job.load)
 	progress := export_progress_fn(mut app, job.ctl, job.on_stage)
 	img := develop_full(job.src, job.edit, job.db,
 		ai_cache: job.ai_cache
@@ -2304,6 +2306,7 @@ fn main() {
 			no_ai:    ai_skipped
 			quality:  st.settings.jpeg_quality
 			size:     st.settings.export_size_opts()
+			load:     load_level(st.settings.export_load)
 			ai_cache: ai_cache
 			ctl:      ctl
 			on_stage: st.exp_progress
@@ -2315,8 +2318,8 @@ fn main() {
 		sync_settings_ui(mut st)
 		st.save_threads << spawn save_worker(job, mut app, save_done)
 	}
-	st.exp_frame = fn [mut st] (ctl &ExportCtl, fr BatchFrame) {
-		batch_frame(mut st, ctl, fr)
+	st.exp_event = fn [mut st] (ctl &ExportCtl, ev BatchEvent) {
+		batch_event(mut st, ctl, ev)
 	}
 	// Пакетный экспорт: настройки кадров - здесь (сайдкары, AI-модели),
 	// проявка - в фоне по очереди (batch_worker)
@@ -2326,16 +2329,14 @@ fn main() {
 		}
 		fmt := st.settings.export_fmt()
 		mut items, bad := batch_items(st, paths)
-		mut no_ai := []bool{len: items.len}
 		mut caches := map[string]&ai.Cache{}
 		mut secs := map[string]f64{}
-		for i, mut it in items {
+		for mut it in items {
 			if it.edit.ai <= 0 {
 				continue
 			}
 			if st.settings.export_no_ai {
 				it.edit.ai = 0
-				no_ai[i] = true
 				continue
 			}
 			m := it.edit.ai_model
@@ -2354,6 +2355,7 @@ fn main() {
 			src:     items[0].src
 			fmt:     fmt
 			n:       items.len
+			load:    st.settings.export_load
 			started: time.now().unix_milli()
 		}
 		job := BatchJob{
@@ -2363,10 +2365,8 @@ fn main() {
 			db:        st.lens_db
 			ai_caches: caches
 			ai_secs:   secs
-			no_ai:     no_ai
 			ctl:       ctl
-			on_stage:  st.exp_progress
-			on_frame:  st.exp_frame
+			on_event:  st.exp_event
 		}
 		st.exp = ctl
 		show_export(mut st, mut app, win)

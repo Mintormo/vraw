@@ -100,15 +100,21 @@ fn export_dir_for(s &Settings, raw_path string) string {
 // export_path - путь файла: папка, имя по шаблону, расширение формата;
 // файл есть и выбрано «добавить номер» - «имя-2», «имя-3»...
 fn export_path(s &Settings, raw_path string, f imgio.Format) string {
+	return export_path_taken(s, raw_path, f, map[string]bool{})
+}
+
+// export_path_taken - то же, но пути taken тоже заняты (пакет: кадры,
+// которые ещё проявляются, файлов пока не записали)
+fn export_path_taken(s &Settings, raw_path string, f imgio.Format, taken map[string]bool) string {
 	dir := export_dir_for(s, raw_path)
 	name := export_file_name(s.export_name, raw_path)
 	ext := f.ext()
 	mut p := os.join_path(dir, '${name}.${ext}')
-	if s.export_exists == 'overwrite' {
+	if s.export_exists == 'overwrite' && p !in taken {
 		return p
 	}
 	mut i := 2
-	for os.exists(p) {
+	for os.exists(p) || p in taken {
 		p = os.join_path(dir, '${name}-${i}.${ext}')
 		i++
 	}
@@ -141,13 +147,15 @@ mut:
 	size_row &vgui.HBox     = unsafe { nil } // пересобирается под режим
 	size_mode string = '?' // режим, под который собран size_row
 	ex_cb   &vgui.ComboBox  = unsafe { nil }
+	load_cb &vgui.ComboBox  = unsafe { nil }
+	load_nt &vgui.Label     = unsafe { nil }
 	ai_cb   &vgui.CheckBox  = unsafe { nil }
 	result  &vgui.Label     = unsafe { nil }
 	notes   []&vgui.Label
 }
 
 const xs_w = 680
-const xs_h = 560
+const xs_h = 620
 const xs_lbl_w = f32(150)
 const xs_path_max = 56
 
@@ -320,6 +328,11 @@ fn sync_export_setup(mut st State) {
 	ecb.set_selected(math.max(0, export_exists_keys.index(s.export_exists)))
 	mut acb := u.ai_cb
 	acb.checked = !s.export_no_ai
+	mut lcb := u.load_cb
+	li := math.max(0, load_keys.index(s.export_load))
+	lcb.set_selected(li)
+	mut lnt := u.load_nt
+	lnt.text = '${load_notes[li]}; кадры с AI - по одному'
 	st.suppress = was
 	sync_export_result(mut st)
 }
@@ -611,6 +624,21 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.ai_cb = ai_cb
 
+	// Нагрузка: кадров одновременно и приоритет потоков экспорта
+	mut load_cb := vgui.combo_box()
+	load_cb.set_items(load_names)
+	load_cb.on_change = fn [mut st] (i int, _ string) {
+		if st.suppress || i < 0 || i >= load_keys.len {
+			return
+		}
+		st.settings.export_load = load_keys[i]
+		export_setup_changed(mut st)
+	}
+	u.load_cb = load_cb
+	mut load_note := vgui.label('')
+	u.notes << load_note
+	u.load_nt = load_note
+
 	mut result := vgui.label('')
 	result.font_style = .bold
 	u.result = result
@@ -649,6 +677,9 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(indented(size_note, xs_lbl_w + 8), set_note_h)
 	body.add_fixed(vgui.create_spacer(), 6)
 	body.add_fixed(ai_cb, set_row_h)
+	body.add_fixed(vgui.create_spacer(), 4)
+	body.add_fixed(row('Нагрузка', load_cb), set_row_h)
+	body.add_fixed(indented(load_note, xs_lbl_w + 8), set_note_h)
 	body.add(vgui.create_spacer(), 1)
 	body.add_fixed(result, set_row_h)
 	body.add_fixed(btn_row, 30)
