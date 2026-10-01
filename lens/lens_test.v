@@ -177,3 +177,30 @@ fn test_shared_database() {
 		assert false
 	}
 }
+
+// Профиль виньетирования: не убывает (спад и ноль за «полюсом» - значение
+// до него), мягкий потолок непрерывен и не выше cap
+fn test_vign_profile_pole() {
+	w := 201
+	h := 101
+	cx := f64(w - 1) / 2
+	cy := f64(h - 1) / 2
+	rmax := math.sqrt(cx * cx + cy * cy)
+	// Карта как у вырожденного профиля: растёт, у 0.9 - полюс, дальше 0
+	mut gain := []f32{len: w * h}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			r := math.sqrt((f64(x) - cx) * (f64(x) - cx) + (f64(y) - cy) * (f64(y) - cy)) / rmax
+			gain[y * w + x] = if r < 0.9 { f32(1 / (1 - r * r * 1.2)) } else { 0 }
+		}
+	}
+	lut := vign_profile(gain, w, h, 2.5, 4)
+	for i in 1 .. lut.len {
+		assert lut[i] >= lut[i - 1]
+	}
+	assert lut[0] == 1 && lut.last() <= 4 && lut.last() > 3
+	// soft_cap: до колена - как есть, дальше непрерывно и не выше потолка
+	assert soft_cap(2, 2.5, 4) == 2
+	assert math.abs(soft_cap(2.5001, 2.5, 4) - 2.5001) < 1e-3
+	assert soft_cap(1000, 2.5, 4) <= 4 && soft_cap(1000, 2.5, 4) > 3.99
+}

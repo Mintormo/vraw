@@ -1,6 +1,7 @@
 module lens
 
 import math
+import runtime
 
 // Обёртка над lensfun: поиск профиля объектива по метаданным кадра и
 // коррекция виньетирования на линейном 16-битном RGB-буфере.
@@ -22,24 +23,23 @@ const lf_modify_distortion = 8 // LF_MODIFY_DISTORTION
 const lf_modify_scale = 0x20 // LF_MODIFY_SCALE - без него scale в initialize игнорируется
 const lf_rectilinear = 1 // lfLensType: LF_RECTILINEAR
 const lf_cr_intensity = 3 // LF_CR_1(INTENSITY) - одноканальный буфер
-// Потолок СЫРОГО усиления профиля - ×8 (3 EV): сильнее виньетка у реальных
-// объективов не бывает, а вырожденный полином профиля по дороге к нулю
-// проходит через любые значения (у RF 24-50 в углу - ×60 и больше). Это
-// потолок значения g ДО смягчения; в кадр попадает уже g^vign_strength,
-// поэтому эффективный максимум применяемого усиления - 8^0.3 ≈ ×1.87 (~0.9 EV).
-const gain_cap = f32(8.0)
-// Сила коррекции в ЛОГ-домене усиления (g_applied = g^vign_strength),
-// 1.0 = полное усиление профиля (как раньше). У вырожденных профилей
-// (RF 24-50 на 24 мм) полином виньетирования в углу растёт настолько
-// резко, что даже под потолком gain_cap реальные (не обрезанные до cap)
-// значения усиления в переходной зоне (не в самом углу, а чуть ближе
-// к центру) поднимают светлое небо ВЫШЕ яркости центра кадра -
-// "вывернутая виньетка" (видна как светлое кольцо-ореол вокруг угла).
-// 0.3 подобрано измерением на IMG_0817.CR3 (RF24-50 24мм f/6.3, небо
-// в верхнем углу): при 1.0 угол ярче центра в ~1.2 раза, при 0.3 угол
-// остаётся заметно (в ~1.6 раза) ярче некорректированного, но не выше
-// центра кадра нигде вдоль перехода угол->центр.
+// Усиление виньетирования: профиль lensfun по радиусу (vign_profile),
+// неубывающий (у «полюса» вырожденного полинома - значение до него), с
+// мягким потолком (soft_cap: до vign_knee как в профиле, выше плавно, без
+// излома, к vign_cap) и ослабленный в лог-домене: g^vign_strength.
+// Раньше потолок был жёстким (x8) и карта применялась попиксельно - излом
+// на потолке и спад за «полюсом» давали на гладком небе дуги и светлые
+// серпы в углах (IMG_0817.CR3, RF 24-50 на 24 мм: профиль x3.5 на 0.85
+// радиуса, x16.7 на 0.95, в углу 0).
+const vign_knee = f32(8.0)
+const vign_cap = f32(16.0)
+// Сила коррекции в лог-домене (1.0 - полный профиль). У RF 24-50 профиль
+// перекорректирует уже с 0.7 радиуса: при полной силе края неба светлее
+// центра и у углов ореол. 0.3 подобрано на IMG_0817.CR3: яркость неба
+// по радиусу - как у JPEG камеры (103..73 против 105..76).
 const vign_strength = f32(0.3)
+// Точек радиального профиля (от центра до угла)
+const vign_lut_n = 1024
 
 // C-структуры объявлены частично (как в модуле raw): раскладку компилятор
 // берёт из <lensfun/lensfun.h>, объявляем только используемые поля.
@@ -215,28 +215,111 @@ pub fn (c &Corrector) vignetting(buf &u16, w int, h int, focal f32, aperture f32
 	if ok == 0 {
 		return false
 	}
-	unsafe {
-		mut p := &u16(buf)
-		mut gp := &f32(gain.data)
-		for _ in 0 .. w * h {
-			mut g := *gp
-			if !(g > 0 && g <= gain_cap) { // ловит и NaN/inf/отрицательные
-				g = gain_cap
+	mut lut := vign_profile(gain, w, h, vign_knee, vign_cap)
+	for i in 0 .. lut.len {
+		lut[i] = math.powf(lut[i], vign_strength)
+	}
+	apply_radial_gain(buf, w, h, lut)
+	return true
+}
+
+// vign_profile - радиальный профиль усиления (vign_lut_n точек от центра
+// до угла) из карты lensfun w x h: по диагонали к правому нижнему углу
+// (модели виньетирования lensfun радиальны), неубывающий (NaN, ноль и
+// спад после «полюса» вырожденного полинома - предыдущее значение), с
+// мягким потолком soft_cap
+fn vign_profile(gain []f32, w int, h int, knee f32, cap f32) []f32 {
+	mut lut := []f32{len: vign_lut_n}
+	cx := f64(w - 1) / 2
+	cy := f64(h - 1) / 2
+	mut prev := f32(1)
+	mut pole := false
+	for i in 0 .. vign_lut_n {
+		t := f64(i) / f64(vign_lut_n - 1)
+		// Точка диагонали - билинейно: ближайший пиксель давал значению
+		// дрожь по радиусу, удержание максимума - микроступеньки (кольца)
+		g := map_at(gain, w, h, cx + t * cx, cy + t * cy)
+		// «Полюс» вырожденного полинома: NaN, ноль, спад - дальше значение
+		// до него (профиль не убывает)
+		if pole || !(g >= prev * 0.999 && g < 1e6) {
+			pole = true
+		} else {
+			prev = g
+		}
+		lut[i] = soft_cap(prev, knee, cap)
+	}
+	return lut
+}
+
+// map_at - значение карты w x h в дробной точке (билинейно)
+fn map_at(m []f32, w int, h int, x f64, y f64) f32 {
+	x0 := imin(int(x), w - 2)
+	y0 := imin(int(y), h - 2)
+	fx := f32(x - f64(x0))
+	fy := f32(y - f64(y0))
+	a := m[y0 * w + x0] * (1 - fx) + m[y0 * w + x0 + 1] * fx
+	b := m[(y0 + 1) * w + x0] * (1 - fx) + m[(y0 + 1) * w + x0 + 1] * fx
+	return a * (1 - fy) + b * fy
+}
+
+// soft_cap - мягкий потолок в лог-домене: до knee как есть, выше -
+// knee * (cap/knee)^tanh(...): производная в knee непрерывна, к cap
+// подходит асимптотически
+@[inline]
+fn soft_cap(g f32, knee f32, cap f32) f32 {
+	if g <= knee {
+		return g
+	}
+	lk := math.log(f64(knee))
+	span := math.log(f64(cap)) - lk
+	return f32(math.exp(lk + span * math.tanh((math.log(f64(g)) - lk) / span)))
+}
+
+// apply_radial_gain - умножить RGB-буфер на усиление lut по расстоянию
+// пикселя от центра (доля полудиагонали), линейная интерполяция профиля.
+// Строки - в потоки (корень на каждый пиксель полного кадра).
+fn apply_radial_gain(buf &u16, w int, h int, lut []f32) {
+	nt := imin(runtime.nr_cpus(), 16)
+	step := (h + nt - 1) / nt
+	mut ts := []thread{}
+	for y0 := 0; y0 < h; y0 += step {
+		ts << spawn radial_rows(buf, w, h, lut, y0, imin(h, y0 + step))
+	}
+	for t in ts {
+		t.wait()
+	}
+}
+
+fn radial_rows(buf &u16, w int, h int, lut []f32, y0 int, y1 int) {
+	cx := f64(w - 1) / 2
+	cy := f64(h - 1) / 2
+	rmax := math.sqrt(cx * cx + cy * cy)
+	k := f64(vign_lut_n - 1) / rmax
+	for y in y0 .. y1 {
+		dy := f64(y) - cy
+		unsafe {
+			mut p := &u16(buf) + y * w * 3
+			for x in 0 .. w {
+				dx := f64(x) - cx
+				f := math.sqrt(dx * dx + dy * dy) * k
+				mut i := int(f)
+				if i >= vign_lut_n - 1 {
+					i = vign_lut_n - 2
+				}
+				fr := f32(f - f64(i))
+				g := lut[i] + (lut[i + 1] - lut[i]) * fr
+				for c in 0 .. 3 {
+					v := f32(p[c]) * g
+					p[c] = if v > 65535.0 { u16(65535) } else { u16(v) }
+				}
+				p += 3
 			}
-			// Смягчение в лог-домене: g^strength, strength<1 - против
-			// перекоррекции вырожденных профилей (см. vign_strength).
-			// g >= 1 по построению профиля lensfun (карта - усиление,
-			// не затемнение), поэтому powf монотонна и результат >= 1.
-			g = math.powf(g, vign_strength)
-			for k in 0 .. 3 {
-				v := f32(p[k]) * g
-				p[k] = if v > 65535.0 { u16(65535) } else { u16(v) }
-			}
-			p += 3
-			gp += 1
 		}
 	}
-	return true
+}
+
+fn imin(a int, b int) int {
+	return if a < b { a } else { b }
 }
 
 // bilinear - выборка канала ch из плотного RGB-буфера u16 в дробной

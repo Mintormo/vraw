@@ -338,29 +338,153 @@ pub fn match_curve(src &u16, npix int, ref_ &u8, ref_npix int) []f32 {
 		cs[i] /= cs[256]
 		cr[i] /= cr[256]
 	}
-	// Сопоставление квантилей: тон v источника -> тон u JPEG той же доли
-	mut curve := []f32{len: 256}
+	// Сопоставление квантилей: тон v источника -> тон u JPEG той же доли.
+	// Тона, которых в кадре нет, - без соответствия (-1)
+	mut mapping := []int{len: 256, init: -1}
 	mut u := 0
 	for v in 0 .. 256 {
 		q := cs[v + 1]
 		for u < 255 && cr[u + 1] < q {
 			u++
 		}
-		curve[v] = f32(u)
-	}
-	// Сглаживание (два прохода box r=2) + монотонность
-	for _ in 0 .. 2 {
-		mut sm := []f32{len: 256}
-		for v in 0 .. 256 {
-			lo := if v < 2 { 0 } else { v - 2 }
-			hi := if v > 253 { 255 } else { v + 2 }
-			mut sum := f32(0)
-			for j in lo .. hi + 1 {
-				sum += curve[j]
-			}
-			sm[v] = sum / f32(hi - lo + 1)
+		if hs[v] > 0 {
+			mapping[v] = u
 		}
-		curve = sm.clone()
+	}
+	return curve_from_mapping(mapping)
+}
+
+// Шаг опорных точек камерной кривой, тонов: местные изгибы соответствия
+// гистограмм (меньше шага) в кривую не попадают
+const curve_step = 32
+// Во сколько раз наклон кривой может меняться от отрезка к отрезку
+const curve_slope_ratio = 2.0
+
+// curve_from_mapping - гладкая кривая по соответствию тонов mapping (тон
+// нейтральной проявки -> тон JPEG, -1 - тона в кадре нет). Соответствие
+// гистограмм повторяет каждую неровность распределения: небо на полкадра
+// давало участок с наклоном x4.6 рядом с пологим и изломы на границах
+// (IMG_0817.CR3: ступенчатое небо). Поэтому: опорные точки через
+// curve_step тонов; наклон соседних отрезков различается не больше чем в
+// curve_slope_ratio раз (средняя точка тянется к хорде соседей, пока
+// ограничение не выполнится); через точки - монотонный кубический сплайн
+// (Фрич-Карлсон): гладкий, без выбросов, не убывает.
+pub fn curve_from_mapping(mapping []int) []f32 {
+	mut xs := [f64(0)]
+	mut ys := [f64(0)]
+	for x := curve_step / 2; x < 256 - curve_step / 4; x += curve_step {
+		// Значение - среднее в ±2 тонах (ступенчатость квантилей); окно
+		// шире занижало бы изогнутые участки (тени)
+		mut sum := 0.0
+		mut n := 0
+		for k in x - 2 .. x + 3 {
+			if k >= 0 && k < 256 && mapping[k] >= 0 {
+				sum += f64(mapping[k])
+				n++
+			}
+		}
+		// Пусто - ближайший тон с данными в ±curve_step/4 (тени редкие);
+		// нет и его (край гистограммы) - точку не ставить
+		if n == 0 {
+			for dk in 3 .. curve_step / 4 + 1 {
+				for k in [x - dk, x + dk] {
+					if n == 0 && k >= 0 && k < 256 && mapping[k] >= 0 {
+						sum = f64(mapping[k])
+						n = 1
+					}
+				}
+			}
+		}
+		if n > 0 {
+			xs << f64(x)
+			ys << sum / f64(n)
+		}
+	}
+	xs << 255
+	ys << 255
+	// Монотонность точек
+	for i in 1 .. ys.len {
+		if ys[i] < ys[i - 1] {
+			ys[i] = ys[i - 1]
+		}
+	}
+	limit_slopes(xs, mut ys)
+	return monotone_spline(xs, ys)
+}
+
+// limit_slopes - выравнивание наклонов отрезков ломаной (xs, ys): если
+// соседние наклоны различаются больше чем в curve_slope_ratio раз,
+// средняя точка сдвигается на четверть пути к хорде соседей; повтор, пока
+// всё не уложится (или 200 проходов). Концы (0,0) и (255,255) неподвижны.
+fn limit_slopes(xs []f64, mut ys []f64) {
+	for _ in 0 .. 200 {
+		mut moved := false
+		for i in 1 .. xs.len - 1 {
+			s0 := (ys[i] - ys[i - 1]) / (xs[i] - xs[i - 1])
+			s1 := (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i])
+			lo := math.min(s0, s1)
+			hi := math.max(s0, s1)
+			if hi > curve_slope_ratio * math.max(lo, 1e-3) {
+				chord := ys[i - 1] + (xs[i] - xs[i - 1]) / (xs[i + 1] - xs[i - 1]) * (ys[i + 1] - ys[i - 1])
+				ys[i] += (chord - ys[i]) * 0.25
+				moved = true
+			}
+		}
+		if !moved {
+			break
+		}
+	}
+}
+
+// monotone_spline - кривая 0..255 через точки (xs возрастают)
+// монотонным кубическим сплайном Фрича-Карлсона
+fn monotone_spline(xs []f64, ys []f64) []f32 {
+	n := xs.len
+	mut curve := []f32{len: 256}
+	if n < 2 {
+		for v in 0 .. 256 {
+			curve[v] = f32(v)
+		}
+		return curve
+	}
+	mut d := []f64{len: n - 1} // наклоны отрезков
+	for k in 0 .. n - 1 {
+		d[k] = (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k])
+	}
+	mut m := []f64{len: n} // касательные в точках
+	m[0] = d[0]
+	m[n - 1] = d[n - 2]
+	for k in 1 .. n - 1 {
+		m[k] = if d[k - 1] * d[k] <= 0 { 0.0 } else { (d[k - 1] + d[k]) / 2 }
+	}
+	for k in 0 .. n - 1 {
+		if d[k] == 0 {
+			m[k] = 0
+			m[k + 1] = 0
+			continue
+		}
+		a := m[k] / d[k]
+		b := m[k + 1] / d[k]
+		h := a * a + b * b
+		if h > 9 {
+			t := 3 / math.sqrt(h)
+			m[k] = t * a * d[k]
+			m[k + 1] = t * b * d[k]
+		}
+	}
+	mut k := 0
+	for v in 0 .. 256 {
+		x := f64(v)
+		for k < n - 2 && x > xs[k + 1] {
+			k++
+		}
+		hk := xs[k + 1] - xs[k]
+		t := (x - xs[k]) / hk
+		t2 := t * t
+		t3 := t2 * t
+		y := (2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * hk * m[k] +
+			(-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * hk * m[k + 1]
+		curve[v] = f32(math.max(0, math.min(255, y)))
 	}
 	for v in 1 .. 256 {
 		if curve[v] < curve[v - 1] {

@@ -352,3 +352,33 @@ fn test_vibrance() {
 	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ vibrance: 100, dither: false }, mut b, 3)
 	assert int(b[0]) - int(b[2]) > int(a[0]) - int(a[2])
 }
+
+// Кривая по соответствию с «небом»: резкий скачок на узком участке тонов
+// (наклон x5 на 16 тонах) - в кривой наклон соседних участков меняется
+// плавно, без излома; кривая монотонна, концы на месте
+fn test_curve_from_mapping_smooth() {
+	mut mapping := []int{len: 256}
+	for v in 0 .. 256 {
+		mapping[v] = if v < 104 {
+			v * 150 / 104
+		} else if v < 120 {
+			150 + (v - 104) * 5
+		} else {
+			230 + (v - 120) * 25 / 135
+		}
+	}
+	c := curve_from_mapping(mapping)
+	assert c[0] == 0 && c[255] == 255
+	mut prev_slope := f32(-1)
+	for v := 8; v < 248; v += 8 {
+		slope := (c[v + 8] - c[v]) / 8
+		assert slope < 3.0, 'тон ${v}: наклон ${slope}'
+		if prev_slope >= 0 {
+			assert math.abs(slope - prev_slope) < 0.8, 'тон ${v}: излом ${prev_slope} -> ${slope}'
+		}
+		prev_slope = slope
+	}
+	for v in 1 .. 256 {
+		assert c[v] >= c[v - 1]
+	}
+}
