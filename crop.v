@@ -12,7 +12,8 @@ module main
 // показывает весь повёрнутый кадр R, рамка рисуется поверх (on_overlay -
 // без пересчёта снимка); вне режима превью - уже обрезанный кадр,
 // гистограмма - по нему. Мышь в режиме: ручки углов и сторон, внутри
-// рамки - перенос, снаружи - новая рамка, двойной щелчок - вся рамка.
+// рамки - перенос, снаружи - поворот кадра (как в Lightroom), Ctrl+
+// перетаскивание снаружи - новая рамка, двойной щелчок - вся рамка.
 // Enter - применить (выйти), Esc - отменить правки режима. Каждое
 // отпускание - запись в истории (Ctrl+Z работает и в режиме).
 import math
@@ -39,6 +40,7 @@ enum CropDragKind {
 	move
 	handle
 	horizon
+	rotate // поворот кадра перетаскиванием снаружи рамки
 }
 
 struct CropDrag {
@@ -52,6 +54,8 @@ mut:
 	py     f64
 	cx     f64 // текущая точка (линия горизонта)
 	cy     f64
+	geom   pipeline.Geom // геометрия на момент нажатия (поворот)
+	a0     f64           // угол мыши вокруг центра рамки при нажатии, радианы
 	moved  bool
 }
 
@@ -71,6 +75,7 @@ mut:
 	grid_cb     &vgui.ComboBox = unsafe { nil }
 	horizon_btn &vgui.Button   = unsafe { nil }
 	angle_sl    &vgui.Slider   = unsafe { nil }
+	angle_in    &vgui.TextInput = unsafe { nil } // угол вручную (Enter)
 	m_crop      &vgui.MenuItem = unsafe { nil }
 }
 
@@ -372,8 +377,11 @@ fn handle_points(b pipeline.CropBox) [][]f64 {
 		[mx, b.y0], [b.x1, my], [mx, b.y1], [b.x0, my]]
 }
 
-fn hit_cursor(hit int, horizon bool) int {
-	if horizon {
+// hit_cursor - курсор над точкой: ручки - стрелки размера, внутри -
+// перенос, снаружи - рука (поворот; своего курсора поворота в SDL нет),
+// с Ctrl - крест (новая рамка)
+fn hit_cursor(hit int, horizon bool, ctrl bool) int {
+	if horizon || (hit < 0 && ctrl) {
 		return vgui.sdl_system_cursor_crosshair
 	}
 	return match hit {
@@ -382,7 +390,7 @@ fn hit_cursor(hit int, horizon bool) int {
 		4, 6 { vgui.sdl_system_cursor_sizens }
 		5, 7 { vgui.sdl_system_cursor_sizewe }
 		8 { vgui.sdl_system_cursor_sizeall }
-		else { vgui.sdl_system_cursor_crosshair }
+		else { vgui.sdl_system_cursor_hand }
 	}
 }
 
@@ -446,7 +454,7 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 	my := f64(ev.fy)
 	match ev.kind {
 		.hover {
-			vgui.set_cursor(hit_cursor(crop_hit(st, sx, sy), st.horizon))
+			vgui.set_cursor(hit_cursor(crop_hit(st, sx, sy), st.horizon, ev.ctrl))
 		}
 		.leave {
 			vgui.set_cursor(vgui.sdl_system_cursor_default)
@@ -493,8 +501,20 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 					px:    mx
 					py:    my
 				}
+			} else if !ev.ctrl {
+				// Снаружи - поворот кадра вокруг центра рамки
+				cx := (b.x0 + b.x1) / 2
+				cy := (b.y0 + b.y1) / 2
+				st.crop_drag = CropDrag{
+					kind:  .rotate
+					start: b
+					geom:  g
+					a0:    math.atan2(my - cy, mx - cx)
+					px:    mx
+					py:    my
+				}
 			} else {
-				// Снаружи - новая рамка от точки (угол 2, опора - точка)
+				// Ctrl снаружи - новая рамка от точки (угол 2, опора - точка)
 				nx := math.max(0, math.min(f64(w0), mx))
 				ny := math.max(0, math.min(f64(h0), my))
 				dot := pipeline.CropBox{nx, ny, nx, ny}
@@ -522,6 +542,33 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				.horizon {
 					st.crop_drag.cx = mx
 					st.crop_drag.cy = my
+					return true
+				}
+				.rotate {
+					if !d.moved && math.abs(mx - d.px) < 2 && math.abs(my - d.py) < 2 {
+						return true
+					}
+					st.crop_drag.moved = true
+					// Мышь по часовой (y вниз) - кадр по часовой, а плюс угла -
+					// против часовой. Отсчёт от геометрии нажатия: рамка,
+					// сжатая на большом угле, вернётся при обратном повороте
+					cx := (d.start.x0 + d.start.x1) / 2
+					cy := (d.start.y0 + d.start.y1) / 2
+					mut da := math.atan2(my - cy, mx - cx) - d.a0
+					if da > math.pi {
+						da -= 2 * math.pi
+					} else if da < -math.pi {
+						da += 2 * math.pi
+					}
+					mut ng := d.geom
+					lim := f64(pipeline.geom_angle_max)
+					v := math.max(-lim, math.min(lim, f64(d.geom.angle) - da * 180 / math.pi))
+					ng.angle = f32(math.round(v * 10) / 10)
+					if ng.angle != st.edit.geom.angle {
+						st.edit.geom = refit(d.geom, ng, w0, h0)
+						sync_crop_ui(mut st)
+						defer_fx(mut st, st.tone_fx)
+					}
 					return true
 				}
 				.move {
@@ -584,6 +631,12 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 						sync_crop_ui(mut st)
 					}
 				}
+				.rotate {
+					if d.moved && st.edit.geom != d.geom {
+						crop_apply(mut st, st.edit.geom, 'angle', 'Поворот: ${angle_text(st.edit.geom.angle)}',
+							false)
+					}
+				}
 				.move, .handle {
 					if d.moved {
 						crop_apply(mut st, st.edit.geom, 'crop_box', 'Кадрирование: рамка',
@@ -597,6 +650,52 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 		else {}
 	}
 	return false
+}
+
+// parse_angle - угол, введённый вручную: «-2.5», «−2,5», «+3», «3°»;
+// «ю» и «б» - тоже разделитель (клавиши точки и запятой в русской
+// раскладке); none - не число. Ограничение ±45 - у вызывающего
+fn parse_angle(s string) ?f32 {
+	mut t := s.trim_space().replace('°', '').replace('−', '-')
+	for sep in [',', 'ю', 'Ю', 'б', 'Б'] {
+		t = t.replace(sep, '.')
+	}
+	t = t.trim_space()
+	if t.len == 0 {
+		return none
+	}
+	body := t.trim_left('+-')
+	if body.len == 0 || !body.contains_any('0123456789')
+		|| !body.contains_only('0123456789.') || body.count('.') > 1 || t.len - body.len > 1 {
+		return none
+	}
+	return f32(t.f64())
+}
+
+// set_angle_text - угол, введённый в поле: применить с подгонкой рамки
+// (как ползунок) и записью в историю; не число - поле возвращается
+fn set_angle_text(mut st State, s string) {
+	v := parse_angle(s) or {
+		sync_crop_ui(mut st)
+		if !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_warning('Угол - число от -45 до 45 градусов')
+		}
+		return
+	}
+	if st.linear.len == 0 {
+		sync_crop_ui(mut st)
+		return
+	}
+	ng := geom_with_angle(st, f32(math.round(f64(v) * 10) / 10))
+	if ng != st.edit.geom {
+		crop_apply(mut st, ng, 'angle', 'Угол: ${angle_text(ng.angle)}', false)
+	}
+	// Поле в фокусе sync_crop_ui не трогает - привести к виду «-3.5» здесь
+	if !isnil(st.crop_ui) && !isnil(st.crop_ui.angle_in) {
+		mut ai := st.crop_ui.angle_in
+		ai.set_text('${st.edit.geom.angle:.1f}')
+	}
 }
 
 fn angle_text(a f32) string {
@@ -641,7 +740,7 @@ fn crop_overlay(mut st State, mut ctx vgui.RenderContext) {
 	bh := by1 - by0
 	// Мелкая сетка, пока крутят угол или ведут линию горизонта
 	rotating := (!isnil(st.crop_ui) && !isnil(st.crop_ui.angle_sl) && st.crop_ui.angle_sl.dragging)
-		|| st.horizon
+		|| st.horizon || st.crop_drag.kind == .rotate
 	if rotating {
 		step := f32(40)
 		mut x := bx0 + step
@@ -691,8 +790,15 @@ fn crop_overlay(mut st State, mut ctx vgui.RenderContext) {
 		ctx.fill_rect(vgui.Rect{bx0 + 4, by1 - 24, lw, 20}, vgui.Color{0, 0, 0, 170})
 		ctx.draw_text(label, bx0 + 9, by1 - 22, crop_line)
 	}
-	// Линия горизонта
 	d := st.crop_drag
+	// Угол - у верхнего края рамки, пока кадр поворачивают мышью
+	if d.kind == .rotate && d.moved {
+		at := angle_text(st.edit.geom.angle)
+		aw := f32(at.runes().len) * 7.5 + 12
+		ctx.fill_rect(vgui.Rect{bx0 + (bw - aw) / 2, by0 + 4, aw, 20}, vgui.Color{0, 0, 0, 170})
+		ctx.draw_text(at, bx0 + (bw - aw) / 2 + 6, by0 + 6, crop_line)
+	}
+	// Линия горизонта
 	if d.kind == .horizon {
 		ax, ay := cv.buf_to_screen(f32(d.px), f32(d.py))
 		cx, cy := cv.buf_to_screen(f32(d.cx), f32(d.cy))
@@ -757,6 +863,11 @@ fn sync_crop_ui(mut st State) {
 	if !isnil(u.angle_sl) {
 		mut asl := u.angle_sl
 		asl.set_value(e.geom.angle) // под suppress: подпись и снимок, без пересчёта
+	}
+	// Поле угла - текущий угол, если в нём не набирают
+	if !isnil(u.angle_in) && !u.angle_in.focused {
+		mut ai := u.angle_in
+		ai.set_text('${e.geom.angle:.1f}')
 	}
 	st.suppress = was
 	mut hb := u.horizon_btn
@@ -1007,6 +1118,16 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		}
 	}
 	u.horizon_btn = hz
+	// Угол вручную: Enter - применить
+	mut ain := vgui.text_input('0.0')
+	ain.max_len = 8
+	ain.on_submit = fn [mut st] (s string) {
+		set_angle_text(mut st, s)
+	}
+	u.angle_in = ain
+	mut ain_tip := vgui.tooltip('Угол вручную, градусы (-45..45): введите и нажмите Enter')
+	ain_tip.attach(ain)
+	st.tips << ain_tip
 	mut tools := vgui.create_hbox_fill()
 	tools.set_spacing(6)
 	tools.add_fixed(vgui.label('Повернуть'), lbl_w)
@@ -1016,6 +1137,8 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	tools.add_fixed(f_v, 26)
 	tools.add_fixed(hz, 26)
 	tools.add(vgui.label(''), 1)
+	tools.add_fixed(ain, 56)
+	tools.add_fixed(vgui.label('°'), 10)
 
 	// Сетка поверх рамки - вид (настройки программы, не кадра)
 	mut gcb := vgui.combo_box()

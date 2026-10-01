@@ -381,7 +381,7 @@ fn test_make_thumb_real() {
 	if !os.exists(path) {
 		return
 	}
-	pix := make_thumb(path)!
+	pix := make_thumb(path, pipeline.Geom{})!
 	assert pix.len == thumb_w * thumb_h * 4
 	// Кадр 3:2 заполняет буфер 3:2 целиком - полей нет, угол не фон
 	assert pixel(pix, thumb_w, 0, 0) != [thumb_bg.r, thumb_bg.g, thumb_bg.b]

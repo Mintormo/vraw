@@ -99,6 +99,12 @@ mut:
 	thumb_stop    &StopFlag = unsafe { nil }
 	thumb_threads []thread
 	thumb_done    fn (ThumbResult) = unsafe { nil }
+	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
+	// Приложение - для фоновых потоков, запускаемых из обработчиков
+	// (refresh_thumb); vgui трогают только через app.post
+	app &vgui.App = unsafe { nil }
+	// Пересчёт по ходу перетаскивания уже поставлен (defer_fx)
+	fx_pending bool
 	// Фоновая загрузка кадра (loader.v): идёт ли, флаг отмены, потоки,
 	// предупреждение о сайдкаре для показа по окончании
 	loading      bool
@@ -281,7 +287,32 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 // гистограмму. Вызывается при отпускании тонального ползунка и на каждое
 // одиночное изменение (колесо, клавиши, сброс), поэтому никаких
 // уведомлений отсюда - только картинка.
+// defer_fx - пересчёт по ходу перетаскивания (живой ползунок, поворот
+// мышью): не на каждое движение, а один на пачку событий - замыкание
+// app.post выполняется после всех накопившихся событий. Пересчёт с
+// поворотом ~0.25 с: прямой вызов на каждое движение копил очередь
+// (десятки секунд догонять после отпускания). Окончательный пересчёт
+// (отпускание) - прямой, он и снимает отложенный.
+fn defer_fx(mut st State, fx fn ()) {
+	if isnil(st.app) {
+		fx()
+		return
+	}
+	if st.fx_pending {
+		return
+	}
+	st.fx_pending = true
+	mut app := st.app
+	app.post(fn [mut st, fx] () {
+		if st.fx_pending {
+			st.fx_pending = false
+			fx()
+		}
+	})
+}
+
 fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
+	st.fx_pending = false // отложенный пересчёт (defer_fx) уже не нужен
 	if st.suppress || st.linear.len == 0 {
 		return
 	}
@@ -845,11 +876,11 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 			alt := vgui.key_mods() & vgui.sdl_kmod_alt != 0
 			if alt || st.sharp_drag != .off {
 				st.sharp_drag = if alt { cfg.drag_view } else { pipeline.SharpView.off }
-				cfg.fx()
+				defer_fx(mut st, cfg.fx)
 			}
 		}
 		if sl.dragging && !st.suppress && cfg.live {
-			cfg.fx()
+			defer_fx(mut st, cfg.fx)
 		}
 		if st.suppress || sl.dragging {
 			return
@@ -2037,6 +2068,7 @@ fn main() {
 	st.thumb_done = fn [mut st] (res ThumbResult) {
 		take_thumb(mut st, res)
 	}
+	st.app = app
 	mut strip := vgui.list_box_h(strip_item_width(strip_pane_h))
 	strip.pad = strip_pad
 	// Одиночный щелчок (и стрелки при фокусе на ленте) только выделяет

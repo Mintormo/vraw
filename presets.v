@@ -216,6 +216,9 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 		if changed {
 			done++
 			mark_frame_edited(mut st, p)
+			if 'crop' in groups {
+				refresh_frame_thumb(mut st, p)
+			}
 		}
 	}
 	if failed.len > 0 {
@@ -226,6 +229,16 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 		nm.show_success('${name}: ${done} ${plural(done, 'кадр', 'кадра', 'кадров')} из ${targets.len}')
 	} else if done == 0 {
 		nm.show_info('${name}: настройки кадра уже такие')
+	}
+}
+
+// refresh_frame_thumb - миниатюра кадра ленты по пути RAW заново (после
+// вставки кадрирования в его сайдкар)
+fn refresh_frame_thumb(mut st State, path string) {
+	for i, f in st.frames {
+		if f.path == path {
+			refresh_thumb(mut st, i, thumb_geom(path))
+		}
 	}
 }
 

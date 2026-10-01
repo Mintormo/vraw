@@ -24,6 +24,7 @@ import math
 import vgui
 import raw
 import stbi
+import pipeline
 
 // Расширения RAW для сканирования папки (без учёта регистра)
 const raw_exts = ['cr3', 'cr2', 'crw', 'nef', 'arw', 'dng', 'raf', 'orf', 'rw2']
@@ -57,6 +58,10 @@ mut:
 	// Миниатюра живёт только в пикселях холста (без отдельной копии: ~200 КБ
 	// на кадр); отметка «изменён» только добавляется - рисуется поверх
 	cv &vgui.Canvas = unsafe { nil }
+	// Геометрия, которую показывает (или вот-вот покажет) миниатюра, и
+	// номер её расчёта: результат старее показанного отбрасывается
+	geom pipeline.Geom
+	seq  int
 }
 
 // StopFlag - флаг остановки фонового воркера миниатюр (смена папки,
@@ -69,9 +74,11 @@ mut:
 }
 
 struct ThumbResult {
-	gen int // номер загрузки папки: результаты старой папки отбрасываются
-	idx int
-	pix []u8
+	gen  int // номер загрузки папки: результаты старой папки отбрасываются
+	seq  int // номер расчёта (refresh_thumb): старее показанного - мимо
+	idx  int
+	pix  []u8
+	geom pipeline.Geom
 }
 
 // is_raw_file - файл с расширением RAW (без учёта регистра)
@@ -182,9 +189,22 @@ fn fit_thumb(src []u8, w int, h int, flip int, bw int, bh int) []u8 {
 	return out
 }
 
-// make_thumb - миниатюра RAW-файла: своё открытие LibRaw (воркер не
-// делит хендл с GUI), встроенное превью не меньше буфера, поворот.
-fn make_thumb(path string) ![]u8 {
+// thumb_geom - геометрия кадра из его сайдкара (как на выходе:
+// out_geom); нет сайдкара или не читается - без изменений
+fn thumb_geom(path string) pipeline.Geom {
+	side := load_sidecar(sidecar_path(path)) or { return pipeline.Geom{} }
+	if side.history.len == 0 {
+		return pipeline.Geom{}
+	}
+	return out_geom(&side.history[side.current].state)
+}
+
+// make_thumb - миниатюра RAW-файла с геометрией g (кадрирование и
+// поворот из сайдкара): своё открытие LibRaw (воркер не делит хендл с
+// GUI), встроенное превью не меньше буфера, поворот по ориентации
+// камеры; с геометрией - сначала обрезка во всю величину превью
+// (geom_rgba, ближайший пиксель), потом уменьшение усреднением.
+fn make_thumb(path string, g pipeline.Geom) ![]u8 {
 	mut d := raw.open(path)!
 	defer {
 		d.close()
@@ -196,27 +216,59 @@ fn make_thumb(path string) ![]u8 {
 		img.free()
 	}
 	src := unsafe { img.data.vbytes(img.width * img.height * 3) }
-	return fit_thumb(src, img.width, img.height, flip, thumb_w, thumb_h)
+	if g.is_identity() {
+		return fit_thumb(src, img.width, img.height, flip, thumb_w, thumb_h)
+	}
+	ow := if flip & 4 != 0 { img.height } else { img.width }
+	oh := if flip & 4 != 0 { img.width } else { img.height }
+	pix := fit_thumb(src, img.width, img.height, flip, ow, oh)
+	cw, ch := g.out_size(ow, oh, true)
+	cut := pipeline.geom_rgba(pix, ow, oh, g, true, cw, ch)
+	mut rgb := []u8{len: cw * ch * 3}
+	for i in 0 .. cw * ch {
+		rgb[i * 3] = cut[i * 4]
+		rgb[i * 3 + 1] = cut[i * 4 + 1]
+		rgb[i * 3 + 2] = cut[i * 4 + 2]
+	}
+	return fit_thumb(rgb, cw, ch, 0, thumb_w, thumb_h)
 }
 
 // thumb_worker выполняется в spawn: миниатюры по порядку order, каждая -
 // в главный поток через app.post (единственный потокобезопасный вход
 // vgui). Не читаемый файл пропускается - остаётся пустая ячейка.
-fn thumb_worker(paths []string, order []int, gen int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+fn thumb_worker(paths []string, order []int, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
 	for idx in order {
 		if stop.stop {
 			return
 		}
-		pix := make_thumb(paths[idx]) or { continue }
+		g := thumb_geom(paths[idx])
+		pix := make_thumb(paths[idx], g) or { continue }
 		res := ThumbResult{
-			gen: gen
-			idx: idx
-			pix: pix
+			gen:  gen
+			seq:  seq
+			idx:  idx
+			pix:  pix
+			geom: g
 		}
 		app.post(fn [on_done, res] () {
 			on_done(res)
 		})
 	}
+}
+
+// thumb_one выполняется в spawn: одна миниатюра заново (refresh_thumb)
+fn thumb_one(path string, g pipeline.Geom, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
+	pix := make_thumb(path, g) or { return }
+	res := ThumbResult{
+		gen:  gen
+		seq:  seq
+		idx:  idx
+		pix:  pix
+		geom: g
+	}
+	app.post(fn [on_done, res] () {
+		on_done(res)
+	})
 }
 
 // stop_thumbs останавливает воркер миниатюр (смена папки, выход);
@@ -274,19 +326,49 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	cur := paths.index(cur_path)
 	stop := &StopFlag{}
 	st.thumb_stop = stop
+	st.thumb_seq++
 	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), st.thumb_gen,
-		stop, mut app, st.thumb_done)
+		st.thumb_seq, stop, mut app, st.thumb_done)
 	layout_strip(mut st)
 }
 
 // take_thumb принимает миниатюру из воркера (главный поток)
 fn take_thumb(mut st State, res ThumbResult) {
-	if res.gen != st.thumb_gen || res.idx < 0 || res.idx >= st.frames.len {
+	if res.gen != st.thumb_gen || res.idx < 0 || res.idx >= st.frames.len
+		|| res.seq < st.frames[res.idx].seq {
 		return
 	}
+	st.frames[res.idx].seq = res.seq
+	st.frames[res.idx].geom = res.geom
 	mut cv := st.frames[res.idx].cv
 	cv.pixels = res.pix
 	draw_mark(mut st, res.idx)
+}
+
+// refresh_thumb - миниатюра кадра idx заново с геометрией g (после
+// кадрирования или поворота): одна в фоне, ~25 мс
+fn refresh_thumb(mut st State, idx int, g pipeline.Geom) {
+	if idx < 0 || idx >= st.frames.len || isnil(st.app) {
+		return
+	}
+	st.thumb_seq++
+	st.frames[idx].geom = g
+	st.frames[idx].seq = st.thumb_seq
+	mut app := st.app
+	st.thumb_threads << spawn thumb_one(st.frames[idx].path, g, st.thumb_gen, st.thumb_seq,
+		idx, mut app, st.thumb_done)
+}
+
+// sync_thumb - миниатюра открытого кадра под его геометрию (после
+// записи сайдкара: правка, откат, вставка настроек)
+fn sync_thumb(mut st State) {
+	if st.frame_idx < 0 || st.frame_idx >= st.frames.len {
+		return
+	}
+	g := out_geom(&st.edit)
+	if g != st.frames[st.frame_idx].geom {
+		refresh_thumb(mut st, st.frame_idx, g)
+	}
 }
 
 // draw_mark - отметка «изменён» (кружок в правом верхнем углу) поверх

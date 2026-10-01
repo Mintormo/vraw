@@ -331,6 +331,7 @@ fn sync_sidecar(mut st State) {
 		return
 	}
 	mark_edited(mut st) // отметка «изменён» на миниатюре ленты
+	sync_thumb(mut st) // кадрирование и поворот - на миниатюре
 }
 
 // write_atomic - запись через временный файл и переименование: сбой
