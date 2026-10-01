@@ -32,10 +32,25 @@ mut:
 	total   int
 	eta     f64 = -1 // AI: секунд до конца, < 0 - неизвестно
 	started i64 // unix мс
+	// Пакет (batch.v): кадров всего и номер текущего (с 0); у одиночного
+	// экспорта n = 1. src/dst/plan/ai_skipped - текущего кадра
+	n   int = 1
+	idx int
 }
 
-// fraction - общая доля готового по весам этапов
+// fraction - общая доля готового: у пакета - готовые кадры плюс доля
+// текущего (кадры считаются равными: этапы у них разные, а время
+// большей частью одно - демозаика, тон, запись)
 fn (c &ExportCtl) fraction() f64 {
+	f := c.frame_fraction()
+	if c.n <= 1 {
+		return f
+	}
+	return (f64(c.idx) + f) / f64(c.n)
+}
+
+// frame_fraction - доля готового текущего кадра по весам этапов
+fn (c &ExportCtl) frame_fraction() f64 {
 	mut all := 0.0
 	mut ready := 0.0
 	for i, s in c.plan.stages {
@@ -182,17 +197,51 @@ fn export_started(mut st State) {
 		return
 	}
 	mut u := st.eui
-	c := st.exp
-	mut f := u.files
-	no_ai := if c.ai_skipped { '  ·  без AI-шумодава' } else { '' }
-	f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
-	u.folder.set('Папка: ', os.dir(c.dst))
+	sync_export_files(mut st)
 	paint_export(mut st)
 	mut b := u.btn
 	b.text = 'Отменить'
 	b.style = .normal
 	b.enabled = true
 	sync_export_ui(mut st)
+}
+
+// sync_export_files - что проявляется и куда (у пакета - «Кадр 3 из 12»)
+fn sync_export_files(mut st State) {
+	if isnil(st.eui) || isnil(st.exp) {
+		return
+	}
+	mut u := st.eui
+	c := st.exp
+	mut f := u.files
+	no_ai := if c.ai_skipped { '  ·  без AI-шумодава' } else { '' }
+	pos := if c.n > 1 { 'Кадр ${c.idx + 1} из ${c.n}:  ' } else { '' }
+	f.text = if c.dst == '' {
+		'${pos}${os.file_name(c.src)}${no_ai}'
+	} else {
+		'${pos}${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
+	}
+	if c.dst != '' {
+		u.folder.set('Папка: ', os.dir(c.dst))
+	}
+}
+
+// batch_frame - начало кадра пакета (из воркера через app.post)
+fn batch_frame(mut st State, ctl &ExportCtl, fr BatchFrame) {
+	mut c := unsafe { ctl }
+	c.idx = fr.idx
+	c.src = fr.src
+	c.dst = fr.dst
+	c.plan = fr.plan
+	c.ai_skipped = fr.ai_skipped
+	c.stage = .decode
+	c.done = 0
+	c.total = 0
+	c.eta = -1
+	if st.exp == ctl {
+		sync_export_files(mut st)
+		sync_export_ui(mut st)
+	}
 }
 
 // sync_export_ui - этап, полоса и время по st.exp (главный поток)
@@ -226,7 +275,7 @@ fn sync_export_ui(mut st State) {
 	mut t := 'прошло ${fmt_secs(elapsed)}'
 	// Оставшееся: на AI - по плиткам (это почти всё время), иначе - по
 	// весам этапов, когда накопилось на что опереться
-	if c.stage == .ai && c.eta >= 0 {
+	if c.n <= 1 && c.stage == .ai && c.eta >= 0 {
 		t += ' · ${fmt_eta(c.eta)}'
 	} else if frac > 0.15 && elapsed > 2 {
 		t += ' · ${fmt_eta(elapsed / frac - elapsed)}'

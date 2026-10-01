@@ -1,7 +1,8 @@
 module main
 
-// Окно «Экспорт» (Ctrl+E, «Файл - Экспорт...»): куда и как сохранить кадр
-// перед запуском - папка, имя по шаблону, формат и качество, размер на
+// Окно «Экспорт» (Ctrl+E, «Файл - Экспорт...»): что экспортировать
+// (открытый кадр, выделенные в ленте, вся папка - пакет, batch.v), куда и
+// как - папка, имя по шаблону, формат и качество, размер на
 // выход, что делать с существующим файлом, AI-шумодав. Выбор запоминается
 // в настройках программы (settings.v) - его же возьмёт пакетная обработка.
 // Размер на выход - настройка экспорта, а не кадра (как в Lightroom):
@@ -120,6 +121,11 @@ fn export_path(s &Settings, raw_path string, f imgio.Format) string {
 struct ExportSetupUi {
 mut:
 	dlg     &vgui.Dialog   = unsafe { nil }
+	what_cb &vgui.ComboBox = unsafe { nil }
+	// Варианты «Кадры» на момент открытия окна (ключи: 'open', 'sel',
+	// 'all') и выбранный; выбор не запоминается - зависит от ленты
+	what_keys []string
+	what      string
 	dir_cb  &vgui.ComboBox = unsafe { nil }
 	dir_btn &vgui.Button   = unsafe { nil }
 	dir     PathNote
@@ -141,7 +147,7 @@ mut:
 }
 
 const xs_w = 680
-const xs_h = 520
+const xs_h = 560
 const xs_lbl_w = f32(150)
 const xs_path_max = 56
 
@@ -161,10 +167,80 @@ fn show_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) {
 			return
 		}
 	}
+	set_export_targets(mut st)
 	sync_export_setup(mut st)
 	mut d := st.xs.dlg
 	if !d.is_open() {
 		d.show_scaled(parent)
+	}
+}
+
+// set_export_targets - варианты «Кадры» по ленте: выделено больше одного
+// кадра - по умолчанию они, иначе открытый кадр, иначе вся папка
+fn set_export_targets(mut st State) {
+	mut u := st.xs
+	sel := strip_selection(st)
+	mut keys := []string{}
+	mut names := []string{}
+	if !isnil(st.dev) {
+		keys << 'open'
+		names << 'Открытый кадр (${os.file_name(st.dev.path)})'
+	}
+	if sel.len > 1 {
+		keys << 'sel'
+		names << 'Выделенные в ленте (${sel.len})'
+	}
+	if st.frames.len > 1 || (st.frames.len == 1 && keys.len == 0) {
+		keys << 'all'
+		names << 'Все кадры папки (${st.frames.len})'
+	}
+	u.what_keys = keys
+	u.what = if 'sel' in keys {
+		'sel'
+	} else if keys.len > 0 {
+		keys[0]
+	} else {
+		''
+	}
+	mut cb := u.what_cb
+	cb.set_items(names)
+	cb.set_selected(math.max(0, keys.index(u.what)))
+	cb.enabled = keys.len > 1
+}
+
+// strip_selection - выделенные в ленте кадры (индексы)
+fn strip_selection(st &State) []int {
+	if isnil(st.strip) {
+		return []int{}
+	}
+	return st.strip.get_selection().filter(it >= 0 && it < st.frames.len)
+}
+
+// export_target_paths - RAW-файлы по выбору «Кадры»
+fn export_target_paths(st &State, what string) []string {
+	return match what {
+		'open' {
+			if isnil(st.dev) { []string{} } else { [st.dev.path] }
+		}
+		'sel' {
+			strip_selection(st).map(st.frames[it].path)
+		}
+		'all' {
+			st.frames.map(it.path)
+		}
+		else {
+			[]string{}
+		}
+	}
+}
+
+// size_desc - размер на выход словами (итог пакета)
+fn size_desc(s &Settings) string {
+	return match s.export_size {
+		'long' { 'длинная сторона до ${s.export_long} px' }
+		'fit' { 'в пределах ${s.export_w} × ${s.export_h} px' }
+		'pct' { '${s.export_pct}% размера' }
+		else { 'полный размер' }
 	}
 }
 
@@ -254,12 +330,22 @@ fn sync_export_result(mut st State) {
 		return
 	}
 	mut r := st.xs.result
+	s := st.settings
+	f := s.export_fmt()
+	if st.xs.what != 'open' {
+		paths := export_target_paths(st, st.xs.what)
+		if paths.len == 0 {
+			r.text = 'Нет кадров'
+			return
+		}
+		first := os.file_name(export_path(&s, paths[0], f))
+		r.text = '${paths.len} ${plural(paths.len, 'кадр', 'кадра', 'кадров')}: ${first}...  ·  ${size_desc(&s)}'
+		return
+	}
 	if isnil(st.dev) {
 		r.text = 'Кадр не открыт'
 		return
 	}
-	s := st.settings
-	f := s.export_fmt()
 	name := os.file_name(export_path(&s, st.dev.path, f))
 	fw, fh := full_size(st)
 	cw, ch := crop_size(&st.edit, fw, fh)
@@ -277,14 +363,31 @@ fn export_setup_changed(mut st State) {
 // export_confirm - «Экспорт»: проверка папки, запуск, окно закрывается
 fn export_confirm(mut st State) {
 	mut nm := st.nm
-	if isnil(st.dev) {
-		nm.show_warning('Сначала откройте RAW-файл')
-		return
-	}
 	// Имя из поля - и без Enter
 	t := st.xs.name.get_text()
 	st.settings.export_name = if t.trim_space() == '' { name_tmpl_default } else { t }
 	save_settings(st.settings)
+	if st.xs.what != 'open' {
+		paths := export_target_paths(st, st.xs.what)
+		if paths.len == 0 {
+			nm.show_warning('Нет кадров для экспорта')
+			return
+		}
+		if st.settings.export_dir_mode == 'dir' && !os.is_dir(st.settings.export_dir) {
+			nm.show_error('Папки нет: ${st.settings.export_dir}')
+			return
+		}
+		mut d := st.xs.dlg
+		d.close_with_result(1)
+		if !isnil(st.export_batch) {
+			st.export_batch(paths)
+		}
+		return
+	}
+	if isnil(st.dev) {
+		nm.show_warning('Сначала откройте RAW-файл')
+		return
+	}
 	dir := export_dir_for(&st.settings, st.dev.path)
 	if !os.is_dir(dir) {
 		nm.show_error('Папки нет: ${dir}')
@@ -323,6 +426,18 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		r.add(w, 1)
 		return r
 	}
+
+	// Кадры: открытый, выделенные в ленте, вся папка
+	mut what_cb := vgui.combo_box()
+	what_cb.on_change = fn [mut st] (i int, _ string) {
+		if st.suppress || isnil(st.xs) || i < 0 || i >= st.xs.what_keys.len {
+			return
+		}
+		mut u := st.xs
+		u.what = u.what_keys[i]
+		sync_export_result(mut st)
+	}
+	u.what_cb = what_cb
 
 	// Папка
 	mut dir_cb := vgui.combo_box()
@@ -519,6 +634,8 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut body := vgui.create_vbox_fill()
 	body.set_padding(16)
 	body.set_spacing(6)
+	body.add_fixed(row('Кадры', what_cb), set_row_h)
+	body.add_fixed(vgui.create_spacer(), 4)
 	body.add_fixed(dir_row, set_row_h)
 	body.add_fixed(indented(dir_note.label, xs_lbl_w + 8), set_note_h)
 	body.add_fixed(row('Имя файла', name), set_row_h)

@@ -168,6 +168,10 @@ mut:
 	// файл (путь и формат - из окна)
 	xs        &ExportSetupUi = unsafe { nil }
 	export_go fn (string, imgio.Format) = unsafe { nil }
+	// Пакетный экспорт (batch.v): запуск по путям кадров и приёмник
+	// начала очередного кадра в главном потоке
+	export_batch fn ([]string) = unsafe { nil }
+	exp_frame    fn (&ExportCtl, BatchFrame) = unsafe { nil }
 	// Баланс белого (wb_ui.v): цвет камеры кадра и его ББ «как снято»,
 	// виджеты секции, режим пипетки; холст и тональный пересчёт - для
 	// обработчиков секции
@@ -2255,8 +2259,8 @@ fn main() {
 			nm.show_warning('Кадр ещё загружается')
 			return
 		}
-		if isnil(st.dev) {
-			nm.show_warning('Сначала откройте RAW-файл')
+		if isnil(st.dev) && st.frames.len == 0 {
+			nm.show_warning('Сначала откройте RAW-файл или папку')
 			return
 		}
 		show_export_setup(mut st, mut app, win)
@@ -2310,6 +2314,65 @@ fn main() {
 		// Пока идёт экспорт, модели не удалить (модель может быть в работе)
 		sync_settings_ui(mut st)
 		st.save_threads << spawn save_worker(job, mut app, save_done)
+	}
+	st.exp_frame = fn [mut st] (ctl &ExportCtl, fr BatchFrame) {
+		batch_frame(mut st, ctl, fr)
+	}
+	// Пакетный экспорт: настройки кадров - здесь (сайдкары, AI-модели),
+	// проявка - в фоне по очереди (batch_worker)
+	st.export_batch = fn [mut st, mut nm, mut app, win, save_done] (paths []string) {
+		if !isnil(st.exp) || paths.len == 0 {
+			return
+		}
+		fmt := st.settings.export_fmt()
+		mut items, bad := batch_items(st, paths)
+		mut no_ai := []bool{len: items.len}
+		mut caches := map[string]&ai.Cache{}
+		mut secs := map[string]f64{}
+		for i, mut it in items {
+			if it.edit.ai <= 0 {
+				continue
+			}
+			if st.settings.export_no_ai {
+				it.edit.ai = 0
+				no_ai[i] = true
+				continue
+			}
+			m := it.edit.ai_model
+			if m !in caches {
+				caches[m] = ai_cache_for(mut st, m) or {
+					nm.show_error('Экспорт с AI-шумодавом (${os.file_name(it.src)}): ${err.msg()}')
+					return
+				}
+				secs[m] = ai_estimate(st, m, true)
+			}
+		}
+		if bad.len > 0 {
+			nm.show_warning('Правки не прочитаны, кадр без них: ${bad.join(', ')}')
+		}
+		ctl := &ExportCtl{
+			src:     items[0].src
+			fmt:     fmt
+			n:       items.len
+			started: time.now().unix_milli()
+		}
+		job := BatchJob{
+			items:     items
+			settings:  st.settings
+			format:    fmt
+			db:        st.lens_db
+			ai_caches: caches
+			ai_secs:   secs
+			no_ai:     no_ai
+			ctl:       ctl
+			on_stage:  st.exp_progress
+			on_frame:  st.exp_frame
+		}
+		st.exp = ctl
+		show_export(mut st, mut app, win)
+		export_started(mut st)
+		sync_settings_ui(mut st)
+		st.save_threads << spawn batch_worker(job, mut app, save_done)
 	}
 
 	// «Сброс» тональный: пересветы, коррекция объектива, камерная кривая
