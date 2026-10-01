@@ -382,3 +382,43 @@ fn test_curve_from_mapping_smooth() {
 		assert c[v] >= c[v - 1]
 	}
 }
+
+// match_saturation: эталон - наши же тона с насыщенностью x1.5 -
+// множитель ~1.5; эталон без изменений - ~1; серый кадр - 1
+fn test_match_saturation() {
+	npix := 40000
+	mut src := []u16{len: npix * 3}
+	for i in 0 .. npix {
+		// Цветной градиент средних тонов
+		t := f32(i % 200) / 200.0
+		src[i * 3] = u16(6000 + 14000 * t)
+		src[i * 3 + 1] = u16(9000 + 8000 * t)
+		src[i * 3 + 2] = u16(4000 + 20000 * (1 - t))
+	}
+	p := Params{}
+	tone := build_flut(&p)
+	mk := fn [src, tone, npix] (s f32) []u8 {
+		mut ref_ := []u8{len: npix * 3}
+		for i in 0 .. npix {
+			r := tone[src[i * 3]]
+			g := tone[src[i * 3 + 1]]
+			b := tone[src[i * 3 + 2]]
+			l := 0.2126 * r + 0.7152 * g + 0.0722 * b
+			for c, v in [r, g, b] {
+				x := l + s * (v - l)
+				ref_[i * 3 + c] = u8(if x < 0 { f32(0) } else if x > 255 { f32(255) } else { x + 0.5 })
+			}
+		}
+		return ref_
+	}
+	r15 := mk(1.5)
+	k15 := match_saturation(unsafe { &u16(src.data) }, npix, []f32{}, unsafe { &u8(r15.data) }, npix)
+	assert math.abs(k15 - 1.5) < 0.05, '${k15}'
+	r1 := mk(1.0)
+	k1 := match_saturation(unsafe { &u16(src.data) }, npix, []f32{}, unsafe { &u8(r1.data) }, npix)
+	assert math.abs(k1 - 1.0) < 0.03, '${k1}'
+	// Серый источник - считать не по чему
+	gray := []u16{len: npix * 3, init: 12000}
+	kg := match_saturation(unsafe { &u16(gray.data) }, npix, []f32{}, unsafe { &u8(r15.data) }, npix)
+	assert kg == 1
+}

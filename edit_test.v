@@ -237,7 +237,7 @@ fn test_roundtrip() {
 		'Шумодав: яркостный 35', 'Разное']
 	// Снимки совпадают с исходными (с производными полями - как в живом State)
 	for i, h in loaded.history {
-		assert with_derived(h.state, st.curve, st.cam) == st.history[i].state
+		assert with_derived(h.state, st.look, st.cam) == st.history[i].state
 	}
 	last := loaded.history[3].state
 	assert last.curve_pts[2].len == 3
@@ -260,7 +260,7 @@ fn test_loaded_history_no_spurious_record() {
 	st2.history = loaded.history.map(HistEntry{
 		name:  it.name
 		key:   it.key
-		state: with_derived(it.state, st2.curve, st2.cam)
+		state: with_derived(it.state, st2.look, st2.cam)
 	})
 	st2.hist_pos = loaded.current
 	jump(mut st2, 0)
@@ -475,11 +475,11 @@ fn test_wb_derive() {
 		cam_xyz: [f32(0.8293), -0.1789, -0.1094, -0.5025, 1.2925, 0.2327, -0.1199, 0.2769, 0.6108]!
 	}
 	mut e := neutral_edit()
-	d0 := with_derived(e, []f32{}, cam)
+	d0 := with_derived(e, CamLook{}, cam)
 	assert !d0.params.wb_on
 	e.wb_mode = 'tungsten'
 	e.wb_temp = 2850
-	d1 := with_derived(e, []f32{}, cam)
+	d1 := with_derived(e, CamLook{}, cam)
 	assert d1.params.wb_on
 	// Лампа накаливания: серое становится синее (B-строка больше R-строки)
 	m := d1.params.wb.matrix()

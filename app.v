@@ -42,7 +42,7 @@ mut:
 	// кадров (corr) ссылаются на неё; nil - база не загрузилась
 	lens_db      &lens.Database  = unsafe { nil }
 	corr         &lens.Corrector = unsafe { nil } // профиль lensfun или nil
-	curve        []f32 // камерная кривая кадра (match_curve), пустая - нет превью
+	look         CamLook // «как JPEG» кадра (кривая и насыщенность), пусто - нет превью
 	nr_applied   [4]f32 = [f32(-1), -1, -1, -1]! // значения последней подготовки сырья
 	dc_applied   [3]f32 = [f32(-1), -1, -1]! // Capture-резкость последней подготовки (dc_key)
 	save_threads []thread // хендлы фоновых сохранений: wait после app.run()
@@ -1379,18 +1379,19 @@ fn main() {
 	mut lens_lb := vgui.label('')
 	st.secondary_labels << lens_lb
 
-	// Камерная кривая: тональная кривая, подогнанная под встроенный JPEG
-	// камеры (как «Автоопределение тоновой кривой» в RawTherapee). Без неё
-	// нейтральная проявка - чистая гамма 2.2, заметно темнее камерного
-	// JPEG в средних тонах. Кривая сидит в flut, поэтому переключение -
-	// мгновенное (обычный apply, перепроявка не нужна).
-	mut crv_cb := vgui.checkbox('Камерная кривая (как JPEG)')
+	// «Как JPEG камеры»: тональная кривая и множитель насыщенности,
+	// подогнанные под встроенный JPEG (CamLook). Без них нейтральная
+	// проявка - чистая гамма 2.2, темнее и блёклее камерного JPEG. Кривая
+	// сидит в flut, насыщенность - множитель, поэтому переключение -
+	// мгновенное (обычный apply, перепроявка не нужна). Ползунок
+	// «Насыщенность» - относительно камерной (1.00 - как у камеры).
+	mut crv_cb := vgui.checkbox('Как JPEG камеры (тон и цвет)')
 	crv_cb.checked = true
 	crv_cb.on_change = fn [mut st, mut cv, mut hist] (v bool) {
 		st.edit.use_curve = v
-		st.edit.params.curve = if v { st.curve.clone() } else { []f32{} }
+		st.edit = with_derived(st.edit, st.look, st.cam)
 		apply_pipeline(mut st, mut cv, mut hist)
-		record(mut st, 'camcurve', 'Камерная кривая: ${on_off(v)}', false)
+		record(mut st, 'camcurve', 'Как JPEG камеры: ${on_off(v)}', false)
 	}
 	st.crv_cb = crv_cb
 
@@ -1943,7 +1944,7 @@ fn main() {
 		st.gmask = []u16{}
 		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
-		st.curve = []f32{}
+		st.look = CamLook{}
 		st.lens_dirty = false
 		lens_lb.text = 'поиск профиля объектива...'
 		lens_cb.enabled = false
@@ -2039,14 +2040,14 @@ fn main() {
 		st.ai_applied = 0
 		st.lens_dirty = false
 		st.raw_pending = false
-		st.curve = res.curve
-		crv_cb.enabled = st.curve.len > 0
+		st.look = res.look
+		crv_cb.enabled = st.look.curve.len > 0
 		// Производные поля снимков - по камерной кривой этого кадра
-		st.edit = with_derived(st.edit, st.curve, st.cam)
+		st.edit = with_derived(st.edit, st.look, st.cam)
 		st.history = st.history.map(HistEntry{
 			name:  it.name
 			key:   it.key
-			state: with_derived(it.state, st.curve, st.cam)
+			state: with_derived(it.state, st.look, st.cam)
 		})
 		show_viewer(mut cv, mut placeholder)
 		sync_view_bg(mut st)
@@ -2177,7 +2178,7 @@ fn main() {
 		st.gmask = []u16{}
 		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
-		st.curve = []f32{}
+		st.look = CamLook{}
 		st.side_path = ''
 		set_cam_color(mut st, pipeline.CamColor{})
 		set_wb_pick(mut st, false)

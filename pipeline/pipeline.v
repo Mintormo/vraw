@@ -36,6 +36,9 @@ pub mut:
 	exposure   f32 // экспозиция, EV (-3..+3)
 	contrast   f32 // контраст (-1..+1), S-кривая в тоновом пространстве
 	saturation f32 = 1.0 // насыщенность (0..4), 1 = как есть
+	// Насыщенность «как JPEG камеры» (match_saturation) - производное
+	// поле, множитель к saturation; 1 - нет
+	cam_sat f32 = 1.0
 	// Сочность (vibrance) -100..100: бережная насыщенность - блёклые цвета
 	// меняются сильнее насыщенных, тона кожи при подъёме защищены
 	vibrance f32
@@ -494,6 +497,75 @@ fn monotone_spline(xs []f64, ys []f64) []f32 {
 	return curve
 }
 
+// Насыщенность «как JPEG»: пределы множителя и средние тона, по которым
+// он считается (в провалах цвет не виден, в пересветах каналы упираются
+// в 255 - насыщенностью их не раздвинуть)
+const cam_sat_min = f32(0.8)
+const cam_sat_max = f32(2.0)
+const cam_sat_lo = 25
+const cam_sat_hi = 230
+
+// match_saturation - множитель насыщенности «как камерный JPEG»: средняя
+// цветность (max - min каналов) JPEG ref (8-бит RGB, ref_npix пикселей)
+// к средней цветности нашей проявки src (линейный 16-бит RGB, npix) с
+// камерной кривой curve и нейтральными остальными настройками - по
+// пикселям средних тонов (люма cam_sat_lo..cam_sat_hi, ни один канал не
+// у 255). Насыщенность раздвигает каналы от люмы (v' = l + s(v - l)) -
+// цветность растёт ровно в s раз, поэтому отношение средних и есть
+// множитель. Кадры могут не совпадать попиксельно (размер, дисторсия у
+// JPEG исправлена) - сравниваются средние по кадру. Сочность JPEG
+// камеры - в основном её стиль изображения (насыщенность), кривая
+// яркости её не даёт. Ограничен cam_sat_min..cam_sat_max; не
+// посчитать - 1.
+pub fn match_saturation(src &u16, npix int, curve []f32, ref_ &u8, ref_npix int) f32 {
+	p := Params{
+		curve: curve
+	}
+	tone := build_flut(&p)
+	mut cs := 0.0
+	mut ns := 0
+	unsafe {
+		mut s := &u16(src)
+		tl := &f32(tone.data)
+		for _ in 0 .. npix / 4 {
+			r := tl[s[0]]
+			g := tl[s[1]]
+			b := tl[s[2]]
+			s += 12
+			l := 0.2126 * r + 0.7152 * g + 0.0722 * b
+			mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
+			mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
+			if l >= cam_sat_lo && l <= cam_sat_hi && mx < 250 {
+				cs += f64(mx - mn)
+				ns++
+			}
+		}
+	}
+	mut cr := 0.0
+	mut nr := 0
+	unsafe {
+		mut q := &u8(ref_)
+		for _ in 0 .. ref_npix / 4 {
+			r := f32(q[0])
+			g := f32(q[1])
+			b := f32(q[2])
+			q += 12
+			l := 0.2126 * r + 0.7152 * g + 0.0722 * b
+			mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
+			mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
+			if l >= cam_sat_lo && l <= cam_sat_hi && mx < 250 {
+				cr += f64(mx - mn)
+				nr++
+			}
+		}
+	}
+	if ns < 100 || nr < 100 || cs <= 0 {
+		return 1
+	}
+	k := f32((cr / f64(nr)) / (cs / f64(ns)))
+	return if k < cam_sat_min { cam_sat_min } else if k > cam_sat_max { cam_sat_max } else { k }
+}
+
 // blur_luma - маска для «Тени/Света»: BT.709-люма каждого пикселя,
 // размытая приближением гауссова фильтра (тройной box blur, радиус ~1%
 // большей стороны кадра). Считается один раз на кадр (зависит только от
@@ -742,7 +814,7 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
-	sat := p.saturation
+	sat := p.saturation * p.cam_sat
 	vib := p.vibrance / 100.0
 	wb_on := p.wb_on
 	wx := p.wb

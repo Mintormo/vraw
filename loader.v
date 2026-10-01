@@ -66,7 +66,7 @@ struct LoadResult {
 	raw_linear []u16
 	linear     []u16
 	mask       []u16
-	curve      []f32 // камерная кривая; пусто - встроенного JPEG нет
+	look       CamLook // камерная кривая и насыщенность; пусто - встроенного JPEG нет
 }
 
 // load_worker выполняется в spawn; результат - через app.post
@@ -134,7 +134,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		raw_linear: prep.raw_linear
 		linear:     prep.linear
 		mask:       prep.mask
-		curve:      camera_curve(mut d, prep.linear, w * h)
+		look:       camera_look(mut d, prep.linear, w * h)
 	}
 	post_load(mut app, on_done, res)
 }
@@ -174,17 +174,40 @@ fn quick_preview(mut d raw.Developer, job LoadJob) ?LoadPreview {
 	}
 }
 
-// camera_curve - камерная кривая кадра: встроенный полный JPEG камеры +
-// гистограммное сопоставление с нейтральной проявкой превью linear (npix
-// пикселей). Именно полный JPEG: у CR3 превью 1620x1080 обработано иначе.
-// Пусто - встроенного JPEG нет.
-fn camera_curve(mut d raw.Developer, linear []u16, npix int) []f32 {
-	tj := d.thumb() or { return []f32{} }
-	mut t := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return []f32{} }
+// CamLook - «как JPEG камеры» для кадра: тоновая кривая (match_curve) и
+// множитель насыщенности (match_saturation). Производное, в сайдкар не
+// пишется; включается флажком «как JPEG» (EditState.use_curve).
+// Наименьший встроенный JPEG для «как JPEG» (300 x 200): на меньшем
+// гистограммы и средние слишком шумные
+const cam_look_min_px = 60000
+
+struct CamLook {
+	curve []f32 // пусто - встроенного JPEG нет
+	sat   f32 = 1
+}
+
+// camera_look - «как JPEG» кадра: встроенный полный JPEG камеры против
+// нейтральной проявки превью linear (npix пикселей): кривая -
+// сопоставлением гистограмм, насыщенность - по средней цветности с этой
+// кривой. Именно полный JPEG: у CR3 превью 1620x1080 обработано иначе.
+// Камеры разные (Canon, Nikon, Sony...) и стили у них разные - поэтому
+// всё по встроенному JPEG этого же кадра, а не константами; JPEG меньше
+// cam_look_min_px пикселей (бывают крошечные превью) - без подбора.
+fn camera_look(mut d raw.Developer, linear []u16, npix int) CamLook {
+	tj := d.thumb() or { return CamLook{} }
+	mut t := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return CamLook{} }
 	defer {
 		t.free()
 	}
-	return pipeline.match_curve(unsafe { &u16(linear.data) }, npix, t.data, t.width * t.height)
+	if t.width * t.height < cam_look_min_px {
+		return CamLook{}
+	}
+	src := unsafe { &u16(linear.data) }
+	curve := pipeline.match_curve(src, npix, t.data, t.width * t.height)
+	return CamLook{
+		curve: curve
+		sat:   pipeline.match_saturation(src, npix, curve, t.data, t.width * t.height)
+	}
 }
 
 // free_load - закрыть LibRaw отброшенного результата загрузки (профиль

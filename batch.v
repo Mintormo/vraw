@@ -139,7 +139,7 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 		d.close()
 	}
 	cam := cam_color(d.color())
-	mut curve := []f32{}
+	mut look := CamLook{}
 	if e.use_curve {
 		mut img := d.develop(half: true, highlight: e.highlight)!
 		w := img.width
@@ -150,9 +150,9 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 		if e.lens_corr {
 			correct_lens(unsafe { &u16(lin.data) }, w, h, d.meta(), db)
 		}
-		curve = camera_curve(mut d, lin, w * h)
+		look = camera_look(mut d, lin, w * h)
 	}
-	return with_derived(e, curve, cam)
+	return with_derived(e, look, cam)
 }
 
 // batch_items - кадры пакета по путям: открытый - текущие настройки окна,

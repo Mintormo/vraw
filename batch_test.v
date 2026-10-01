@@ -64,7 +64,8 @@ fn test_batch_derive() {
 	mut off := neutral_edit()
 	off.use_curve = false
 	d2 := batch_derive(path, off, unsafe { nil })!
-	assert d2.params.curve.len == 0
+	assert d2.params.curve.len == 0 && d2.params.cam_sat == 1
+	assert d.params.cam_sat > 0.5 && d.params.cam_sat <= 2
 }
 
 // Пути пакета: занятые ещё не записанными кадрами тоже обходятся

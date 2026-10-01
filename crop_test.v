@@ -113,7 +113,7 @@ fn test_develop_crop() {
 	}
 	b := g.max_box(1, 2999.0 / 2, 1999.0 / 2, 2999, 1999)
 	e.geom = g.with_box(b, 2999, 1999)
-	img := develop_full(path, with_derived(e, []f32{}, pipeline.CamColor{}), unsafe { nil },
+	img := develop_full(path, with_derived(e, CamLook{}, pipeline.CamColor{}), unsafe { nil },
 		size: ExportSize{
 			mode: 'long'
 			long: 1000

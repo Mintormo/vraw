@@ -206,7 +206,7 @@ fn set_edit(mut st State, e EditState) {
 		sl.set_value(b.get(&e))
 	}
 	st.suppress = false
-	st.edit = with_derived(e, st.curve, st.cam)
+	st.edit = with_derived(e, st.look, st.cam)
 	if !isnil(st.lens_cb) {
 		mut cb := st.lens_cb
 		cb.set_checked(e.lens_corr)
