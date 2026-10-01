@@ -1,9 +1,9 @@
 module main
 
 // Окно «Настройки» (меню «Правка - Настройки...»): оформление (тема, фон
-// вокруг снимка - те же, что в меню «Вид»), экспорт (формат, качество
-// JPEG, AI-шумодав при экспорте), AI-шумодав: скачивание ONNX Runtime и моделей в папки рядом с
-// программой, выбор модели для новых прогонов. Диалог создаётся при первом открытии и живёт до выхода:
+// вокруг снимка - те же, что в меню «Вид»), AI-шумодав: скачивание ONNX
+// Runtime и моделей в папки рядом с программой, выбор модели для новых
+// прогонов. Настройки экспорта - в окне «Экспорт» (export_setup.v). Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
 // закрыть и работать дальше, итог - тостом в главном окне.
 import vgui
@@ -45,8 +45,6 @@ mut:
 	dlg      &vgui.Dialog      = unsafe { nil }
 	theme_cb &vgui.ComboBox    = unsafe { nil }
 	bg_cb    &vgui.ComboBox    = unsafe { nil }
-	fmt_cb   &vgui.ComboBox    = unsafe { nil } // формат экспорта
-	ai_cb    &vgui.CheckBox    = unsafe { nil } // AI-шумодав при экспорте
 	rt_state &vgui.Label       = unsafe { nil }
 	rt_btn   &vgui.Button      = unsafe { nil }
 	rows     []ModelRow
@@ -58,7 +56,7 @@ mut:
 }
 
 const set_w = 640
-const set_h = 820
+const set_h = 590
 const set_row_h = f32(28)
 const set_note_h = f32(20)
 const set_state_w = f32(150)
@@ -256,52 +254,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(labeled('Фон вокруг снимка', bg_cb), set_row_h)
 	body.add_fixed(vgui.create_spacer(), 8)
 
-	// ── Экспорт ──
-	// Формат - тот, что предложит «Экспорт...»; выбор другого расширения
-	// в диалоге сохранения тоже меняет его
-	mut fmt_cb := vgui.combo_box()
-	fmt_cb.set_items(imgio.formats.map(fmt_title(it)))
-	fmt_cb.on_change = fn [mut st] (i int, _ string) {
-		if i >= 0 && i < imgio.formats.len {
-			st.settings.export_format = imgio.formats[i].key()
-			save_settings(st.settings)
-		}
-	}
-	u.fmt_cb = fmt_cb
-	q := st.settings.jpeg_quality
-	mut q_vl := value_label('${q}')
-	mut q_sl := vgui.slider_horizontal(jpeg_q_min, 100, q)
-	q_sl.step = 1
-	q_sl.on_change = fn [mut st, mut q_vl] (v f32) {
-		if int(v) != st.settings.jpeg_quality {
-			st.settings.jpeg_quality = int(v)
-			save_settings(st.settings)
-		}
-		q_vl.text = '${int(v)}'
-	}
-	mut q_row := vgui.create_hbox_fill()
-	q_row.set_spacing(8)
-	q_row.add_fixed(vgui.label('Качество JPEG'), 170)
-	q_row.add_fixed(q_sl, 240)
-	q_row.add_fixed(q_vl, 40)
-	q_row.add(vgui.create_spacer(), 1)
-	body.add_fixed(caption('Экспорт'), 20)
-	body.add_fixed(labeled('Формат', fmt_cb), set_row_h)
-	body.add_fixed(q_row, set_row_h)
-	body.add_fixed(note(mut u, 'Больше - лучше качество и больше файл; ${jpeg_q_default} - хороший баланс'),
-		set_note_h)
-	// AI-шумодав на полном кадре - минуты (SCUNet ~16 мин): можно
-	// отключить для быстрых проб; кадр своей настройки AI не теряет
-	mut ai_cb := vgui.checkbox('AI-шумодав при экспорте')
-	ai_cb.on_change = fn [mut st] (v bool) {
-		st.settings.export_no_ai = !v
-		save_settings(st.settings)
-	}
-	u.ai_cb = ai_cb
-	body.add_fixed(ai_cb, set_row_h)
-	body.add_fixed(indented(note(mut u, 'Выключено - кадры с AI экспортируются без него: быстро, но шумнее'),
-		26), set_note_h)
-	body.add_fixed(vgui.create_spacer(), 8)
 	body.add_fixed(caption('AI-шумодав'), 20)
 	body.add_fixed(rt_row, set_row_h)
 	body.add_fixed(note(mut u, 'Движок нейросетей (открытый, MIT) - нужен всем моделям'), set_note_h)
@@ -421,10 +373,6 @@ fn sync_settings_ui(mut st State) {
 	tcb.set_selected(theme_index(st.settings.theme))
 	mut bcb := u.bg_cb
 	bcb.set_selected(bg_index(st.settings.viewer_bg))
-	mut fcb := u.fmt_cb
-	fcb.set_selected(imgio.formats.index(st.settings.export_fmt()))
-	mut acb := u.ai_cb
-	acb.checked = !st.settings.export_no_ai
 	busy := !isnil(st.dl)
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''

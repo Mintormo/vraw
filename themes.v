@@ -101,6 +101,11 @@ fn apply_theme(mut st State, mut app vgui.App, idx int) {
 		d.set_theme(th)
 		paint_export(mut st)
 	}
+	if !isnil(st.xs) {
+		mut d := st.xs.dlg
+		d.set_theme(th)
+		paint_export_setup(mut st)
+	}
 	if !isnil(st.groups_ui) {
 		mut d := st.groups_ui.dlg
 		d.set_theme(th)

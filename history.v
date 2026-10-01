@@ -35,18 +35,13 @@ mut:
 	wb_tint f32
 	// Кадрирование и поворот (crop.v): геометрия (ориентация, угол, рамка
 	// в долях кадра), ограничение рамки - пропорция (ключ crop_aspects,
-	// '' - свободно; своя - crop_aw:crop_ah; portrait - вертикальная) и
-	// размер на выход (size_mode: 0 - как есть, 1 - точно size_w x
-	// size_h, 2 - длинная сторона size_long)
+	// '' - свободно; своя - crop_aw:crop_ah; portrait - вертикальная).
+	// Размер на выход - не кадра, а экспорта (Settings, export_setup.v)
 	geom          pipeline.Geom
 	crop_aspect   string
 	crop_aw       int = 3
 	crop_ah       int = 2
 	crop_portrait bool
-	size_mode     int
-	size_w        int = 1920
-	size_h        int = 1080
-	size_long     int = 2048
 }
 
 // neutral_edit - настройки только что открытого файла (запись «Открыт файл»)

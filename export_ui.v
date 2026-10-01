@@ -34,21 +34,6 @@ mut:
 	started i64 // unix мс
 }
 
-// export_target - формат и путь по имени из диалога сохранения: формат -
-// по расширению; без расширения - формат def (расширение дописывается);
-// незнакомое расширение - ошибка (молча писать не то, что просили, нельзя)
-fn export_target(path string, def imgio.Format) !(imgio.Format, string) {
-	if f := imgio.format_by_path(path) {
-		return f, path
-	}
-	ext := os.file_ext(path)
-	if ext == '' {
-		return def, '${path}.${def.ext()}'
-	}
-	names := imgio.formats.map(it.name()).join(', ')
-	return error('Формат «${ext}» не поддерживается. Можно: ${names}')
-}
-
 // fraction - общая доля готового по весам этапов
 fn (c &ExportCtl) fraction() f64 {
 	mut all := 0.0

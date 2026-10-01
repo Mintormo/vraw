@@ -28,7 +28,6 @@ const crop_aspect_names = ['Свободно', 'Как снято', '1:1', '3:2'
 	'7:5', '16:9 (9:16 сторис)', '16:10', '2:1', '65:24 (панорама XPan)', 'Своя']
 const crop_grids = ['thirds', 'diagonal', 'golden', 'none']
 const crop_grid_names = ['Трети', 'Диагонали', 'Золотое сечение', 'Нет']
-const size_mode_names = ['Как есть', 'Точный размер', 'По длинной стороне']
 
 // Ручки рамки: углы (0 - левый верхний, по часовой) и стороны (4 - верх,
 // 5 - право, 6 - низ, 7 - лево)
@@ -68,9 +67,6 @@ mut:
 	orient_btn  &vgui.Button   = unsafe { nil }
 	aw          &vgui.Spinbox  = unsafe { nil }
 	ah          &vgui.Spinbox  = unsafe { nil }
-	size_cb     &vgui.ComboBox = unsafe { nil }
-	sw          &vgui.Spinbox  = unsafe { nil }
-	sh          &vgui.Spinbox  = unsafe { nil }
 	total       &vgui.Label    = unsafe { nil }
 	grid_cb     &vgui.ComboBox = unsafe { nil }
 	horizon_btn &vgui.Button   = unsafe { nil }
@@ -100,9 +96,6 @@ fn full_size(st &State) (int, int) {
 // crop_ratio - пропорция рамки (ширина / высота в пикселях) по настройкам
 // кадра e; 0 - свободная. w0 x h0 - повёрнутый кадр («как снято»).
 fn crop_ratio(e &EditState, w0 int, h0 int) f64 {
-	if e.size_mode == 1 && e.size_w > 0 && e.size_h > 0 {
-		return f64(e.size_w) / f64(e.size_h)
-	}
 	mut r := match e.crop_aspect {
 		'' {
 			return 0
@@ -128,37 +121,16 @@ fn crop_ratio(e &EditState, w0 int, h0 int) f64 {
 // не «как снято») высота выхода считается по ширине - 1:1 ровно квадрат
 fn out_geom(e &EditState) pipeline.Geom {
 	mut g := e.geom
-	if (e.crop_aspect != '' && e.crop_aspect != 'shot') || e.size_mode == 1 {
+	if e.crop_aspect != '' && e.crop_aspect != 'shot' {
 		g.aspect = f32(crop_ratio(e, 3, 2))
 	}
 	return g
 }
 
-// out_size - размер кадра на выходе: обрезанный полный кадр (cw x ch) и
-// итог после размера на выход (fw x fh)
-fn out_size(e &EditState, full_w int, full_h int) (int, int, int, int) {
-	cw, ch := out_geom(e).out_size(full_w, full_h, true)
-	fw, fh := final_size(e, cw, ch)
-	return cw, ch, fw, fh
-}
-
-// final_size - размер на выход для обрезанного кадра cw x ch
-fn final_size(e &EditState, cw int, ch int) (int, int) {
-	match e.size_mode {
-		1 {
-			return e.size_w, e.size_h
-		}
-		2 {
-			l := e.size_long
-			if cw >= ch {
-				return l, int(math.max(1, math.round(f64(ch) * l / cw)))
-			}
-			return int(math.max(1, math.round(f64(cw) * l / ch))), l
-		}
-		else {
-			return cw, ch
-		}
-	}
+// crop_size - размер обрезанного полного кадра (до размера на выход -
+// он в окне «Экспорт»)
+fn crop_size(e &EditState, full_w int, full_h int) (int, int) {
+	return out_geom(e).out_size(full_w, full_h, true)
 }
 
 fn size_text(w int, h int) string {
@@ -222,11 +194,8 @@ fn rotate90(mut st State, dir int) {
 	} else {
 		g.x0, g.y0, g.x1, g.y1 = y0, 1 - x1, y1, 1 - x0
 	}
-	if st.edit.crop_aspect != '' || st.edit.size_mode == 1 {
+	if st.edit.crop_aspect != '' {
 		st.edit.crop_portrait = !st.edit.crop_portrait
-		if st.edit.size_mode == 1 {
-			st.edit.size_w, st.edit.size_h = st.edit.size_h, st.edit.size_w
-		}
 	}
 	crop_apply(mut st, g, 'rot90', if dir > 0 { 'Поворот на 90° по часовой' } else { 'Поворот на 90° против часовой' },
 		false)
@@ -287,7 +256,7 @@ fn set_crop_mode(mut st State, on bool) {
 		st.crop_before = st.edit.clone()
 		// Кадр без рамки и без выбранной пропорции - последняя выбранная
 		// (по ориентации кадра), рамка - наибольшая
-		if st.edit.geom.is_identity() && st.edit.crop_aspect == '' && st.edit.size_mode == 0
+		if st.edit.geom.is_identity() && st.edit.crop_aspect == ''
 			&& st.settings.crop_aspect != '' {
 			w0, h0 := crop_frame(st)
 			st.edit.crop_aspect = st.settings.crop_aspect
@@ -312,16 +281,12 @@ fn crop_cancel(mut st State) {
 	}
 	b := st.crop_before
 	changed := b.geom != st.edit.geom || b.crop_aspect != st.edit.crop_aspect
-		|| b.crop_portrait != st.edit.crop_portrait || b.size_mode != st.edit.size_mode
+		|| b.crop_portrait != st.edit.crop_portrait
 	st.edit.geom = b.geom
 	st.edit.crop_aspect = b.crop_aspect
 	st.edit.crop_aw = b.crop_aw
 	st.edit.crop_ah = b.crop_ah
 	st.edit.crop_portrait = b.crop_portrait
-	st.edit.size_mode = b.size_mode
-	st.edit.size_w = b.size_w
-	st.edit.size_h = b.size_h
-	st.edit.size_long = b.size_long
 	st.crop_mode = false
 	st.horizon = false
 	st.crop_drag = CropDrag{}
@@ -783,7 +748,7 @@ fn crop_overlay(mut st State, mut ctx vgui.RenderContext) {
 	}
 	// Итоговый размер - у нижнего края рамки
 	fw_, fh_ := full_size(st)
-	_, _, fw, fh := out_size(&st.edit, fw_, fh_)
+	fw, fh := crop_size(&st.edit, fw_, fh_)
 	label := '${size_text(fw, fh)} px'
 	lw := f32(label.runes().len) * 7.5 + 12
 	if bw > lw + 8 && bh > 30 {
@@ -841,25 +806,16 @@ fn sync_crop_ui(mut st State) {
 	mb.text = if st.crop_mode { 'Готово (Enter)' } else { 'Кадрировать' }
 	mut acb := u.aspect_cb
 	acb.set_selected(math.max(0, crop_aspects.index(e.crop_aspect)))
-	acb.enabled = e.size_mode != 1
 	mut ob := u.orient_btn
 	ob.icon_name = if e.crop_portrait { 'rectangle-vertical' } else { 'rectangle-horizontal' }
-	mut scb := u.size_cb
-	scb.set_selected(e.size_mode)
 	was := st.suppress
 	st.suppress = true
 	mut aw := u.aw
 	mut ah := u.ah
 	aw.set_value(e.crop_aw)
 	ah.set_value(e.crop_ah)
-	aw.enabled = e.crop_aspect == 'custom' && e.size_mode != 1
+	aw.enabled = e.crop_aspect == 'custom'
 	ah.enabled = aw.enabled
-	mut sw := u.sw
-	mut sh := u.sh
-	sw.set_value(if e.size_mode == 2 { e.size_long } else { e.size_w })
-	sh.set_value(e.size_h)
-	sw.enabled = e.size_mode != 0
-	sh.enabled = e.size_mode == 1
 	if !isnil(u.angle_sl) {
 		mut asl := u.angle_sl
 		asl.set_value(e.geom.angle) // под suppress: подпись и снимок, без пересчёта
@@ -890,12 +846,8 @@ fn sync_crop_total(mut st State) {
 		return
 	}
 	fw_, fh_ := full_size(st)
-	cw, ch, fw, fh := out_size(&st.edit, fw_, fh_)
-	t.text = if cw == fw && ch == fh {
-		'Итог: ${size_text(fw, fh)} px'
-	} else {
-		'Итог: ${size_text(fw, fh)} px (кадр ${size_text(cw, ch)})'
-	}
+	cw, ch := crop_size(&st.edit, fw_, fh_)
+	t.text = 'Кадр: ${size_text(cw, ch)} px'
 }
 
 // build_crop_section - ряды секции «Кадрирование и поворот»
@@ -944,7 +896,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut orient := icon_button(mut st, 'rectangle-horizontal', 'Горизонтальная / вертикальная рамка')
 	orient.on_click = fn [mut st] () {
 		w0, h0 := crop_frame(st)
-		if st.edit.crop_aspect == '' && st.edit.size_mode != 1 {
+		if st.edit.crop_aspect == '' {
 			// Свободная пропорция - рамка поворачивается вокруг центра
 			g := st.edit.geom
 			b := g.box_of(w0, h0)
@@ -955,9 +907,6 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 			return
 		}
 		st.edit.crop_portrait = !st.edit.crop_portrait
-		if st.edit.size_mode == 1 {
-			st.edit.size_w, st.edit.size_h = st.edit.size_h, st.edit.size_w
-		}
 		fit_ratio(mut st, 'Пропорция: ${aspect_name(st.edit)}')
 	}
 	u.orient_btn = orient
@@ -1000,60 +949,6 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	c_row.add(ah, 1)
 	c_row.add_fixed(vgui.label(''), 26)
 
-	// Размер на выход
-	mut scb := vgui.combo_box()
-	scb.set_items(size_mode_names)
-	scb.set_selected(0)
-	scb.on_change = fn [mut st] (idx int, text string) {
-		if st.suppress || idx < 0 || idx > 2 {
-			return
-		}
-		st.edit.size_mode = idx
-		fit_ratio(mut st, 'Размер: ${size_mode_names[idx].to_lower()}')
-	}
-	u.size_cb = scb
-	mut s_lb := vgui.label('Размер')
-	mut s_row := vgui.create_hbox_fill()
-	s_row.set_spacing(6)
-	s_row.add_fixed(s_lb, lbl_w)
-	s_row.add(scb, 1)
-	s_row.add_fixed(vgui.label(''), 26)
-	mut sw := vgui.spinbox()
-	sw.set_range(16, 30000)
-	mut sh := vgui.spinbox()
-	sh.set_range(16, 30000)
-	sw.on_change = fn [mut st] (v int) {
-		if st.suppress {
-			return
-		}
-		if st.edit.size_mode == 2 {
-			st.edit.size_long = v
-			sync_crop_total(mut st)
-			record(mut st, 'size', 'Размер: длинная сторона ${v}', true)
-			return
-		}
-		st.edit.size_w = v
-		fit_ratio(mut st, 'Размер: ${size_text(st.edit.size_w, st.edit.size_h)}')
-	}
-	sh.on_change = fn [mut st] (v int) {
-		if st.suppress {
-			return
-		}
-		st.edit.size_h = v
-		fit_ratio(mut st, 'Размер: ${size_text(st.edit.size_w, st.edit.size_h)}')
-	}
-	u.sw = sw
-	u.sh = sh
-	mut px_lb := vgui.label('Ш × В, px')
-	mut times := vgui.label('×')
-	times.align = .center
-	mut px_row := vgui.create_hbox_fill()
-	px_row.set_spacing(6)
-	px_row.add_fixed(px_lb, lbl_w)
-	px_row.add(sw, 1)
-	px_row.add_fixed(times, 10)
-	px_row.add(sh, 1)
-	px_row.add_fixed(vgui.label(''), 26)
 	mut total := vgui.label('Итог: -')
 	st.secondary_labels << total
 	u.total = total
@@ -1163,7 +1058,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	hint.font_size = 12
 	st.hint_labels << hint
 	return [SectionRow{mode_row, 28}, SectionRow{a_row, 28}, SectionRow{c_row, 28},
-		SectionRow{s_row, 28}, SectionRow{px_row, 28}, SectionRow{total, 18},
+		SectionRow{total, 18},
 		SectionRow{angle_row, 26}, SectionRow{tools, 28}, SectionRow{g_row, 28},
 		SectionRow{hint, 16}]
 }

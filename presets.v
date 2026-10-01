@@ -40,7 +40,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop')
 //   hsl    - HSL-эквалайзер
 //   nr     - классический шумодав и ореолы, AI-шумодав (сила и модель)
 //   sharp, haze, lens - резкость, удаление дымки, коррекция объектива
-//   crop   - кадрирование и поворот (геометрия, пропорция, размер)
+//   crop   - кадрирование и поворот (геометрия, пропорция)
 fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 	mut e := dst.clone()
 	s := src
@@ -95,10 +95,6 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.crop_aw = s.crop_aw
 				e.crop_ah = s.crop_ah
 				e.crop_portrait = s.crop_portrait
-				e.size_mode = s.size_mode
-				e.size_w = s.size_w
-				e.size_h = s.size_h
-				e.size_long = s.size_long
 			}
 			else {}
 		}

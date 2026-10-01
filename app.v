@@ -164,6 +164,10 @@ mut:
 	exp          &ExportCtl = unsafe { nil }
 	eui          &ExportUi  = unsafe { nil }
 	exp_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
+	// Окно «Экспорт» перед запуском (export_setup.v) и запуск экспорта в
+	// файл (путь и формат - из окна)
+	xs        &ExportSetupUi = unsafe { nil }
+	export_go fn (string, imgio.Format) = unsafe { nil }
 	// Баланс белого (wb_ui.v): цвет камеры кадра и его ББ «как снято»,
 	// виджеты секции, режим пипетки; холст и тональный пересчёт - для
 	// обработчиков секции
@@ -582,6 +586,7 @@ struct SaveJob {
 	edit      EditState // настройки кадра с производными полями - как в окне
 	format    imgio.Format
 	quality   int  // JPEG
+	size      ExportSize // размер на выход
 	no_ai     bool // AI у кадра есть, но при экспорте отключён (для итога)
 	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
 	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
@@ -614,6 +619,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 	img := develop_full(job.src, job.edit, job.db,
 		ai_cache: job.ai_cache
 		progress: progress
+		size:     job.size
 	) or {
 		if err is ExportCancelled {
 			report(mut app, on_done, .cancelled, 'Экспорт отменён')
@@ -2238,7 +2244,9 @@ fn main() {
 		}
 		sync_settings_ui(mut st)
 	}
-	m_export.on_click = fn [mut st, mut nm, mut app, win, save_done] () {
+	// «Файл - Экспорт...»: идёт экспорт - его диалог прогресса, иначе
+	// окно «Экспорт» (export_setup.v), оно и запускает start_export
+	m_export.on_click = fn [mut st, mut nm, mut app, win] () {
 		if !isnil(st.exp) {
 			show_export(mut st, mut app, win)
 			return
@@ -2251,33 +2259,11 @@ fn main() {
 			nm.show_warning('Сначала откройте RAW-файл')
 			return
 		}
-		// Формат - по расширению выбранного имени (диалог не сообщает
-		// выбранный фильтр); по умолчанию - последний использованный, его
-		// фильтр первым
-		cur := st.settings.export_fmt()
-		mut order := [cur]
-		for f in imgio.formats {
-			if f != cur {
-				order << f
-			}
-		}
-		base := os.file_name(st.dev.path).all_before_last('.')
-		chosen := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
-			default_name:    '${base}.${cur.ext()}'
-			filter_names:    order.map(it.name())
-			filter_patterns: order.map(it.exts().join(';'))
-		})
-		if chosen.len == 0 {
+		show_export_setup(mut st, mut app, win)
+	}
+	st.export_go = fn [mut st, mut nm, mut app, win, save_done] (path string, fmt imgio.Format) {
+		if !isnil(st.exp) || isnil(st.dev) {
 			return
-		}
-		fmt, path := export_target(chosen, cur) or {
-			nm.show_error(err.msg())
-			return
-		}
-		if fmt != cur {
-			st.settings.export_format = fmt.key()
-			save_settings(st.settings)
-			sync_settings_ui(mut st)
 		}
 		// AI при экспорте можно отключить в настройках: кадр проявляется
 		// без него (своя настройка AI у кадра не меняется)
@@ -2313,6 +2299,7 @@ fn main() {
 			format:   fmt
 			no_ai:    ai_skipped
 			quality:  st.settings.jpeg_quality
+			size:     st.settings.export_size_opts()
 			ai_cache: ai_cache
 			ctl:      ctl
 			on_stage: st.exp_progress

@@ -143,6 +143,7 @@ fn (e ExportCancelled) msg() string {
 struct ExportOpts {
 	ai_cache &ai.Cache = unsafe { nil }
 	progress fn (ExportStage, int, int) bool = unsafe { nil }
+	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
 }
 
 fn no_progress(_ ExportStage, _ int, _ int) bool {
@@ -251,8 +252,8 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	mut rgb := []u8{len: gw * gh * 3}
 	pipeline.apply_image(src, unsafe { &u16(mask.data) }, &haze, gw, gh, e.params, 1.0, mut
 		rgb, 3)
-	// Размер на выход (точный или по длинной стороне)
-	fw, fh := final_size(&e, gw, gh)
+	// Размер на выход (окно «Экспорт»): только уменьшение
+	fw, fh := export_dims(o.size, gw, gh)
 	if fw != gw || fh != gh {
 		rgb = pipeline.resize_rgb(rgb, gw, gh, fw, fh)
 	}

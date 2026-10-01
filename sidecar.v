@@ -79,10 +79,8 @@ struct SideState {
 	crop_aw       int
 	crop_ah       int
 	crop_portrait bool
-	size_mode     int
-	size_w        int
-	size_h        int
-	size_long     int
+	// Поля размера на выход (size_mode, size_w...) из сайдкаров 30.09.2026
+	// json2 при чтении пропускает: размер теперь - настройка экспорта
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -167,10 +165,6 @@ fn side_state(e EditState) SideState {
 		crop_aw:       e.crop_aw
 		crop_ah:       e.crop_ah
 		crop_portrait: e.crop_portrait
-		size_mode:     e.size_mode
-		size_w:        e.size_w
-		size_h:        e.size_h
-		size_long:     e.size_long
 	}
 }
 
@@ -226,10 +220,6 @@ fn edit_state(s SideState) !EditState {
 		crop_aw:       if s.crop_aw > 0 { s.crop_aw } else { 3 }
 		crop_ah:       if s.crop_ah > 0 { s.crop_ah } else { 2 }
 		crop_portrait: s.crop_portrait
-		size_mode:     if s.size_mode >= 0 && s.size_mode <= 2 { s.size_mode } else { 0 }
-		size_w:        if s.size_w > 0 { s.size_w } else { 1920 }
-		size_h:        if s.size_h > 0 { s.size_h } else { 1080 }
-		size_long:     if s.size_long > 0 { s.size_long } else { 2048 }
 	}
 	for i in 0 .. 5 {
 		e.params.eq[i] = s.eq[i]

@@ -25,6 +25,20 @@ mut:
 	// Отрицание нарочно: в settings.json старой версии поля нет, json2
 	// даст false - AI при экспорте остаётся включённым
 	export_no_ai bool
+	// окно «Экспорт» (export_setup.v) - последний выбор: папка ('raw' -
+	// рядом с RAW, 'dir' - export_dir), шаблон имени, файл уже есть
+	// ('number' - добавить номер, 'overwrite'), размер на выход
+	// (export_size: '' как есть, 'long' по длинной стороне, 'fit' вписать
+	// в Ш×В, 'pct' в процентах; кадр не увеличивается)
+	export_dir_mode string = 'raw'
+	export_dir      string
+	export_name     string = name_tmpl_default
+	export_exists   string = 'number'
+	export_size     string
+	export_long     int = 2048
+	export_w        int = 1920
+	export_h        int = 1080
+	export_pct      int = 50
 	// группы настроек в окне «Копировать настройки» и «Сохранить пресет»
 	// (presets.v) - последний выбор; нет в файле - все
 	copy_groups []string = default_copy_groups.clone()
@@ -76,6 +90,15 @@ fn load_settings() Settings {
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()
 		export_no_ai:  s.export_no_ai
+		export_dir_mode: if s.export_dir_mode == 'dir' && s.export_dir != '' { 'dir' } else { 'raw' }
+		export_dir:      s.export_dir
+		export_name:     if s.export_name.trim_space() != '' { s.export_name } else { name_tmpl_default }
+		export_exists:   if s.export_exists == 'overwrite' { 'overwrite' } else { 'number' }
+		export_size:     if s.export_size in export_size_keys { s.export_size } else { '' }
+		export_long:     clamp_px(s.export_long, 2048)
+		export_w:        clamp_px(s.export_w, 1920)
+		export_h:        clamp_px(s.export_h, 1080)
+		export_pct:      if s.export_pct >= 1 && s.export_pct <= 100 { s.export_pct } else { 50 }
 		copy_groups:   if known_groups(s.copy_groups).len > 0 {
 			known_groups(s.copy_groups)
 		} else {

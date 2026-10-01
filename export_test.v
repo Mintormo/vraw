@@ -2,7 +2,6 @@ module main
 
 import os
 import vgui
-import imgio
 import json2
 import pipeline
 
@@ -52,21 +51,6 @@ fn test_settings_export_ai_default() {
 	assert !old.export_no_ai
 	off := json2.decode[Settings]('{"export_no_ai": true}')!
 	assert off.export_no_ai
-}
-
-// Формат по имени из диалога сохранения
-fn test_export_target() {
-	f, p := export_target('/a/IMG.png', .jpeg)!
-	assert f == .png && p == '/a/IMG.png'
-	f2, p2 := export_target('/a/IMG', .tiff)!
-	assert f2 == .tiff && p2 == '/a/IMG.tif'
-	f3, _ := export_target('/a/IMG.JPEG', .gif)!
-	assert f3 == imgio.Format.jpeg
-	export_target('/a/IMG.webp', .jpeg) or {
-		assert err.msg().contains('.webp')
-		return
-	}
-	assert false
 }
 
 // Длинный путь: многоточие в начале, в подсказке - строки по «/»
@@ -127,4 +111,67 @@ fn test_develop_full() {
 		sb += b.rgb[i]
 	}
 	assert sb > sn * 11 / 10
+}
+
+// Размер на выход: длинная сторона ровно, пропорции сохраняются, кадр не
+// увеличивается; вписать в Ш × В - по тесной стороне; проценты
+fn test_export_dims() {
+	mut w, mut h := export_dims(ExportSize{}, 6000, 4000)
+	assert w == 6000 && h == 4000
+	w, h = export_dims(ExportSize{ mode: 'long', long: 2048 }, 6000, 4000)
+	assert w == 2048 && h == 1365
+	w, h = export_dims(ExportSize{ mode: 'long', long: 2048 }, 4000, 6000)
+	assert w == 1365 && h == 2048
+	w, h = export_dims(ExportSize{ mode: 'long', long: 9000 }, 6000, 4000)
+	assert w == 6000 && h == 4000 // не увеличивать
+	w, h = export_dims(ExportSize{ mode: 'fit', w: 1920, h: 1080 }, 6000, 4000)
+	assert w == 1620 && h == 1080 // упор в высоту
+	w, h = export_dims(ExportSize{ mode: 'fit', w: 1920, h: 1920 }, 6000, 4000)
+	assert w == 1920 && h == 1280
+	w, h = export_dims(ExportSize{ mode: 'pct', pct: 50 }, 5999, 3999)
+	assert w == 3000 && h == 2000
+	w, h = export_dims(ExportSize{ mode: 'pct', pct: 100 }, 5999, 3999)
+	assert w == 5999 && h == 3999
+}
+
+// Имя по шаблону: {имя}, запрещённые символы, пустое - имя RAW
+fn test_export_file_name() {
+	assert export_file_name('{имя}', '/a/IMG_0991.CR3') == 'IMG_0991'
+	assert export_file_name('{имя}_web', '/a/IMG_0991.CR3') == 'IMG_0991_web'
+	assert export_file_name('{name}-1', '/a/X.CR3') == 'X-1'
+	assert export_file_name('a/b:c', '/a/X.CR3') == 'a_b_c'
+	assert export_file_name('  ', '/a/X.CR3') == 'X'
+	assert export_file_name('...', '/a/X.CR3') == 'X'
+}
+
+// Путь: рядом с RAW или в папке; существующий файл - номер или перезапись
+fn test_export_path() {
+	dir := os.join_path(os.temp_dir(), 'vraw_export_path_test')
+	os.rmdir_all(dir) or {}
+	os.mkdir_all(dir)!
+	raw_path := os.join_path(dir, 'IMG_1.CR3')
+	mut s := Settings{}
+	assert export_path(&s, raw_path, .jpeg) == os.join_path(dir, 'IMG_1.jpg')
+	os.write_file(os.join_path(dir, 'IMG_1.jpg'), 'x')!
+	assert export_path(&s, raw_path, .jpeg) == os.join_path(dir, 'IMG_1-2.jpg')
+	os.write_file(os.join_path(dir, 'IMG_1-2.jpg'), 'x')!
+	assert export_path(&s, raw_path, .jpeg) == os.join_path(dir, 'IMG_1-3.jpg')
+	assert export_path(&s, raw_path, .png) == os.join_path(dir, 'IMG_1.png')
+	s.export_exists = 'overwrite'
+	assert export_path(&s, raw_path, .jpeg) == os.join_path(dir, 'IMG_1.jpg')
+	s.export_dir_mode = 'dir'
+	s.export_dir = '/tmp/out'
+	s.export_name = '{имя}_web'
+	assert export_path(&s, raw_path, .tiff) == '/tmp/out/IMG_1_web.tif'
+	os.rmdir_all(dir) or {}
+}
+
+// Настройки экспорта: старый файл без полей - значения по умолчанию
+fn test_settings_export_defaults() {
+	s := Settings{}
+	assert s.export_dir_mode == 'raw' && s.export_name == '{имя}' && s.export_exists == 'number'
+		&& s.export_size == '' && s.export_long == 2048 && s.export_pct == 50
+	old := json2.decode[Settings]('{"theme": "dark"}')!
+	assert old.export_size == '' && old.export_dir == ''
+	assert clamp_px(0, 2048) == 2048 && clamp_px(99999, 1920) == 1920 && clamp_px(800, 1) == 800
 }

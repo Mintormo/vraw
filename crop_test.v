@@ -5,9 +5,8 @@ import math
 import pipeline
 import vgui
 
-// Размер на выход: числовая пропорция - ровно (1:1 - квадрат), размер
-// по длинной стороне и точный
-fn test_crop_out_size() {
+// Размер кадра после обрезки: числовая пропорция - ровно (1:1 - квадрат)
+fn test_crop_size() {
 	mut e := neutral_edit()
 	e.geom = pipeline.Geom{
 		x0: 0.1
@@ -16,22 +15,12 @@ fn test_crop_out_size() {
 		y1: 0.9
 	}
 	e.crop_aspect = '1:1'
-	cw, ch, fw, fh := out_size(&e, 5999, 3999)
-	assert cw == ch && fw == cw && fh == ch
-	e.size_mode = 2
-	e.size_long = 1000
-	_, _, lw, lh := out_size(&e, 5999, 3999)
-	assert lw == 1000 && lh == 1000
+	cw, ch := crop_size(&e, 5999, 3999)
+	assert cw == ch
 	e.crop_aspect = ''
 	e.geom = pipeline.Geom{}
-	_, _, aw, ah := out_size(&e, 6000, 4000)
-	assert aw == 1000 && ah == 667
-	e.size_mode = 1
-	e.size_w = 1920
-	e.size_h = 1080
-	_, _, xw, xh := out_size(&e, 6000, 4000)
-	assert xw == 1920 && xh == 1080
-	assert crop_ratio(&e, 6000, 4000) > 1.77 && crop_ratio(&e, 6000, 4000) < 1.78
+	fw, fh := crop_size(&e, 6000, 4000)
+	assert fw == 6000 && fh == 4000
 }
 
 fn test_crop_ratio_keys() {
@@ -72,13 +61,10 @@ fn test_sidecar_crop() {
 	}
 	e.crop_aspect = '16:9'
 	e.crop_portrait = true
-	e.size_mode = 2
-	e.size_long = 3000
 	s := side_state(e)
 	back := edit_state(s)!
 	assert back.geom == e.geom
-	assert back.crop_aspect == '16:9' && back.crop_portrait && back.size_mode == 2
-		&& back.size_long == 3000
+	assert back.crop_aspect == '16:9' && back.crop_portrait
 	edge := edit_state(SideState{
 		...s
 		crop: [f32(0.125), 0.25, 1.0000001, 0.75]
@@ -96,10 +82,8 @@ fn test_sidecar_crop() {
 		...side_state(neutral_edit())
 		crop:      []f32{}
 		crop_aw:   0
-		size_w:    0
-		size_long: 0
 	})!
-	assert o.geom.is_identity() && o.crop_aw == 3 && o.size_w == 1920 && o.size_long == 2048
+	assert o.geom.is_identity() && o.crop_aw == 3
 }
 
 // Группа «Кадрирование» в копировании настроек; по умолчанию не копируется
@@ -124,14 +108,17 @@ fn test_develop_crop() {
 	mut e := neutral_edit()
 	e.lens_corr = false
 	e.crop_aspect = '1:1'
-	e.size_mode = 2
-	e.size_long = 1000
 	g := pipeline.Geom{
 		angle: 6
 	}
 	b := g.max_box(1, 2999.0 / 2, 1999.0 / 2, 2999, 1999)
 	e.geom = g.with_box(b, 2999, 1999)
-	img := develop_full(path, with_derived(e, []f32{}, pipeline.CamColor{}), unsafe { nil })!
+	img := develop_full(path, with_derived(e, []f32{}, pipeline.CamColor{}), unsafe { nil },
+		size: ExportSize{
+			mode: 'long'
+			long: 1000
+		}
+	)!
 	assert img.width == 1000 && img.height == 1000
 	assert img.rgb.len == 1000 * 1000 * 3
 	// Без пустых углов: углы кадра не чёрные
