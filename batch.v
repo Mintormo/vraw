@@ -236,7 +236,10 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 		if c.cancel || tally.cancelled {
 			break
 		}
-		dst := export_path_taken(&job.settings, it.src, job.format, taken)
+		dst := export_path_taken(&job.settings, it.src, job.format, taken, NameInfo{
+			num:   i + 1
+			count: n
+		})
 		taken[dst] = true
 		e0 := it.edit
 		ai_secs := if e0.ai > 0 { job.ai_secs[e0.ai_model] or { 0 } } else { 0 }

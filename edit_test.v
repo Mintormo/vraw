@@ -490,3 +490,22 @@ fn test_wb_derive() {
 	}
 	assert temp_text(5230) == '5250 K'
 }
+
+// Ctrl+A: все кадры ленты выделены, текущим остаётся открытый
+fn test_select_all_frames() {
+	mut st := &State{}
+	mut strip := vgui.list_box_h(100)
+	strip.multi_select = true
+	for i in 0 .. 4 {
+		strip.add_item_widget(vgui.label('${i}'))
+		st.frames << Frame{
+			path: '/a/${i}.CR3'
+		}
+	}
+	st.strip = strip
+	st.frame_idx = 1
+	select_all_frames(mut st)
+	assert st.strip.get_selection() == [0, 1, 2, 3]
+	assert st.strip.selected == 1
+	assert export_target_paths(st, 'sel').len == 4
+}

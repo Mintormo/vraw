@@ -1,6 +1,7 @@
 module main
 
 import os
+import time
 import vgui
 import json2
 import pipeline
@@ -134,14 +135,43 @@ fn test_export_dims() {
 	assert w == 5999 && h == 3999
 }
 
-// Имя по шаблону: {имя}, запрещённые символы, пустое - имя RAW
+// Имя по шаблону: {name}, {num} (ширина - по числу кадров), {date},
+// запрещённые символы, пустое - имя RAW
 fn test_export_file_name() {
-	assert export_file_name('{имя}', '/a/IMG_0991.CR3') == 'IMG_0991'
-	assert export_file_name('{имя}_web', '/a/IMG_0991.CR3') == 'IMG_0991_web'
-	assert export_file_name('{name}-1', '/a/X.CR3') == 'X-1'
-	assert export_file_name('a/b:c', '/a/X.CR3') == 'a_b_c'
-	assert export_file_name('  ', '/a/X.CR3') == 'X'
-	assert export_file_name('...', '/a/X.CR3') == 'X'
+	ni := NameInfo{}
+	assert export_file_name('{name}', '/a/IMG_0991.CR3', ni) == 'IMG_0991'
+	assert export_file_name('{name}_web', '/a/IMG_0991.CR3', ni) == 'IMG_0991_web'
+	assert export_file_name('trip_{num}', '/a/X.CR3', NameInfo{ num: 7, count: 12 }) == 'trip_007'
+	assert export_file_name('{num}', '/a/X.CR3', NameInfo{ num: 42, count: 1500 }) == '0042'
+	assert export_file_name('{num}', '/a/X.CR3', ni) == '001'
+	// 28.09.2026 12:00 местного времени
+	shot := time.new(year: 2026, month: 9, day: 28, hour: 12).unix() - time.offset()
+	assert export_file_name('{date}_{name}', '/a/X.CR3', NameInfo{ shot: shot }) == '2026-09-28_X'
+	assert export_file_name('a/b:c', '/a/X.CR3', ni) == 'a_b_c'
+	assert export_file_name('  ', '/a/X.CR3', ni) == 'X'
+	assert export_file_name('...', '/a/X.CR3', ni) == 'X'
+	assert export_file_name('{имя}', '/a/X.CR3', ni) == '{имя}' // только английские
+}
+
+// Дата съёмки тестового CR3 из EXIF; шаблон с {date} - путь с датой
+fn test_export_date_real() {
+	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
+	if !os.exists(path) {
+		return
+	}
+	shot := raw_shot(path)
+	assert shot > time.new(year: 2020, month: 1, day: 1).unix()
+	mut s := Settings{}
+	s.export_name = '{date}_{name}'
+	p := export_path(&s, path, .jpeg)
+	assert os.file_name(p) == '${shot_date(shot, path)}_IMG_0991.jpg'
+}
+
+// Старый шаблон {имя} при загрузке настроек становится {name}
+fn test_settings_name_migration() {
+	assert name_tmpl_migrate('{имя}_web') == '{name}_web'
+	assert name_tmpl_migrate('  ') == '{name}'
+	assert name_tmpl_migrate('{num}') == '{num}'
 }
 
 // Путь: рядом с RAW или в папке; существующий файл - номер или перезапись
@@ -161,7 +191,7 @@ fn test_export_path() {
 	assert export_path(&s, raw_path, .jpeg) == os.join_path(dir, 'IMG_1.jpg')
 	s.export_dir_mode = 'dir'
 	s.export_dir = '/tmp/out'
-	s.export_name = '{имя}_web'
+	s.export_name = '{name}_web'
 	assert export_path(&s, raw_path, .tiff) == '/tmp/out/IMG_1_web.tif'
 	os.rmdir_all(dir) or {}
 }
@@ -169,7 +199,7 @@ fn test_export_path() {
 // Настройки экспорта: старый файл без полей - значения по умолчанию
 fn test_settings_export_defaults() {
 	s := Settings{}
-	assert s.export_dir_mode == 'raw' && s.export_name == '{имя}' && s.export_exists == 'number'
+	assert s.export_dir_mode == 'raw' && s.export_name == '{name}' && s.export_exists == 'number'
 		&& s.export_size == '' && s.export_long == 2048 && s.export_pct == 50
 	old := json2.decode[Settings]('{"theme": "dark"}')!
 	assert old.export_size == '' && old.export_dir == ''

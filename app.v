@@ -2450,8 +2450,14 @@ fn main() {
 		set_crop_mode(mut st, v)
 	}
 	st.crop_ui.m_crop = m_crop
+	// Выделить все кадры ленты (для вставки настроек и экспорта)
+	mut m_all := vgui.menu_action('Выделить все кадры')
+	m_all.shortcut = 'Ctrl+A'
+	m_all.on_click = fn [mut st] () {
+		select_all_frames(mut st)
+	}
 	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
-		vgui.menu_separator(), m_crop, m_reset, vgui.menu_separator(), m_settings])
+		m_all, vgui.menu_separator(), m_crop, m_reset, vgui.menu_separator(), m_settings])
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {

@@ -9,10 +9,12 @@ module main
 // у кадра только рамка (crop.v).
 import os
 import math
+import time
 import vgui
+import raw
 import imgio
 
-const name_tmpl_default = '{имя}'
+const name_tmpl_default = '{name}'
 // Размер на выход: ключи (Settings.export_size) и названия
 const export_size_keys = ['', 'long', 'fit', 'pct']
 const export_size_names = ['Как есть', 'По длинной стороне', 'Вписать в Ш × В', 'В процентах']
@@ -75,17 +77,60 @@ fn export_dims(sz ExportSize, cw int, ch int) (int, int) {
 	return int(math.max(1, math.round(f64(cw) * f64(h) / f64(ch)))), h
 }
 
-// export_file_name - имя файла без расширения по шаблону: {имя} - имя
-// RAW без расширения; символы, недопустимые в имени, - на «_»; пустой
-// результат - имя RAW
-fn export_file_name(tmpl string, raw_path string) string {
+// NameInfo - что подставляется в шаблон имени кроме имени RAW: номер
+// кадра в экспорте (с 1) и их число (ширина номера), дата съёмки
+// (unix-секунды; 0 - нет)
+struct NameInfo {
+	num   int = 1
+	count int = 1
+	shot  i64
+}
+
+// Переменные шаблона имени (английские): {name} - имя RAW без
+// расширения, {num} - номер в экспорте (001, 002...; шире, если кадров
+// больше 999), {date} - дата съёмки 2026-09-28
+
+// export_file_name - имя файла без расширения по шаблону; символы,
+// недопустимые в имени, - на «_»; пустой результат - имя RAW
+fn export_file_name(tmpl string, raw_path string, ni NameInfo) string {
 	base := os.file_name(raw_path).all_before_last('.')
-	mut n := tmpl.replace('{имя}', base).replace('{name}', base)
+	mut n := tmpl.replace('{name}', base)
+	if n.contains('{num}') {
+		num := '${ni.num}'
+		w := math.max(3, '${ni.count}'.len)
+		n = n.replace('{num}', '0'.repeat(math.max(0, w - num.len)) + num)
+	}
+	if n.contains('{date}') {
+		n = n.replace('{date}', shot_date(ni.shot, raw_path))
+	}
 	for c in ['/', '\\', ':', '*', '?', '"', '<', '>', '|'] {
 		n = n.replace(c, '_')
 	}
 	n = n.trim_space().trim_right('.')
 	return if n.len == 0 { base } else { n }
+}
+
+// name_tmpl_migrate - шаблон имени из настроек: пустой - по умолчанию,
+// {имя} (до 01.10.2026, переменные стали английскими) - {name}
+fn name_tmpl_migrate(t string) string {
+	return if t.trim_space() == '' { name_tmpl_default } else { t.replace('{имя}', '{name}') }
+}
+
+// shot_date - дата съёмки «2026-09-28»; нет в EXIF - дата изменения файла
+fn shot_date(shot i64, raw_path string) string {
+	ts := if shot > 0 { shot } else { os.file_last_mod_unix(raw_path) }
+	t := time.unix(ts).local()
+	return '${t.year:04}-${t.month:02}-${t.day:02}'
+}
+
+// raw_shot - дата съёмки RAW-файла (0 - не читается); открытие LibRaw без
+// распаковки - единицы мс
+fn raw_shot(path string) i64 {
+	mut d := raw.open(path) or { return 0 }
+	defer {
+		d.close()
+	}
+	return d.meta().shot
 }
 
 // export_dir_for - папка экспорта: рядом с RAW или выбранная
@@ -100,14 +145,23 @@ fn export_dir_for(s &Settings, raw_path string) string {
 // export_path - путь файла: папка, имя по шаблону, расширение формата;
 // файл есть и выбрано «добавить номер» - «имя-2», «имя-3»...
 fn export_path(s &Settings, raw_path string, f imgio.Format) string {
-	return export_path_taken(s, raw_path, f, map[string]bool{})
+	return export_path_taken(s, raw_path, f, map[string]bool{}, NameInfo{})
 }
 
 // export_path_taken - то же, но пути taken тоже заняты (пакет: кадры,
 // которые ещё проявляются, файлов пока не записали)
-fn export_path_taken(s &Settings, raw_path string, f imgio.Format, taken map[string]bool) string {
+fn export_path_taken(s &Settings, raw_path string, f imgio.Format, taken map[string]bool, ni NameInfo) string {
 	dir := export_dir_for(s, raw_path)
-	name := export_file_name(s.export_name, raw_path)
+	// Дата съёмки - только если она в шаблоне (открытие RAW)
+	info := if s.export_name.contains('{date}') && ni.shot == 0 {
+		NameInfo{
+			...ni
+			shot: raw_shot(raw_path)
+		}
+	} else {
+		ni
+	}
+	name := export_file_name(s.export_name, raw_path, info)
 	ext := f.ext()
 	mut p := os.join_path(dir, '${name}.${ext}')
 	if s.export_exists == 'overwrite' && p !in taken {
@@ -332,7 +386,7 @@ fn sync_export_setup(mut st State) {
 	li := math.max(0, load_keys.index(s.export_load))
 	lcb.set_selected(li)
 	mut lnt := u.load_nt
-	lnt.text = '${load_notes[li]}; кадры с AI - по одному'
+	lnt.text = load_notes[li]
 	st.suppress = was
 	sync_export_result(mut st)
 }
@@ -351,7 +405,8 @@ fn sync_export_result(mut st State) {
 			r.text = 'Нет кадров'
 			return
 		}
-		first := os.file_name(export_path(&s, paths[0], f))
+		first := os.file_name(export_path_taken(&s, paths[0], f, map[string]bool{},
+			NameInfo{ count: paths.len }))
 		r.text = '${paths.len} ${plural(paths.len, 'кадр', 'кадра', 'кадров')}: ${first}...  ·  ${size_desc(&s)}'
 		return
 	}
@@ -514,7 +569,7 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		export_confirm(mut st)
 	}
 	u.name = name
-	mut name_note := vgui.label('{имя} - имя RAW-файла; например: {имя}_web')
+	mut name_note := vgui.label('{name} - имя RAW, {num} - номер (001), {date} - дата съёмки')
 	u.notes << name_note
 
 	// Формат и качество
@@ -614,7 +669,7 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 
 	// AI-шумодав на полном кадре - минуты (SCUNet ~16 мин): можно
 	// отключить для быстрых проб; кадр своей настройки AI не теряет
-	mut ai_cb := vgui.checkbox('AI-шумодав, если включён у кадра (долго: минуты)')
+	mut ai_cb := vgui.checkbox('AI-шумодав, если включён у кадра (минуты, кадры с ним - по одному)')
 	ai_cb.on_change = fn [mut st] (v bool) {
 		if st.suppress {
 			return

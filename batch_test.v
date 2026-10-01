@@ -77,13 +77,13 @@ fn test_export_path_taken() {
 	a := os.join_path(dir, 'IMG.CR3')
 	b := os.join_path(dir, 'IMG.DNG')
 	mut taken := map[string]bool{}
-	pa := export_path_taken(&s, a, .jpeg, taken)
+	pa := export_path_taken(&s, a, .jpeg, taken, NameInfo{})
 	taken[pa] = true
-	pb := export_path_taken(&s, b, .jpeg, taken)
+	pb := export_path_taken(&s, b, .jpeg, taken, NameInfo{})
 	assert pa == os.join_path(dir, 'IMG.jpg') && pb == os.join_path(dir, 'IMG-2.jpg')
 	s.export_exists = 'overwrite'
-	assert export_path_taken(&s, b, .jpeg, taken) == os.join_path(dir, 'IMG-2.jpg')
-	assert export_path_taken(&s, b, .jpeg, map[string]bool{}) == os.join_path(dir, 'IMG.jpg')
+	assert export_path_taken(&s, b, .jpeg, taken, NameInfo{}) == os.join_path(dir, 'IMG-2.jpg')
+	assert export_path_taken(&s, b, .jpeg, map[string]bool{}, NameInfo{}) == os.join_path(dir, 'IMG.jpg')
 	os.rmdir_all(dir) or {}
 }
 

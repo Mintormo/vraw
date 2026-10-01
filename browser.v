@@ -476,6 +476,24 @@ fn strip_info_text(mut st State) {
 	info.text = text
 }
 
+// select_all_frames - выделить все кадры ленты (Ctrl+A); текущим
+// остаётся открытый кадр - лента не прокручивается к последнему.
+// set_selection не зовёт on_select - подпись здесь.
+fn select_all_frames(mut st State) {
+	if isnil(st.strip) || st.frames.len == 0 {
+		return
+	}
+	mut idx := []int{len: st.frames.len, init: index}
+	if st.frame_idx >= 0 {
+		// Текущей становится последняя из списка - открытый кадр в конец
+		idx.delete(st.frame_idx)
+		idx << st.frame_idx
+	}
+	mut strip := st.strip
+	strip.set_selection(idx)
+	strip_info_text(mut st)
+}
+
 // strip_item_width - ширина ячейки ленты под высоту её панели pane_h
 // (полоса + лента): миниатюра 3:2 во всю высоту ячейки над подписью.
 // Отступы: 2 x strip_box_pad - поля панели, 4 - между полосой и лентой,

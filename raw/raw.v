@@ -79,6 +79,7 @@ pub struct C.libraw_iparams_t {
 pub struct C.libraw_imgother_t {
 	aperture  f32
 	focal_len f32
+	timestamp i64 // time_t: дата съёмки из EXIF (mktime - местное время камеры)
 }
 
 @[typedef]
@@ -253,6 +254,8 @@ pub:
 	lens      string // модель объектива из EXIF, например 'RF24-50mm F4.5-6.3 IS STM'
 	focal     f32    // фокусное, мм
 	aperture  f32    // диафрагма (0, если не записана)
+	shot      i64    // дата съёмки, unix-секунды (0 - нет); LibRaw переводит
+	// EXIF mktime'ом, так что time.unix(shot).local() - часы камеры
 }
 
 pub fn (d &Developer) meta() Meta {
@@ -268,6 +271,7 @@ pub fn (d &Developer) meta() Meta {
 		lens:      unsafe { cstring_to_vstring(&char(&li.Lens[0])) }
 		focal:     ot.focal_len
 		aperture:  ot.aperture
+		shot:      ot.timestamp
 	}
 }
 

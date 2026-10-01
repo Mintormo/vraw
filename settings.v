@@ -95,7 +95,7 @@ fn load_settings() Settings {
 		export_no_ai:  s.export_no_ai
 		export_dir_mode: if s.export_dir_mode == 'dir' && s.export_dir != '' { 'dir' } else { 'raw' }
 		export_dir:      s.export_dir
-		export_name:     if s.export_name.trim_space() != '' { s.export_name } else { name_tmpl_default }
+		export_name:     name_tmpl_migrate(s.export_name)
 		export_exists:   if s.export_exists == 'overwrite' { 'overwrite' } else { 'number' }
 		export_size:     if s.export_size in export_size_keys { s.export_size } else { '' }
 		export_long:     clamp_px(s.export_long, 2048)
