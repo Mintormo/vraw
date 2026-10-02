@@ -422,6 +422,7 @@ struct PrepJob {
 	corr      &lens.Corrector = unsafe { nil } // nil - без коррекции
 	focal     f32
 	aperture  f32
+	vign      f32    // сила коррекции виньетирования (CamLook.vign)
 	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
 	ai_src    []u16  // результат модели по тому же сырью (копия) или пусто
 	ai_s      f32    // сила AI 0..100 (0 - без AI)
@@ -457,6 +458,7 @@ fn make_prep_job(mut st State) PrepJob {
 		corr:      if st.edit.lens_corr { st.corr } else { unsafe { nil } }
 		focal:     st.meta.focal
 		aperture:  st.meta.aperture
+		vign:      st.look.vign
 		nr:        st.edit.nr
 		ai_src:    if ai_s > 0 { st.ai_linear.clone() } else { []u16{} }
 		ai_s:      ai_s
@@ -481,7 +483,7 @@ fn dc_key(s pipeline.Sharpen) [3]f32 {
 fn prep_compute(job PrepJob) PrepResult {
 	buf := unsafe { &u16(job.src.data) }
 	if job.redo_lens && !isnil(job.corr) {
-		job.corr.vignetting(buf, job.w, job.h, job.focal, job.aperture)
+		job.corr.vignetting(buf, job.w, job.h, job.focal, job.aperture, job.vign)
 		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
 		job.corr.geometry(buf, job.w, job.h, job.focal)
 	}

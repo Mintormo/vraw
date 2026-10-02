@@ -16,7 +16,7 @@ fn test_vignetting_gain_profile() {
 	w := 600
 	h := 400
 	mut buf := []u16{len: w * h * 3, init: 2000}
-	assert c.vignetting(unsafe { &u16(buf.data) }, w, h, 24.0, 5.6)
+	assert c.vignetting(unsafe { &u16(buf.data) }, w, h, 24.0, 5.6, vign_default)
 
 	ci := ((h / 2) * w + w / 2) * 3
 	mid := ((h * 3 / 4) * w + w * 3 / 4) * 3 // ~половина радиуса
@@ -29,17 +29,17 @@ fn test_vignetting_gain_profile() {
 	assert buf[mid] > buf[ci] + 100
 	assert buf[corner] > buf[mid]
 	// Потолок: в вырожденном углу не ноль и не больше 8x (после смягчения
-	// vign_strength усиление тем более не выше потолка)
+	// vign_default усиление тем более не выше потолка)
 	assert buf[corner] > 0
 	assert buf[corner] <= 2000 * 8
 	// Серый остаётся серым: каналы усилены одинаково
 	assert buf[corner] == buf[corner + 1]
 	assert buf[corner + 1] == buf[corner + 2]
 
-	// Смягчение в лог-домене (vign_strength < 1) даёт в углу меньшее
+	// Смягчение в лог-домене (сила < 1) даёт в углу меньшее
 	// усиление, чем было бы при полной силе (strength = 1) - иначе
 	// это не смягчение (см. CLAUDE.md: перекоррекция углов RF 24-50)
-	full_gain := math.powf(f32(buf[corner]) / 2000.0, 1.0 / vign_strength)
+	full_gain := math.powf(f32(buf[corner]) / 2000.0, 1.0 / vign_default)
 	assert full_gain > f32(buf[corner]) / 2000.0
 
 	c.free()
@@ -168,7 +168,7 @@ fn test_shared_database() {
 	w := 60
 	h := 40
 	mut buf := []u16{len: w * h * 3, init: 2000}
-	assert c2.vignetting(unsafe { &u16(buf.data) }, w, h, 24.0, 5.6)
+	assert c2.vignetting(unsafe { &u16(buf.data) }, w, h, 24.0, 5.6, vign_default)
 	// Неизвестное - none
 	if _ := db.find('Canon', 'EOS R8', '') {
 		assert false
@@ -203,4 +203,33 @@ fn test_vign_profile_pole() {
 	assert soft_cap(2, 2.5, 4) == 2
 	assert math.abs(soft_cap(2.5001, 2.5, 4) - 2.5001) < 1e-3
 	assert soft_cap(1000, 2.5, 4) <= 4 && soft_cap(1000, 2.5, 4) > 3.99
+}
+
+// Рабочая копия для подбора силы: размер match_dims, ln усиления растёт к
+// краю, сила 0 - копия без изменений, сила 1 у края - ярче
+fn test_match_frame() {
+	mut c := find('Canon', 'EOS R8', 'RF24-50mm F4.5-6.3 IS STM') or {
+		eprintln('ПРОПУСК: профиль RF 24-50 не найден в базе lensfun')
+		return
+	}
+	defer {
+		c.free()
+	}
+	w := 1200
+	h := 800
+	buf := []u16{len: w * h * 3, init: 3000}
+	mf := c.match_frame(unsafe { &u16(buf.data) }, w, h, 24.0, 6.3) or {
+		assert false
+		return
+	}
+	rw, rh := match_dims(w, h)
+	assert mf.w == rw && mf.h == rh && rw == match_side
+	ci := (rh / 2) * rw + rw / 2
+	ei := (rh / 2) * rw + rw - 3 // у края по горизонтали
+	assert math.abs(mf.lgain[ci]) < 0.01
+	assert mf.lgain[ei] > 0.2
+	assert mf.with_strength(0) == mf.lin
+	full := mf.with_strength(1)
+	assert full[ei * 3] > mf.lin[ei * 3] + 300
+	assert math.abs(int(full[ci * 3]) - int(mf.lin[ci * 3])) < 30
 }

@@ -47,7 +47,7 @@ struct BatchJob {
 	// AI-шумодав: модели кадров (общие, только чтение) и оценки секунд
 	ai_caches map[string]&ai.Cache
 	ai_secs   map[string]f64
-	ctl       &ExportCtl = unsafe { nil }
+	ctl       &ExportCtl                  = unsafe { nil }
 	on_event  fn (&ExportCtl, BatchEvent) = unsafe { nil }
 }
 
@@ -90,9 +90,11 @@ fn C.omp_set_num_threads(n int)
 // Нагрузка экспорта: ключи (Settings.export_load) и названия
 const load_keys = ['low', 'normal', 'high']
 const load_names = ['Фоновая', 'Обычная', 'Максимальная']
-const load_notes = ['По одному кадру, низкий приоритет - другие программы не тормозят',
+const load_notes = [
+	'По одному кадру, низкий приоритет - другие программы не тормозят',
 	'2 кадра одновременно, приоритет ниже других программ',
-	'3 кадра одновременно - быстрее всего, компьютер занят']
+	'3 кадра одновременно - быстрее всего, компьютер занят',
+]
 
 fn load_title(key string) string {
 	return match key {
@@ -132,7 +134,8 @@ fn apply_load(l LoadLevel) {
 }
 
 // batch_derive - производные поля настроек неоткрытого кадра: цвет
-// камеры (баланс белого) и камерная кривая (если включена)
+// камеры (баланс белого), сила коррекции виньетирования (при коррекции
+// объектива) и камерная кривая (если включена) - как в загрузчике окна
 fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 	mut d := raw.open(path)!
 	defer {
@@ -140,17 +143,33 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 	}
 	cam := cam_color(d.color())
 	mut look := CamLook{}
-	if e.use_curve {
+	if e.use_curve || e.lens_corr {
 		mut img := d.develop(half: true, highlight: e.highlight)!
 		w := img.width
 		h := img.height
 		mut lin := []u16{len: w * h * 3}
 		unsafe { vmemcpy(lin.data, img.data_u16(), w * h * 6) }
 		img.free()
-		if e.lens_corr {
-			correct_lens(unsafe { &u16(lin.data) }, w, h, d.meta(), db)
+		mut cj := cam_jpeg(mut d)
+		defer {
+			if mut t := cj {
+				t.free()
+			}
 		}
-		look = camera_look(mut d, lin, w * h)
+		mut vign := lens.vign_default
+		if e.lens_corr {
+			m := d.meta()
+			corr := db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
+			vign = vign_match(cj, d.flip(), corr, lin, w, h, m)
+			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, vign)
+		}
+		if e.use_curve {
+			look = camera_look(cj, lin, w * h, vign)
+		} else {
+			look = CamLook{
+				vign: vign
+			}
+		}
 	}
 	return with_derived(e, look, cam)
 }
@@ -250,7 +269,11 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 			dst:  dst
 			plan: export_plan(e0, ai_secs, job.format)
 		})
-		cache := if e0.ai > 0 { job.ai_caches[e0.ai_model] or { unsafe { nil } } } else { unsafe { nil } }
+		cache := if e0.ai > 0 {
+			job.ai_caches[e0.ai_model] or { unsafe { nil } }
+		} else {
+			unsafe { nil }
+		}
 		threads << spawn batch_frame_job(job, i, dst, cache, level, mut app, ch)
 		running++
 		if alone {

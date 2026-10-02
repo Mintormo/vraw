@@ -15,14 +15,14 @@ import pipeline
 import ai
 import imgio
 
-// correct_lens - коррекция объектива на месте (виньетирование строго до
-// дисторсии: ремап двигает пиксели); false - профиля нет
-fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database) bool {
+// correct_lens - коррекция объектива на месте (виньетирование с силой vign
+// строго до дисторсии: ремап двигает пиксели); false - профиля нет
+fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, vign f32) bool {
 	if isnil(db) {
 		return false
 	}
 	c := db.find(m.cam_make, m.cam_model, m.lens) or { return false }
-	c.vignetting(buf, w, h, m.focal, m.aperture)
+	c.vignetting(buf, w, h, m.focal, m.aperture, vign)
 	c.geometry(buf, w, h, m.focal)
 	return true
 }
@@ -177,7 +177,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		if !progress(.lens, 0, 0) {
 			return ExportCancelled{}
 		}
-		correct_lens(buf, w, h, d.meta(), db)
+		correct_lens(buf, w, h, d.meta(), db, e.vign)
 	}
 	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
 	if e.ai > 0 {

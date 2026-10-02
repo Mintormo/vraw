@@ -8,8 +8,9 @@ module main
 //   1. встроенное превью камеры (thumb_min, у CR3 1620x1080, ~30 мс) ->
 //      сразу на экран (on_preview): кадр виден мгновенно;
 //   2. профиль объектива (в общей базе lensfun), проявка превью
-//      LibRaw, коррекция объектива и маска (prep_compute, без шумодава),
-//      камерная кривая по полному JPEG -> on_done.
+//      LibRaw, сила коррекции виньетирования по полному JPEG камеры,
+//      коррекция объектива и маска (prep_compute, без шумодава),
+//      камерная кривая по тому же JPEG -> on_done.
 // Шумодав из сайдкара досчитывает обычный фоновый request_prep уже после
 // загрузки. Быстрое перелистывание: предыдущая загрузка отменяется
 // флагом между этапами, её результат отбрасывается по file_gen (dev и
@@ -20,6 +21,7 @@ module main
 // пишут настройки и историю, а пересчёты (проявка, подготовка, apply)
 // сразу выходят. load_done сверяет итог с настройками на момент
 // окончания и досчитывает разницу (как restore_edit).
+import math
 import stbi
 import vgui
 import raw
@@ -66,7 +68,7 @@ struct LoadResult {
 	raw_linear []u16
 	linear     []u16
 	mask       []u16
-	look       CamLook // камерная кривая и насыщенность; пусто - встроенного JPEG нет
+	look       CamLook // камерная кривая, насыщенность и виньетка; кривая пуста - JPEG нет
 }
 
 // load_worker выполняется в spawn; результат - через app.post
@@ -112,6 +114,16 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		post_load(mut app, on_done, res)
 		return
 	}
+	// Полный JPEG камеры - один раз на силу виньетки и камерную кривую.
+	// Сила - по профилю кадра, даже если коррекция выключена: включат -
+	// не перепроявлять
+	mut cj := cam_jpeg(mut d)
+	defer {
+		if mut t := cj {
+			t.free()
+		}
+	}
+	vign := vign_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
 	prep := prep_compute(PrepJob{
 		gen:       job.gen
 		src:       dev_linear.clone()
@@ -121,6 +133,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		corr:      if job.lens_corr { res.corr } else { unsafe { nil } }
 		focal:     meta.focal
 		aperture:  meta.aperture
+		vign:      vign
 	})
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
@@ -134,7 +147,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		raw_linear: prep.raw_linear
 		linear:     prep.linear
 		mask:       prep.mask
-		look:       camera_look(mut d, prep.linear, w * h)
+		look:       camera_look(cj, prep.linear, w * h, vign)
 	}
 	post_load(mut app, on_done, res)
 }
@@ -174,9 +187,11 @@ fn quick_preview(mut d raw.Developer, job LoadJob) ?LoadPreview {
 	}
 }
 
-// CamLook - «как JPEG камеры» для кадра: тоновая кривая (match_curve) и
-// множитель насыщенности (match_saturation). Производное, в сайдкар не
-// пишется; включается флажком «как JPEG» (EditState.use_curve).
+// CamLook - «как JPEG камеры» для кадра: тоновая кривая (match_curve),
+// множитель насыщенности (match_saturation) и сила коррекции
+// виньетирования (vign_match). Производное, в сайдкар не пишется; кривая
+// и насыщенность включаются флажком «как JPEG» (EditState.use_curve),
+// сила виньетки - при коррекции объектива.
 // Наименьший встроенный JPEG для «как JPEG» (300 x 200): на меньшем
 // гистограммы и средние слишком шумные
 const cam_look_min_px = 60000
@@ -184,29 +199,309 @@ const cam_look_min_px = 60000
 struct CamLook {
 	curve []f32 // пусто - встроенного JPEG нет
 	sat   f32 = 1
+	vign  f32 = lens.vign_default
 }
 
-// camera_look - «как JPEG» кадра: встроенный полный JPEG камеры против
-// нейтральной проявки превью linear (npix пикселей): кривая -
-// сопоставлением гистограмм, насыщенность - по средней цветности с этой
-// кривой. Именно полный JPEG: у CR3 превью 1620x1080 обработано иначе.
-// Камеры разные (Canon, Nikon, Sony...) и стили у них разные - поэтому
-// всё по встроенному JPEG этого же кадра, а не константами; JPEG меньше
-// cam_look_min_px пикселей (бывают крошечные превью) - без подбора.
-fn camera_look(mut d raw.Developer, linear []u16, npix int) CamLook {
-	tj := d.thumb() or { return CamLook{} }
-	mut t := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return CamLook{} }
-	defer {
-		t.free()
-	}
+// cam_jpeg - встроенный полный JPEG камеры, декодированный в RGB (в
+// ориентации сенсора; освобождает вызывающий - free()). Именно полный:
+// у CR3 превью 1620x1080 обработано иначе. Камеры разные (Canon, Nikon,
+// Sony...) и стили у них разные - поэтому «как JPEG» всё по встроенному
+// JPEG этого же кадра, а не константами; JPEG меньше cam_look_min_px
+// пикселей (бывают крошечные превью) - none.
+fn cam_jpeg(mut d raw.Developer) ?stbi.Image {
+	tj := d.thumb() or { return none }
+	mut t := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return none }
 	if t.width * t.height < cam_look_min_px {
-		return CamLook{}
+		t.free()
+		return none
+	}
+	return t
+}
+
+// camera_look - «как JPEG» кадра: JPEG камеры cj против нейтральной
+// проявки превью linear (npix пикселей, после коррекции объектива с силой
+// vign): кривая - сопоставлением гистограмм, насыщенность - по средней
+// цветности с этой кривой
+fn camera_look(cj ?stbi.Image, linear []u16, npix int, vign f32) CamLook {
+	t := cj or {
+		return CamLook{
+			vign: vign
+		}
 	}
 	src := unsafe { &u16(linear.data) }
-	curve := pipeline.match_curve(src, npix, t.data, t.width * t.height)
+	ref_ := unsafe { &u8(t.data) }
+	curve := pipeline.match_curve(src, npix, ref_, t.width * t.height)
 	return CamLook{
 		curve: curve
-		sat:   pipeline.match_saturation(src, npix, curve, t.data, t.width * t.height)
+		sat:   pipeline.match_saturation(src, npix, curve, ref_, t.width * t.height)
+		vign:  vign
+	}
+}
+
+// vign_match - сила коррекции виньетирования кадра «как JPEG камеры»:
+// спад яркости к краю после коррекции - как у камеры. Рабочая копия кадра
+// после geometry (lens.match_frame), JPEG совмещается с ней по масштабу
+// (VignRef), сила - регрессией по точкам (VignRef.fit). src - линейная
+// проявка w x h без коррекции объектива, flip - ориентация кадра (JPEG
+// лежит в ориентации сенсора). Без профиля, JPEG, при обрезанном под
+// другую пропорцию JPEG или без надёжной оценки - lens.vign_default.
+// Порядок: сначала сила, потом камерная кривая (виньетка меняет
+// гистограмму).
+fn vign_match(cj ?stbi.Image, flip int, corr &lens.Corrector, src []u16, w int, h int, m raw.Meta) f32 {
+	t := cj or { return lens.vign_default }
+	if isnil(corr) {
+		return lens.vign_default
+	}
+	ow := if flip & 4 != 0 { t.height } else { t.width }
+	oh := if flip & 4 != 0 { t.width } else { t.height }
+	// JPEG обрезан под другую пропорцию - точки не совпадут
+	if math.abs(f64(ow) * h / (f64(oh) * w) - 1) > 0.01 {
+		return lens.vign_default
+	}
+	mf := corr.match_frame(unsafe { &u16(src.data) }, w, h, m.focal, m.aperture) or {
+		return lens.vign_default
+	}
+	rgba := fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height,
+		flip, mf.w, mf.h)
+	vr := VignRef.new(rgba, mf) or { return lens.vign_default }
+	return vr.fit(mf) or { lens.vign_default }
+}
+
+// VignRef - JPEG камеры для vign_match, совмещённый с рабочей копией
+// кадра. Камера после исправления дисторсии кадрирует сильнее
+// авто-масштаба lensfun (RF 24-50 на 24 мм: JPEG крупнее на 8 %, у края
+// кадра - десятки пикселей рабочей копии), поэтому JPEG сначала
+// масштабируется к нашему кадру (align_zoom); точки за кадром JPEG (и
+// полоса vign_edge у его края) и пересвеченные в JPEG (канал от 250 -
+// тоновое плечо и клип камеры) не сравниваются.
+struct VignRef {
+	ref_ []u8   // RGB, совмещённый с рабочей копией
+	use  []bool // точка сравнивается
+}
+
+// Полоса у края JPEG, которая не сравнивается (fit_thumb может оставить
+// там пиксель фона)
+const vign_edge = f32(2)
+
+// Точки для регрессии: люма JPEG vign_lo..vign_hi, наш канал не у клипа,
+// наша люма не ниже vign_floor (шум и чёрная точка)
+const vign_lo = 16
+const vign_hi = 235
+const vign_clip = 64000
+const vign_floor = 64.0
+// Минимум точек и разброс ln усиления внутри корзин (СКО): меньше - сцена
+// не позволяет отличить виньетку от содержимого (длиннофокусник без спада)
+const vign_min_n = 4000
+const vign_min_spread = 0.03
+// Верхний предел силы: чуть больше полного профиля
+const vign_s_max = f32(1.2)
+
+// Предел корреляции совмещения: ниже - JPEG не тот кадр или сильно другой
+const vign_min_ncc = 0.6
+
+fn VignRef.new(rgba []u8, mf &lens.MatchFrame) ?VignRef {
+	w := mf.w
+	h := mf.h
+	n := w * h
+	// Люма JPEG и наша (гамма; кривая камеры на совмещение почти не влияет)
+	mut jl := []f32{len: n}
+	mut ol := []f32{len: n}
+	ours := mf.with_strength(lens.vign_default)
+	for i in 0 .. n {
+		jl[i] = 0.2126 * f32(rgba[i * 4]) + 0.7152 * f32(rgba[i * 4 + 1]) + 0.0722 * f32(rgba[i * 4 + 2])
+		y := (0.2126 * f32(ours[i * 3]) + 0.7152 * f32(ours[i * 3 + 1]) + 0.0722 * f32(ours[i * 3 + 2])) / 65535.0
+		ol[i] = f32(math.pow(f64(y), 1 / 2.2))
+	}
+	z, ncc := align_zoom(ol, jl, w, h)
+	if ncc < vign_min_ncc {
+		return none
+	}
+	mut ref_ := []u8{len: n * 3}
+	mut use := []bool{len: n}
+	cx := f32(w - 1) / 2
+	cy := f32(h - 1) / 2
+	for y in 0 .. h {
+		for x in 0 .. w {
+			// Точка JPEG, в которой то же место сцены
+			qx := cx + (f32(x) - cx) * z
+			qy := cy + (f32(y) - cy) * z
+			if qx < vign_edge || qy < vign_edge || qx > f32(w - 1) - vign_edge
+				|| qy > f32(h - 1) - vign_edge {
+				continue
+			}
+			i := y * w + x
+			mut clip := false
+			for ch in 0 .. 3 {
+				v := sample_rgba(rgba, w, h, ch, qx, qy)
+				ref_[i * 3 + ch] = u8(v + 0.5)
+				clip = clip || v >= 250
+			}
+			use[i] = !clip
+		}
+	}
+	return VignRef{
+		ref_: ref_
+		use:  use
+	}
+}
+
+// align_zoom - масштаб JPEG относительно нашего кадра (оба w x h, люма):
+// точка нашего кадра p - это точка JPEG c + (p - c)·z. Перебор z по
+// корреляции люм (грубо, потом точнее); второй результат - корреляция.
+fn align_zoom(ours []f32, jpeg []f32, w int, h int) (f32, f64) {
+	mut best := f32(1)
+	mut best_c := zoom_ncc(ours, jpeg, w, h, 1)
+	for i in 0 .. 41 {
+		z := f32(0.85) + f32(i) * 0.01
+		c := zoom_ncc(ours, jpeg, w, h, z)
+		if c > best_c {
+			best, best_c = z, c
+		}
+	}
+	z0 := best
+	for i in -10 .. 11 {
+		z := z0 + f32(i) * 0.001
+		c := zoom_ncc(ours, jpeg, w, h, z)
+		if c > best_c {
+			best, best_c = z, c
+		}
+	}
+	return best, best_c
+}
+
+// zoom_ncc - нормированная корреляция нашей люмы и JPEG при масштабе z
+// по общей области (каждая вторая точка - для скорости хватает)
+fn zoom_ncc(ours []f32, jpeg []f32, w int, h int, z f32) f64 {
+	cx := f32(w - 1) / 2
+	cy := f32(h - 1) / 2
+	mut n := 0.0
+	mut sa := 0.0
+	mut sb := 0.0
+	mut saa := 0.0
+	mut sbb := 0.0
+	mut sab := 0.0
+	for y := 0; y < h; y += 2 {
+		qy := cy + (f32(y) - cy) * z
+		if qy < 0 || qy > f32(h - 1) {
+			continue
+		}
+		for x := 0; x < w; x += 2 {
+			qx := cx + (f32(x) - cx) * z
+			if qx < 0 || qx > f32(w - 1) {
+				continue
+			}
+			a := f64(ours[y * w + x])
+			b := f64(sample_f32(jpeg, w, h, qx, qy))
+			n += 1
+			sa += a
+			sb += b
+			saa += a * a
+			sbb += b * b
+			sab += a * b
+		}
+	}
+	if n < 100 {
+		return -1
+	}
+	va := saa - sa * sa / n
+	vb := sbb - sb * sb / n
+	if va <= 0 || vb <= 0 {
+		return -1
+	}
+	return (sab - sa * sb / n) / math.sqrt(va * vb)
+}
+
+// sample_f32 - билинейная выборка карты w x h (точка внутри кадра)
+fn sample_f32(m []f32, w int, h int, x f32, y f32) f32 {
+	x0 := if int(x) < w - 1 { int(x) } else { w - 2 }
+	y0 := if int(y) < h - 1 { int(y) } else { h - 2 }
+	fx := x - f32(x0)
+	fy := y - f32(y0)
+	a := m[y0 * w + x0] * (1 - fx) + m[y0 * w + x0 + 1] * fx
+	b := m[(y0 + 1) * w + x0] * (1 - fx) + m[(y0 + 1) * w + x0 + 1] * fx
+	return a * (1 - fy) + b * fy
+}
+
+// sample_rgba - билинейная выборка канала ch из RGBA w x h
+fn sample_rgba(m []u8, w int, h int, ch int, x f32, y f32) f32 {
+	x0 := if int(x) < w - 1 { int(x) } else { w - 2 }
+	y0 := if int(y) < h - 1 { int(y) } else { h - 2 }
+	fx := x - f32(x0)
+	fy := y - f32(y0)
+	p00 := f32(m[(y0 * w + x0) * 4 + ch])
+	p10 := f32(m[(y0 * w + x0 + 1) * 4 + ch])
+	p01 := f32(m[((y0 + 1) * w + x0) * 4 + ch])
+	p11 := f32(m[((y0 + 1) * w + x0 + 1) * 4 + ch])
+	return (p00 * (1 - fx) + p10 * fx) * (1 - fy) + (p01 * (1 - fx) + p11 * fx) * fy
+}
+
+// fit - сила регрессией по совмещённым точкам, без тоновой кривой: JPEG -
+// глобальная монотонная кривая от линейной яркости (со спадом «по-
+// камерному»), поэтому точки с одинаковым тоном JPEG имели одинаковую
+// линейную яркость, и внутри такой группы (корзина люмы JPEG) наша
+// яркость с коррекцией y + s·l постоянна; всё, что меняется с радиусом, -
+// недо- или перекоррекция. Регрессия с фиксированными эффектами корзин:
+// s = -Σ(y-ȳ)(l-l̄) / Σ(l-l̄)², средние - по корзине; y - ln нашей люмы
+// без коррекции, l - ln усиления полного профиля в точке. Содержимое
+// сцены сокращается: небо в центре и тень у края не дают ложного спада,
+// как дало бы сравнение средних по кольцам. Сравнение с JPEG ПОСЛЕ нашей
+// камерной кривой (ровность разницы по кольцам) пробовали - кривая по
+// гистограммам скачет от малой смены силы, оценка рваная. none - мало
+// точек или разброса усиления (длиннофокусник без спада).
+fn (r &VignRef) fit(mf &lens.MatchFrame) ?f32 {
+	mut n := []f64{len: 256}
+	mut sy := []f64{len: 256}
+	mut sl := []f64{len: 256}
+	mut syl := []f64{len: 256}
+	mut sll := []f64{len: 256}
+	for i in 0 .. mf.w * mf.h {
+		if !r.use[i] {
+			continue
+		}
+		jl := int(0.2126 * f64(r.ref_[i * 3]) + 0.7152 * f64(r.ref_[i * 3 + 1]) +
+			0.0722 * f64(r.ref_[i * 3 + 2]) + 0.5)
+		if jl < vign_lo || jl > vign_hi {
+			continue
+		}
+		pr := mf.lin[i * 3]
+		pg := mf.lin[i * 3 + 1]
+		pb := mf.lin[i * 3 + 2]
+		if pr >= vign_clip || pg >= vign_clip || pb >= vign_clip {
+			continue
+		}
+		yl := 0.2126 * f64(pr) + 0.7152 * f64(pg) + 0.0722 * f64(pb)
+		if yl < vign_floor {
+			continue
+		}
+		y := math.log(yl)
+		l := f64(mf.lgain[i])
+		n[jl] += 1
+		sy[jl] += y
+		sl[jl] += l
+		syl[jl] += y * l
+		sll[jl] += l * l
+	}
+	mut tot := 0.0
+	mut cyl := 0.0
+	mut cll := 0.0
+	for k in 0 .. 256 {
+		if n[k] < 2 {
+			continue
+		}
+		tot += n[k]
+		cyl += syl[k] - sy[k] * sl[k] / n[k]
+		cll += sll[k] - sl[k] * sl[k] / n[k]
+	}
+	if tot < vign_min_n || cll <= 0 || math.sqrt(cll / tot) < vign_min_spread {
+		return none
+	}
+	s := f32(-cyl / cll)
+	return if s < 0 {
+		f32(0)
+	} else if s > vign_s_max {
+		vign_s_max
+	} else {
+		s
 	}
 }
 

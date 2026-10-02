@@ -351,13 +351,14 @@ fn clamp01f(v f32) f32 {
 }
 
 // with_derived заполняет производные поля снимка: камерную кривую
-// кадра (при use_curve), таблицы кривых из точек и матрицу баланса
-// белого по цвету камеры кадра. Нужна снимкам из файла - иначе
+// кадра (при use_curve), силу коррекции виньетирования, таблицы кривых из
+// точек и матрицу баланса белого по цвету камеры кадра. Нужна снимкам из файла - иначе
 // сравнение с живым st.edit (record) всегда давало бы «изменилось».
 fn with_derived(e EditState, look CamLook, cam pipeline.CamColor) EditState {
 	mut d := e.clone()
 	d.params.curve = if e.use_curve { look.curve.clone() } else { []f32{} }
 	d.params.cam_sat = if e.use_curve && look.curve.len > 0 { look.sat } else { f32(1) }
+	d.vign = look.vign
 	d.params.tc_rgb = tone_lut(e.curve_pts[0])
 	d.params.tc_r = tone_lut(e.curve_pts[1])
 	d.params.tc_g = tone_lut(e.curve_pts[2])

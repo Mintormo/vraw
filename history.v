@@ -12,6 +12,7 @@ import math
 import time
 import vgui
 import pipeline
+import lens
 
 // EditState - снимок всех настроек правки кадра. Из него восстанавливается
 // и GUI (ползунки, чекбоксы, точки кривых), и проявка (превью, сохранение).
@@ -22,11 +23,11 @@ mut:
 	params    pipeline.Params
 	curve_pts [][]vgui.CurvePoint // точки кривых: 0 - RGB, 1..3 - R, G, B
 	highlight int                 // режим пересветов LibRaw (0..9), смена - перепроявка
-	lens_corr bool = true         // чекбокс «Коррекция объектива»
-	use_curve bool = true         // чекбокс «Камерная кривая»
-	nr        [4]f32              // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
-	ai        f32                 // AI-шумодав: сила 1..100, 0 - выключен (ai_nr.v)
-	ai_model  string              // id модели, которой посчитан AI (ai.models), при ai > 0
+	lens_corr bool = true // чекбокс «Коррекция объектива»
+	use_curve bool = true // чекбокс «Камерная кривая»
+	nr        [4]f32 // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
+	ai        f32    // AI-шумодав: сила 1..100, 0 - выключен (ai_nr.v)
+	ai_model  string // id модели, которой посчитан AI (ai.models), при ai > 0
 	// Баланс белого (wb_ui.v): режим - ключ из wb_modes ('' - «как снято»,
 	// тогда температура и оттенок не используются и равны 0), температура
 	// K и оттенок источника. Матрица в params.wb - производная (with_derived).
@@ -42,6 +43,9 @@ mut:
 	crop_aw       int = 3
 	crop_ah       int = 2
 	crop_portrait bool
+	// Сила коррекции виньетирования кадра «как JPEG камеры» (CamLook.vign) -
+	// производное, как params.curve (with_derived), в сайдкар не пишется
+	vign f32 = lens.vign_default
 }
 
 // neutral_edit - настройки только что открытого файла (запись «Открыт файл»)
@@ -77,7 +81,7 @@ struct HistEntry {
 // SliderBind - ползунок и его значение в снимке: по списку st.binds
 // откат выставляет все ползунки панели.
 struct SliderBind {
-	sl  &vgui.Slider = unsafe { nil }
+	sl  &vgui.Slider        = unsafe { nil }
 	get fn (&EditState) f32 = unsafe { nil }
 }
 
