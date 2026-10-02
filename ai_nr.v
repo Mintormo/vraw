@@ -16,8 +16,11 @@ module main
 //   (ai.blend - мгновенно), дальше как обычно: импульсы, вейвлет, ореолы.
 //   Поэтому ползунок силы - без пересчёта модели. Сброс выбрасывает
 //   результат: повторное включение или откат к AI - новый прогон.
-// - raw_linear сменился (объектив, пересветы, другой кадр) - ai_linear
-//   устарел (raw_gen); если AI включён, прогон перезапускается сам.
+// - Модель запускается ТОЛЬКО кнопкой (просьба Игоря 02.10.2026: прогон
+//   долгий, сам по каждому поводу он мешал). raw_linear сменился
+//   (объектив, пересветы, другой кадр, откат истории) - ai_linear устарел
+//   (raw_gen): превью идёт без AI, блок показывает «Пересчитать AI» и
+//   сброс, один раз - тост. Экспорт с AI считает модель сам.
 // - Экспорт с AI считает модель на полном кадре (NAFNet ~2.5 мин, SCUNet
 //   ~16 мин) в save_worker; его прогресс - в диалоге экспорта (export_ui.v).
 import time
@@ -34,7 +37,7 @@ import ai
 struct AiCtl {
 mut:
 	cancel bool
-	t1    i64  // мс первой готовой плитки, 0 - ещё не было
+	t1     i64 // мс первой готовой плитки, 0 - ещё не было
 	n1     int
 	done   int
 	total  int
@@ -64,24 +67,28 @@ struct AiResult {
 	secs      f64
 }
 
-// AiUi - виджеты блока: три состояния в Stack (видно одно) - кнопка,
-// прогресс, применён (сила и сброс - выключение AI). Каждое состояние - VBox в
+// AiUi - виджеты блока: четыре состояния в Stack (видно одно) - кнопка,
+// прогресс, применён (сила и сброс - выключение AI), устарел (AI включён,
+// результата под текущее сырьё нет: «Пересчитать AI» и сброс). Каждое состояние - VBox в
 // своём Stack: у VBox нет публичного visible, у Stack есть.
 @[heap]
 struct AiUi {
 mut:
-	idle     &vgui.Stack       = unsafe { nil }
-	running  &vgui.Stack       = unsafe { nil }
-	applied  &vgui.Stack       = unsafe { nil }
-	start    &vgui.Button      = unsafe { nil }
-	hint     &vgui.Label       = unsafe { nil }
-	bar      &vgui.ProgressBar = unsafe { nil }
-	pct      &vgui.Label       = unsafe { nil }
-	status   &vgui.Label       = unsafe { nil }
-	strength &vgui.Slider      = unsafe { nil }
-	ok_label &vgui.Label       = unsafe { nil }
-	ok_icon  &vgui.Icon        = unsafe { nil }
-	run_icon &vgui.Icon        = unsafe { nil }
+	idle      &vgui.Stack       = unsafe { nil }
+	running   &vgui.Stack       = unsafe { nil }
+	applied   &vgui.Stack       = unsafe { nil }
+	start     &vgui.Button      = unsafe { nil }
+	hint      &vgui.Label       = unsafe { nil }
+	bar       &vgui.ProgressBar = unsafe { nil }
+	pct       &vgui.Label       = unsafe { nil }
+	status    &vgui.Label       = unsafe { nil }
+	stale     &vgui.Stack       = unsafe { nil }
+	redo      &vgui.Button      = unsafe { nil }
+	redo_hint &vgui.Label       = unsafe { nil }
+	strength  &vgui.Slider      = unsafe { nil }
+	ok_label  &vgui.Label       = unsafe { nil }
+	ok_icon   &vgui.Icon        = unsafe { nil }
+	run_icon  &vgui.Icon        = unsafe { nil }
 }
 
 // ai_run_model - модель прогона: у кадра с AI - его модель, иначе
@@ -172,13 +179,13 @@ fn raw_changed(mut st State) {
 	}
 }
 
-// ai_check - запустить прогон превью, если он нужен (кнопка нажата или AI
-// включён в настройках кадра), а результата нет. Зовётся везде, где могло
-// появиться сырьё или смениться настройка: готовая подготовка, конец
-// загрузки кадра, откат истории, кнопка.
+// ai_check - запустить прогон превью, если его просили кнопкой
+// (ai_wanted), а результата нет. Сам модель не запускает: AI кадра без
+// результата (сайдкар, новое сырьё) - превью без AI и тост один раз на
+// сырьё. Зовётся везде, где могло появиться сырьё или смениться настройка:
+// готовая подготовка, конец загрузки кадра, откат истории, кнопка.
 fn ai_check(mut st State, mut app vgui.App) {
-	need := st.ai_wanted || st.edit.ai > 0
-	if !need || !isnil(st.ai_prev) {
+	if !isnil(st.ai_prev) {
 		sync_ai_ui(mut st)
 		return
 	}
@@ -194,16 +201,17 @@ fn ai_check(mut st State, mut app vgui.App) {
 		sync_ai_ui(mut st)
 		return
 	}
+	if !st.ai_wanted {
+		ai_tell_stale(mut st)
+		sync_ai_ui(mut st)
+		return
+	}
 	id := ai_run_model(st)
 	cache := ai_cache_for(mut st, id) or {
-		// Нет модели или ORT: по кнопке - сказать всегда, для кадра с AI из
-		// сайдкара - один раз на кадр и модель (ai_check зовут часто)
-		warn := '${st.file_gen}/${id}'
-		if (st.ai_wanted || st.ai_warned != warn) && !isnil(st.nm) {
+		if !isnil(st.nm) {
 			mut nm := st.nm
 			nm.show_error('AI-шумодав: ${err.msg()}')
 		}
-		st.ai_warned = warn
 		st.ai_wanted = false
 		sync_ai_ui(mut st)
 		return
@@ -222,14 +230,22 @@ fn ai_check(mut st State, mut app vgui.App) {
 		ctl:     ctl
 	}
 	st.ai_threads << spawn ai_worker(job, mut app, st.ai_progress, st.ai_done)
-	// Запуск без кнопки (AI из сайдкара, новое сырьё после смены объектива
-	// или пересветов) - секция может быть свёрнута: сказать тостом
-	if !st.ai_wanted && !isnil(st.nm) {
-		mut nm := st.nm
-		nm.show_info('AI-шумодав: пересчёт превью (${model_title(id)}, ~${fmt_dur(ai_estimate(st,
-			id, false))}, прогресс - в секции «Шумодав и ореолы»)')
-	}
 	sync_ai_ui(mut st)
+}
+
+// ai_tell_stale - AI кадра включён, а результата под текущее сырьё нет:
+// сказать тостом (секция может быть свёрнута), один раз на сырьё
+fn ai_tell_stale(mut st State) {
+	if st.edit.ai <= 0 || isnil(st.nm) {
+		return
+	}
+	key := '${st.file_gen}/${st.raw_gen}'
+	if st.ai_told == key {
+		return
+	}
+	st.ai_told = key
+	mut nm := st.nm
+	nm.show_info('AI-шумодав: превью пока без него - «Пересчитать AI» в секции «Шумодав и ореолы» (экспорт посчитает сам)')
 }
 
 // ai_progress_fn - обратный вызов для ai.denoise (в потоке воркера):
@@ -304,12 +320,9 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 	}
 	st.ai_prev = unsafe { nil }
 	if res.cancelled {
-		// Отменил пользователь: и кнопку, и включённый AI (пересчёт после
-		// смены объектива) - выключаем, чтобы он не запустился снова
+		// Отменил пользователь: AI кадра (если был включён) не трогаем -
+		// сам он больше не запустится, блок покажет «Пересчитать AI»
 		st.ai_wanted = false
-		if st.edit.ai > 0 {
-			ai_turn_off(mut st, mut app)
-		}
 		sync_ai_ui(mut st)
 		return
 	}
@@ -336,15 +349,21 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 			nm.show_success('AI-шумодав готов (${res.secs:.0f} с)')
 		}
 	} else if prep_stale(st) {
-		request_prep(mut st, mut app, false) // AI был включён - пересчёт после смены сырья
+		request_prep(mut st, mut app, false)
 	}
 	sync_ai_ui(mut st)
 }
 
 // ai_turn_on - результат есть, включить AI в настройках кадра (сила 100)
-// и записать в историю
+// и записать в историю. Пересчёт уже включённого AI («Пересчитать AI») -
+// сила и история те же, только подготовка сырья с новым результатом.
 fn ai_turn_on(mut st State, mut app vgui.App) {
 	st.ai_wanted = false
+	if st.edit.ai > 0 {
+		request_prep(mut st, mut app, false)
+		sync_ai_ui(mut st)
+		return
+	}
 	if !isnil(st.ai_ui) && !isnil(st.ai_ui.strength) {
 		st.suppress = true
 		mut sl := st.ai_ui.strength
@@ -358,10 +377,10 @@ fn ai_turn_on(mut st State, mut app vgui.App) {
 	sync_ai_ui(mut st)
 }
 
-// ai_turn_off - сброс AI (кнопка ↺ в строке «Сила», отмена пересчёта):
+// ai_turn_off - сброс AI (кнопка ↺ в строке «Сила» или у «Пересчитать AI»):
 // выключить и выбросить результат модели - следующее «Убрать шум (AI)»
 // считает заново (так просил Игорь: сброс - это сброс, без кэша). Откат
-// истории к записи с AI пересчитает модель через ai_check.
+// истории к записи с AI - превью без AI до «Пересчитать AI».
 fn ai_turn_off(mut st State, mut app vgui.App) {
 	st.edit.ai = 0
 	st.edit.ai_model = ''
@@ -410,9 +429,11 @@ fn sync_ai_ui(mut st State) {
 	ctl := st.ai_prev
 	running := !isnil(ctl)
 	applied := !running && st.edit.ai > 0 && ai_ready(st)
+	stale := !running && st.edit.ai > 0 && !applied
 	u.running.visible = running
 	u.applied.visible = applied
-	u.idle.visible = !running && !applied
+	u.stale.visible = stale
+	u.idle.visible = !running && !applied && !stale
 	if running {
 		what := 'Превью'
 		if ctl.total == 0 {
@@ -429,6 +450,23 @@ fn sync_ai_ui(mut st State) {
 		mut l := u.ok_label
 		l.text = 'AI-шумодав применён · ${model_title(st.edit.ai_model)}'
 	}
+	// Пересчёт AI кадра - его моделью; нет её - «Скачать модель...»
+	if stale {
+		sid := st.edit.ai_model
+		mut rb := u.redo
+		mut rh := u.redo_hint
+		if ai_usable(st, sid) {
+			rb.text = 'Пересчитать AI'
+			rb.icon_name = 'refresh-cw'
+			rb.enabled = !isnil(st.dev) && !st.loading
+			rh.text = '${model_title(sid)} · превью пока без AI, пересчёт ~${fmt_dur(ai_estimate(st, sid, false))}'
+		} else {
+			rb.text = 'Скачать модель...'
+			rb.icon_name = 'download'
+			rb.enabled = true
+			rh.text = 'Модель ${model_title(sid)} не скачана - Правка - Настройки'
+		}
+	}
 	// Кнопка: модель готова - запуск; нет - «Скачать модель...» (окно
 	// настроек, там и выбор модели)
 	id := st.settings.ai_model
@@ -439,8 +477,7 @@ fn sync_ai_ui(mut st State) {
 		b.text = 'Убрать шум (AI)'
 		b.icon_name = 'sparkles'
 		b.enabled = !isnil(st.dev) && !st.loading
-		hint.text = '${model_title(id)} · превью ~${fmt_dur(ai_estimate(st, id, false))}, экспорт ~${fmt_dur(ai_estimate(st,
-			id, true))}'
+		hint.text = '${model_title(id)} · превью ~${fmt_dur(ai_estimate(st, id, false))}, экспорт ~${fmt_dur(ai_estimate(st, id, true))}'
 	} else {
 		b.text = 'Скачать модель...'
 		b.icon_name = 'download'
@@ -450,7 +487,7 @@ fn sync_ai_ui(mut st State) {
 }
 
 // build_ai_block - блок AI-шумодава в секции «Шумодав и ореолы»: Stack
-// трёх состояний одной высоты (ai_block_h), видно одно (sync_ai_ui).
+// четырёх состояний одной высоты (ai_block_h), видно одно (sync_ai_ui).
 // strength - ползунок силы (edit_slider, fx - подготовка сырья).
 fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f32, vw f32) &vgui.Stack {
 	mut u := &AiUi{}
@@ -461,17 +498,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	start.icon_size = 15
 	start.style = .accent
 	start.on_click = fn [mut st, mut app] () {
-		if !ai_usable(st, st.settings.ai_model) {
-			if !isnil(st.open_settings) {
-				st.open_settings()
-			}
-			return
-		}
-		if isnil(st.dev) || st.loading {
-			return
-		}
-		st.ai_wanted = true
-		ai_check(mut st, mut app)
+		ai_start(mut st, mut app)
 	}
 	u.start = start
 	// Высота подписей (ai_note_h) - с запасом на внутренний отступ Label
@@ -557,12 +584,59 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	u.applied = layer(applied)
 	u.applied.visible = false
 
+	// Устарел: AI кадра включён, результата под текущее сырьё нет -
+	// пересчёт по кнопке (сам не запускается) или выключение
+	mut redo := vgui.button('Пересчитать AI')
+	redo.icon_name = 'refresh-cw'
+	redo.icon_size = 15
+	redo.style = .accent
+	redo.on_click = fn [mut st, mut app] () {
+		ai_start(mut st, mut app)
+	}
+	u.redo = redo
+	mut off2 := reset_button(mut st, 'Сбросить AI-шумодав')
+	off2.on_click = fn [mut st, mut app] () {
+		if st.edit.ai > 0 {
+			ai_turn_off(mut st, mut app)
+		}
+	}
+	mut rrow := vgui.create_hbox_fill()
+	rrow.set_spacing(6)
+	rrow.add(redo, 1)
+	rrow.add_fixed(off2, 26)
+	mut redo_hint := vgui.label('')
+	st.hint_labels << redo_hint
+	u.redo_hint = redo_hint
+	mut stale := vgui.create_vbox_fill()
+	stale.set_spacing(ai_row_gap)
+	stale.add_fixed(rrow, ai_row_h)
+	stale.add_fixed(redo_hint, ai_note_h)
+	u.stale = layer(stale)
+	u.stale.visible = false
+
 	mut stack := &vgui.Stack{}
 	stack.add(u.idle)
 	stack.add(u.running)
 	stack.add(u.applied)
+	stack.add(u.stale)
 	sync_ai_ui(mut st)
 	return stack
+}
+
+// ai_start - кнопка «Убрать шум (AI)» / «Пересчитать AI»: прогон превью
+// моделью кадра (ai_run_model); модели нет - окно настроек
+fn ai_start(mut st State, mut app vgui.App) {
+	if !ai_usable(st, ai_run_model(st)) {
+		if !isnil(st.open_settings) {
+			st.open_settings()
+		}
+		return
+	}
+	if isnil(st.dev) || st.loading {
+		return
+	}
+	st.ai_wanted = true
+	ai_check(mut st, mut app)
 }
 
 // layer - слой Stack с одним виджетом (его можно скрыть)

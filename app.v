@@ -139,7 +139,7 @@ mut:
 	ai_linear   []u16
 	ai_raw_gen  int
 	ai_lin_model string
-	ai_warned   string // «кадр/модель», о чьей недоступности уже сказали
+	ai_told     string // «кадр/сырьё», о чьём устаревшем AI уже сказали
 	raw_gen     int
 	raw_pending bool
 	ai_applied  f32 // сила AI в последней подготовке сырья
