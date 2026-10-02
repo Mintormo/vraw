@@ -137,6 +137,34 @@ fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, vie
 	}
 }
 
+// Резкость на выход (окно «Экспорт», resize_rgb_sharp): уменьшение
+// усредняет соседние пиксели и смягчает края - мелкий unsharp mask по люме
+// уже уменьшенного кадра возвращает чёткость. Радиус - в пикселях выхода
+// (под размер экспорта, не кадра), порог в 1 уровень - не усиливать шум,
+// добавка одна на все каналы - без цветных ореолов (как sharpen_tone).
+const out_sharp_sigma = f32(0.6)
+const out_sharp_t2 = f32(1.0)
+
+// out_sharpen - резкость на выход по RGB w x h во f32 (тона 0..255), на
+// месте; amount - доля детали (0.4 слабая .. 1.3 сильная)
+pub fn out_sharpen(mut f []f32, w int, h int, amount f32) {
+	npix := w * h
+	if amount <= 0 || w < 3 || h < 3 || f.len < npix * 3 {
+		return
+	}
+	mut l := []f32{len: npix}
+	for i in 0 .. npix {
+		l[i] = 0.2126 * f[3 * i] + 0.7152 * f[3 * i + 1] + 0.0722 * f[3 * i + 2]
+	}
+	b := gauss_blur(l, w, h, out_sharp_sigma)
+	for i in 0 .. npix {
+		add := amount * soft_threshold(l[i] - b[i], out_sharp_t2)
+		f[3 * i] += add
+		f[3 * i + 1] += add
+		f[3 * i + 2] += add
+	}
+}
+
 // soft_threshold - мягкий порог детали: d · d²/(d² + t²) (t2 = 0 - без порога)
 @[inline]
 fn soft_threshold(d f32, t2 f32) f32 {

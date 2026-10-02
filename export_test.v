@@ -205,3 +205,17 @@ fn test_settings_export_defaults() {
 	assert old.export_size == '' && old.export_dir == ''
 	assert clamp_px(0, 2048) == 2048 && clamp_px(99999, 1920) == 1920 && clamp_px(800, 1) == 800
 }
+
+// Резкость на выход: по умолчанию нет; сила - по ключу; в итоге пакета -
+// только при уменьшении
+fn test_export_sharp_settings() {
+	mut s := Settings{}
+	assert s.export_sharp == '' && s.export_size_opts().sharp == 0
+	s.export_sharp = 'std'
+	assert s.export_size_opts().sharp == 0.8
+	assert size_desc(&s) == 'полный размер'
+	s.export_size = 'long'
+	assert size_desc(&s) == 'длинная сторона до 2048 px, резкость: средняя'
+	s.export_sharp = 'bogus'
+	assert s.export_size_opts().sharp == 0
+}

@@ -252,10 +252,11 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	mut rgb := []u8{len: gw * gh * 3}
 	pipeline.apply_image(src, unsafe { &u16(mask.data) }, &haze, gw, gh, e.params, 1.0, mut
 		rgb, 3)
-	// Размер на выход (окно «Экспорт»): только уменьшение
+	// Размер на выход (окно «Экспорт»): только уменьшение, с резкостью на
+	// выход (она - только при уменьшении)
 	fw, fh := export_dims(o.size, gw, gh)
 	if fw != gw || fh != gh {
-		rgb = pipeline.resize_rgb(rgb, gw, gh, fw, fh)
+		rgb = pipeline.resize_rgb_sharp(rgb, gw, gh, fw, fh, o.size.sharp)
 	}
 	return Image{
 		width:  fw

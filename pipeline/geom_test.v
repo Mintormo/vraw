@@ -144,3 +144,31 @@ fn test_resize_rgb() {
 		}
 	}
 }
+
+// Резкость на выход: без силы - как resize_rgb; на ступеньке перепад у
+// края растёт (ореол по обе стороны), ровное поле остаётся ровным
+fn test_resize_rgb_sharp() {
+	w, h := 40, 20
+	mut src := []u8{len: w * h * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			v := if x < w / 2 { u8(60) } else { u8(180) }
+			for c in 0 .. 3 {
+				src[(y * w + x) * 3 + c] = v
+			}
+		}
+	}
+	plain := resize_rgb(src, w, h, 20, 10)
+	assert resize_rgb_sharp(src, w, h, 20, 10, 0) == plain
+	sharp := resize_rgb_sharp(src, w, h, 20, 10, 1.0)
+	row := 5 * 20 * 3
+	// Тёмная сторона у края темнее, светлая - светлее
+	assert sharp[row + 9 * 3] < plain[row + 9 * 3]
+	assert sharp[row + 10 * 3] > plain[row + 10 * 3]
+	// Вдали от края - без изменений
+	assert sharp[row] == plain[row] && sharp[row + 19 * 3] == plain[row + 19 * 3]
+	flat := []u8{len: 7 * 5 * 3, init: 77}
+	for v in resize_rgb_sharp(flat, 7, 5, 4, 3, 1.3) {
+		assert v == 77
+	}
+}

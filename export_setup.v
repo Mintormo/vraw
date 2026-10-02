@@ -19,19 +19,28 @@ const name_tmpl_default = '{name}'
 const export_size_keys = ['', 'long', 'fit', 'pct']
 const export_size_names = ['Как есть', 'По длинной стороне', 'Вписать в Ш × В', 'В процентах']
 const export_px_max = 30000
+// Резкость на выход: ключи (Settings.export_sharp), названия и сила
+// (pipeline.out_sharpen). Уменьшение усредняет пиксели и смягчает края -
+// резкость под размер файла возвращает чёткость (как Output Sharpening
+// в Lightroom); без уменьшения не применяется - резкость кадра уже есть.
+const export_sharp_keys = ['', 'low', 'std', 'high']
+const export_sharp_names = ['Нет', 'Слабая', 'Средняя', 'Сильная']
+const export_sharp_amounts = [f32(0), 0.4, 0.8, 1.3]
 
 // clamp_px - размер в пикселях из настроек: вне 1..export_px_max - def
 fn clamp_px(v int, def int) int {
 	return if v >= 1 && v <= export_px_max { v } else { def }
 }
 
-// ExportSize - размер на выход (снимок настроек для воркера)
+// ExportSize - размер на выход и резкость под него (снимок настроек для
+// воркера)
 struct ExportSize {
-	mode string // ключ export_size_keys
-	long int
-	w    int
-	h    int
-	pct  int
+	mode  string // ключ export_size_keys
+	long  int
+	w     int
+	h     int
+	pct   int
+	sharp f32 // сила резкости на выход (0 - нет), только при уменьшении
 }
 
 fn (s &Settings) export_size_opts() ExportSize {
@@ -40,7 +49,8 @@ fn (s &Settings) export_size_opts() ExportSize {
 		long: s.export_long
 		w:    s.export_w
 		h:    s.export_h
-		pct:  s.export_pct
+		pct:   s.export_pct
+		sharp: export_sharp_amounts[math.max(0, export_sharp_keys.index(s.export_sharp))]
 	}
 }
 
@@ -199,6 +209,7 @@ mut:
 	times   &vgui.Label     = unsafe { nil }
 	unit    &vgui.Label     = unsafe { nil }
 	size_row &vgui.HBox     = unsafe { nil } // пересобирается под режим
+	sharp_cb &vgui.ComboBox = unsafe { nil }
 	size_mode string = '?' // режим, под который собран size_row
 	ex_cb   &vgui.ComboBox  = unsafe { nil }
 	load_cb &vgui.ComboBox  = unsafe { nil }
@@ -209,7 +220,7 @@ mut:
 }
 
 const xs_w = 680
-const xs_h = 620
+const xs_h = 680
 const xs_lbl_w = f32(150)
 const xs_path_max = 56
 
@@ -298,11 +309,17 @@ fn export_target_paths(st &State, what string) []string {
 
 // size_desc - размер на выход словами (итог пакета)
 fn size_desc(s &Settings) string {
-	return match s.export_size {
+	size := match s.export_size {
 		'long' { 'длинная сторона до ${s.export_long} px' }
 		'fit' { 'в пределах ${s.export_w} × ${s.export_h} px' }
 		'pct' { '${s.export_pct}% размера' }
 		else { 'полный размер' }
+	}
+	i := export_sharp_keys.index(s.export_sharp)
+	return if s.export_size != '' && i > 0 {
+		'${size}, резкость: ${export_sharp_names[i].to_lower()}'
+	} else {
+		size
 	}
 }
 
@@ -378,6 +395,10 @@ fn sync_export_setup(mut st State) {
 		}
 		r.add(vgui.create_spacer(), 1)
 	}
+	// Резкость на выход - только при уменьшении: «Как есть» - недоступна
+	mut shcb := u.sharp_cb
+	shcb.set_selected(math.max(0, export_sharp_keys.index(s.export_sharp)))
+	shcb.enabled = s.export_size != ''
 	mut ecb := u.ex_cb
 	ecb.set_selected(math.max(0, export_exists_keys.index(s.export_exists)))
 	mut acb := u.ai_cb
@@ -655,6 +676,20 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut size_note := vgui.label('Кадр только уменьшается: увеличение деталей не добавит')
 	u.notes << size_note
 
+	// Резкость на выход - под размер файла
+	mut sharp_cb := vgui.combo_box()
+	sharp_cb.set_items(export_sharp_names)
+	sharp_cb.on_change = fn [mut st] (i int, _ string) {
+		if st.suppress || i < 0 || i >= export_sharp_keys.len {
+			return
+		}
+		st.settings.export_sharp = export_sharp_keys[i]
+		export_setup_changed(mut st)
+	}
+	u.sharp_cb = sharp_cb
+	mut sharp_note := vgui.label('Только при уменьшении кадра: возвращает ему чёткость')
+	u.notes << sharp_note
+
 	// Файл уже есть
 	mut ex_cb := vgui.combo_box()
 	ex_cb.set_items(export_exists_names)
@@ -730,6 +765,8 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add_fixed(indented(q_note, xs_lbl_w + 8), set_note_h)
 	body.add_fixed(size_row, set_row_h)
 	body.add_fixed(indented(size_note, xs_lbl_w + 8), set_note_h)
+	body.add_fixed(row('Резкость на выход', sharp_cb), set_row_h)
+	body.add_fixed(indented(sharp_note, xs_lbl_w + 8), set_note_h)
 	body.add_fixed(vgui.create_spacer(), 6)
 	body.add_fixed(ai_cb, set_row_h)
 	body.add_fixed(vgui.create_spacer(), 4)

@@ -409,6 +409,23 @@ pub fn resize_rgb(src []u8, w int, h int, nw int, nh int) []u8 {
 	if nw == w && nh == h {
 		return src.clone()
 	}
+	return quantize_rgb(resize_rgb_f32(src, w, h, nw, nh))
+}
+
+// resize_rgb_sharp - resize_rgb и резкость на выход силы amount (окно
+// «Экспорт», out_sharpen) - по значениям до округления в 8 бит
+pub fn resize_rgb_sharp(src []u8, w int, h int, nw int, nh int, amount f32) []u8 {
+	if amount <= 0 {
+		return resize_rgb(src, w, h, nw, nh)
+	}
+	mut f := resize_rgb_f32(src, w, h, nw, nh)
+	out_sharpen(mut f, nw, nh, amount)
+	return quantize_rgb(f)
+}
+
+// resize_rgb_f32 - пересчёт размера (см. resize_rgb) без округления:
+// RGB nw x nh во f32, 0..255
+fn resize_rgb_f32(src []u8, w int, h int, nw int, nh int) []f32 {
 	// По x: w -> nw, строки h
 	mut tmp := []f32{len: nw * h * 3}
 	wx := resample_weights(w, nw)
@@ -424,7 +441,7 @@ pub fn resize_rgb(src []u8, w int, h int, nw int, nh int) []u8 {
 		}
 	}
 	// По y: h -> nh
-	mut out := []u8{len: nw * nh * 3}
+	mut out := []f32{len: nw * nh * 3}
 	wy := resample_weights(h, nh)
 	for y in 0 .. nh {
 		for x in 0 .. nw {
@@ -438,10 +455,19 @@ pub fn resize_rgb(src []u8, w int, h int, nw int, nh int) []u8 {
 				b += tmp[s + 2] * k.w
 			}
 			t := (y * nw + x) * 3
-			out[t] = u8(clamp255(r) + 0.5)
-			out[t + 1] = u8(clamp255(g) + 0.5)
-			out[t + 2] = u8(clamp255(b) + 0.5)
+			out[t] = r
+			out[t + 1] = g
+			out[t + 2] = b
 		}
+	}
+	return out
+}
+
+// quantize_rgb - f32 0..255 -> u8 с округлением
+fn quantize_rgb(f []f32) []u8 {
+	mut out := []u8{len: f.len}
+	for i, v in f {
+		out[i] = u8(clamp255(v) + 0.5)
 	}
 	return out
 }
