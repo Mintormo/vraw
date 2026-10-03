@@ -8,12 +8,13 @@ module main
 // Включается пунктом «Вид - Пересветы и провалы» (J) - оба сразу - или
 // треугольниками в верхних углах гистограммы: левый - провалы, правый -
 // пересветы. Треугольник горит цветом, когда в кадре есть клип этого края
-// (по гистограмме результата), и обведён белым, когда показ включён.
+// (по гистограмме результата), и обведён (белым в тёмной теме, цветом
+// текста в светлой), когда показ включён. Серый «нет клипа» и обводка -
+// из палитры темы (Palette.clip_idle, clip_ring).
 import vgui
 
 const clip_hi_color = vgui.Color{255, 40, 40, 255}
 const clip_lo_color = vgui.Color{40, 120, 255, 255}
-const clip_idle_color = vgui.Color{95, 95, 100, 255}
 // Треугольник в буфере гистограммы 256x100 (растягивается на виджет):
 // катеты, отступ от угла; щелчок ловится в квадрате чуть больше
 const clip_tri_w = 14
@@ -48,23 +49,25 @@ fn mark_clipping(mut pix []u8, hi bool, lo bool) {
 }
 
 // draw_clip_marks - треугольники в углах гистограммы: цвет - есть клип
-// (hi_seen/lo_seen), белая обводка - показ включён
-fn draw_clip_marks(mut hist vgui.Canvas, hi_seen bool, lo_seen bool, hi_on bool, lo_on bool) {
-	draw_clip_tri(mut hist, false, if lo_seen { clip_lo_color } else { clip_idle_color }, lo_on)
-	draw_clip_tri(mut hist, true, if hi_seen { clip_hi_color } else { clip_idle_color }, hi_on)
+// (hi_seen/lo_seen), обводка - показ включён
+fn draw_clip_marks(mut hist vgui.Canvas, hi_seen bool, lo_seen bool, hi_on bool, lo_on bool, p Palette) {
+	draw_clip_tri(mut hist, false, if lo_seen { clip_lo_color } else { p.clip_idle }, lo_on,
+		p.clip_ring)
+	draw_clip_tri(mut hist, true, if hi_seen { clip_hi_color } else { p.clip_idle }, hi_on,
+		p.clip_ring)
 	hist.mark_dirty()
 }
 
 // draw_clip_tri - прямоугольный треугольник прямым углом в верхний угол
-// (right - правый); on - белая обводка в 1 пиксель
-fn draw_clip_tri(mut hist vgui.Canvas, right bool, c vgui.Color, on bool) {
+// (right - правый); on - обводка ring в 1 пиксель
+fn draw_clip_tri(mut hist vgui.Canvas, right bool, c vgui.Color, on bool, ring vgui.Color) {
 	w := hist.width
 	for y in 0 .. clip_tri_h {
 		// ширина строки убывает от катета к вершине
 		n := clip_tri_w - y * clip_tri_w / clip_tri_h
 		for i in 0 .. n {
 			edge := y == 0 || i == 0 || i == n - 1 || y == clip_tri_h - 1
-			col := if on && edge { vgui.Color{255, 255, 255, 255} } else { c }
+			col := if on && edge { ring } else { c }
 			x := if right { w - 1 - clip_tri_pad - i } else { clip_tri_pad + i }
 			k := ((clip_tri_pad + y) * w + x) * 4
 			if k < 0 || k + 3 >= hist.pixels.len {

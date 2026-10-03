@@ -63,6 +63,12 @@ mut:
 	hist_r []u32
 	hist_g []u32
 	hist_b []u32
+	// Гистограмма на экране (themes.v перерисовывает её при смене темы):
+	// холст, показанные счётчики R, G, B (пусто - чистый фон), есть ли
+	// на ней треугольники клипа
+	hist_cv    &vgui.Canvas = unsafe { nil }
+	hist_shown [][]u32
+	hist_marks bool
 	// История правок (history.v): записи, текущая, время последней записи
 	// для склейки шагов (0 - не склеивать), особое название следующей записи
 	history    []HistEntry
@@ -382,7 +388,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	}
 	// В режиме кадрирования гистограмма - только по рамке (без того, что
 	// будет отрезано, и без пустых углов поворота)
-	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut hist, if st.crop_mode {
+	st.hist_r, st.hist_g, st.hist_b = render_histogram(mut st, mut hist, if st.crop_mode {
 		box_pixels(st, cv.pixels, cv.width, cv.height)
 	} else {
 		cv.pixels
@@ -390,9 +396,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	update_curve_histogram(mut st)
 	// Пересветы и провалы (clipping.v): треугольники по гистограмме
 	// результата, подсветка - поверх уже посчитанной гистограммы
-	hi_seen := st.hist_r[255] + st.hist_g[255] + st.hist_b[255] > 0
-	lo_seen := st.hist_r[0] + st.hist_g[0] + st.hist_b[0] > 0
-	draw_clip_marks(mut hist, hi_seen, lo_seen, st.clip_hi, st.clip_lo)
+	show_clip_marks(mut st, mut hist)
 	if !st.haze_show {
 		mark_clipping(mut cv.pixels, st.clip_hi, st.clip_lo)
 	}
@@ -689,7 +693,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
 // (RGBA-буфер холста). Сэмплируется каждый второй пиксель - на форму
 // гистограммы это не влияет, а стоимость вдвое ниже.
-fn render_histogram(mut hist vgui.Canvas, pixels []u8) ([]u32, []u32, []u32) {
+fn render_histogram(mut st State, mut hist vgui.Canvas, pixels []u8) ([]u32, []u32, []u32) {
 	mut hr := []u32{len: 256}
 	mut hg := []u32{len: 256}
 	mut hb := []u32{len: 256}
@@ -705,6 +709,15 @@ fn render_histogram(mut hist vgui.Canvas, pixels []u8) ([]u32, []u32, []u32) {
 			s += 8
 		}
 	}
+	st.hist_shown = [hr, hg, hb]
+	st.hist_marks = false
+	draw_histogram(mut hist, hr, hg, hb, st.pal)
+	return hr, hg, hb
+}
+
+// draw_histogram - столбцы трёх каналов в цветах палитры темы: цвет
+// пикселя - по маске каналов, чей столбец его накрывает
+fn draw_histogram(mut hist vgui.Canvas, hr []u32, hg []u32, hb []u32, p Palette) {
 	mut mx := u32(1)
 	for i in 0 .. 256 {
 		if hr[i] > mx {
@@ -720,23 +733,68 @@ fn render_histogram(mut hist vgui.Canvas, pixels []u8) ([]u32, []u32, []u32) {
 	w := hist.width // 256: колонка = бин
 	h := hist.height
 	unsafe {
-		mut p := &u8(hist.pixels.data)
+		mut dst := &u8(hist.pixels.data)
 		for x in 0 .. w {
 			th_r := int(u64(hr[x]) * u64(h) / u64(mx))
 			th_g := int(u64(hg[x]) * u64(h) / u64(mx))
 			th_b := int(u64(hb[x]) * u64(h) / u64(mx))
 			for y in 0 .. h {
 				up := h - y // высота столбца, накрывающего строку y
-				mut d := p + (y * w + x) * 4
-				d[0] = if th_r >= up { u8(224) } else { u8(16) }
-				d[1] = if th_g >= up { u8(214) } else { u8(16) }
-				d[2] = if th_b >= up { u8(234) } else { u8(18) }
+				m := (if th_r >= up { 1 } else { 0 }) | (if th_g >= up { 2 } else { 0 }) | (if th_b >= up {
+					4
+				} else {
+					0
+				})
+				c := p.hist[m]
+				mut d := dst + (y * w + x) * 4
+				d[0] = c.r
+				d[1] = c.g
+				d[2] = c.b
 				d[3] = 255
 			}
 		}
 	}
 	hist.mark_dirty()
-	return hr, hg, hb
+}
+
+// clear_histogram - пустая гистограмма (кадр закрыт) - фон темы
+fn clear_histogram(mut st State, mut hist vgui.Canvas) {
+	st.hist_shown = [][]u32{}
+	st.hist_marks = false
+	hist.fill(st.pal.hist[0])
+	hist.mark_dirty()
+}
+
+// show_clip_marks - треугольники клипа по показанной гистограмме
+fn show_clip_marks(mut st State, mut hist vgui.Canvas) {
+	if st.hist_shown.len != 3 {
+		return
+	}
+	hr := st.hist_shown[0]
+	hg := st.hist_shown[1]
+	hb := st.hist_shown[2]
+	hi_seen := hr[255] + hg[255] + hb[255] > 0
+	lo_seen := hr[0] + hg[0] + hb[0] > 0
+	draw_clip_marks(mut hist, hi_seen, lo_seen, st.clip_hi, st.clip_lo, st.pal)
+	st.hist_marks = true
+}
+
+// repaint_histogram - перерисовать показанную гистограмму в цветах
+// текущей палитры (смена темы)
+fn repaint_histogram(mut st State) {
+	if isnil(st.hist_cv) {
+		return
+	}
+	mut hist := st.hist_cv
+	if st.hist_shown.len != 3 {
+		clear_histogram(mut st, mut hist)
+		return
+	}
+	marks := st.hist_marks
+	draw_histogram(mut hist, st.hist_shown[0], st.hist_shown[1], st.hist_shown[2], st.pal)
+	if marks {
+		show_clip_marks(mut st, mut hist)
+	}
 }
 
 // auto_exposure_ev подбирает экспозицию по линейному превью: медиана
@@ -1291,7 +1349,8 @@ fn main() {
 	hist.stretch = true
 	hist.set_wheel_zoom(false)
 	hist.set_pan_buttons(0)
-	hist.fill(vgui.Color{16, 16, 18, 255})
+	hist.fill(st.pal.hist[0])
+	st.hist_cv = hist
 	// Треугольники в верхних углах (clipping.v): левый - провалы, правый -
 	// пересветы; щелчок включает/выключает показ своего края
 	hist.take_keys = false
@@ -2063,7 +2122,7 @@ fn main() {
 		}
 		cv.pixels = pv.pix
 		cv.mark_dirty()
-		render_histogram(mut hist, cv.pixels)
+		render_histogram(mut st, mut hist, cv.pixels)
 		show_viewer(mut cv, mut placeholder)
 		sync_view_bg(mut st)
 	}
@@ -2269,8 +2328,7 @@ fn main() {
 		st.frame_idx = -1
 		lens_lb.text = ''
 		lens_cb.enabled = false
-		hist.fill(vgui.Color{16, 16, 18, 255})
-		hist.mark_dirty()
+		clear_histogram(mut st, mut hist)
 		show_placeholder(mut cv, mut placeholder)
 		sync_view_bg(mut st)
 	}

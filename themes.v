@@ -6,8 +6,10 @@ module main
 // подписи, ленту, историю, заглушку) пересчитывает apply_theme из
 // палитры Palette, выведенной из темы.
 //
-// Не зависят от темы: гистограмма и холст превью (это данные снимка),
-// фон вокруг снимка (выбирается отдельно - «Фон вокруг снимка»).
+// Гистограмма - в цветах темы (фон, столбцы каналов, треугольники
+// клипа), перерисовывается при смене. Не зависят от темы: холст превью
+// (это данные снимка), фон вокруг снимка (выбирается отдельно - «Фон
+// вокруг снимка»).
 import vgui
 
 const theme_keys = ['dark', 'light', 'monokai', 'win10', 'win10_dark', 'win11', 'win11_dark',
@@ -52,6 +54,11 @@ struct Palette {
 	secondary vgui.Color // обычные подписи (имена кадров, записи истории, профиль)
 	hint      vgui.Color // подсказки
 	disabled  vgui.Color // отменённые записи истории
+	// Гистограмма: цвет по маске каналов, чей столбец накрывает пиксель
+	// (бит 0 - R, 1 - G, 2 - B): [0] - фон, [7] - все три
+	hist      [8]vgui.Color
+	clip_idle vgui.Color // треугольник клипа, когда клипа нет
+	clip_ring vgui.Color // обводка треугольника при включённом показе
 }
 
 fn make_palette(th vgui.Theme) Palette {
@@ -66,7 +73,34 @@ fn make_palette(th vgui.Theme) Palette {
 		secondary: th.text_secondary
 		hint:      th.text_hint
 		disabled:  th.text_disabled
+		hist:      hist_colors(th, dark)
+		clip_idle: if dark { vgui.Color{95, 95, 100, 255} } else { vgui.Color{190, 190, 195, 255} }
+		clip_ring: if dark { vgui.Color{255, 255, 255, 255} } else { th.text_primary }
 	}
+}
+
+// hist_colors - цвета гистограммы под тему. В тёмной - сложение на
+// почти чёрном фоне: канал столбца светлый, иначе канал фона (все три -
+// почти белый). В светлой сложение не работает (белое на белом) -
+// готовые цвета на фоне полей ввода: каналы, их смеси, все три - серый.
+fn hist_colors(th vgui.Theme, dark bool) [8]vgui.Color {
+	if dark {
+		bg := th.bg.darken(0.055)
+		mut c := [8]vgui.Color{}
+		for m in 0 .. 8 {
+			c[m] = vgui.Color{
+				r: if m & 1 != 0 { u8(224) } else { bg.r }
+				g: if m & 2 != 0 { u8(214) } else { bg.g }
+				b: if m & 4 != 0 { u8(234) } else { bg.b }
+				a: 255
+			}
+		}
+		return c
+	}
+	return [th.input_bg, vgui.Color{220, 70, 70, 255}, vgui.Color{70, 170, 80, 255},
+		vgui.Color{215, 180, 50, 255}, vgui.Color{70, 110, 225, 255},
+		vgui.Color{185, 85, 200, 255}, vgui.Color{50, 170, 185, 255},
+		vgui.Color{125, 125, 130, 255}]!
 }
 
 // hue - насыщенный цвет подписи (HSL, каналы кривых) под тему: в светлой
@@ -153,4 +187,5 @@ fn paint_ui(mut st State, th vgui.Theme) {
 	sync_strip(mut st)
 	refresh_history(mut st)
 	sync_curve_editor(mut st)
+	repaint_histogram(mut st)
 }

@@ -46,16 +46,43 @@ fn test_clip_hit_and_marks() {
 	hist.fill(vgui.Color{16, 16, 18, 255})
 	// Есть пересвет, показ провалов включён: правый - красный, левый -
 	// серый с белой обводкой
-	draw_clip_marks(mut hist, true, false, false, true)
+	dp := make_palette(vgui.dark_theme())
+	draw_clip_marks(mut hist, true, false, false, true, dp)
 	at := fn [hist] (x int, y int) []u8 {
 		k := (y * 256 + x) * 4
 		return hist.pixels[k..k + 3]
 	}
 	inner := clip_tri_pad + 2
-	assert at(inner, inner) == [clip_idle_color.r, clip_idle_color.g, clip_idle_color.b]
+	assert at(inner, inner) == [dp.clip_idle.r, dp.clip_idle.g, dp.clip_idle.b]
 	assert at(clip_tri_pad, clip_tri_pad) == [u8(255), 255, 255]
 	assert at(255 - inner, inner) == [clip_hi_color.r, clip_hi_color.g, clip_hi_color.b]
 	assert at(255 - clip_tri_pad, clip_tri_pad) == [clip_hi_color.r, clip_hi_color.g,
 		clip_hi_color.b]
 	assert at(128, 50) == [u8(16), 16, 18]
+}
+
+// Цвета гистограммы под тему: в тёмной - прежние (почти чёрный фон,
+// почти белое пересечение каналов), в светлой - фон светлый, а столбцы
+// и обводка треугольника - тёмнее фона (видны)
+fn test_hist_theme_colors() {
+	dp := make_palette(vgui.dark_theme())
+	assert dp.hist[0].r < 30 && dp.hist[7].r > 200
+	assert dp.hist[1] == vgui.Color{224, dp.hist[0].g, dp.hist[0].b, 255}
+	lp := make_palette(vgui.light_theme())
+	bg := lp.hist[0]
+	assert bg.r > 200 && bg.g > 200 && bg.b > 200
+	for m in 1 .. 8 {
+		c := lp.hist[m]
+		assert int(c.r) + c.g + c.b < int(bg.r) + bg.g + bg.b - 150
+	}
+	assert int(lp.clip_ring.r) + lp.clip_ring.g + lp.clip_ring.b < 200
+	// Отрисовка: столбец красного канала - цветом R палитры, фон - фоном
+	mut hist := vgui.canvas(256, 100)
+	mut hr := []u32{len: 256}
+	hr[100] = 10
+	z := []u32{len: 256}
+	draw_histogram(mut hist, hr, z, z, lp)
+	k := (99 * 256 + 100) * 4
+	assert hist.pixels[k..k + 3] == [lp.hist[1].r, lp.hist[1].g, lp.hist[1].b]
+	assert hist.pixels[0..3] == [bg.r, bg.g, bg.b]
 }
