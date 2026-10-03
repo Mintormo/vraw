@@ -1,6 +1,8 @@
 module lens
 
 import math
+import time
+import pipeline { Region }
 
 // Тесты требуют базы lensfun с профилем RF 24-50 (системная база 0.3.4
 // его ещё не содержит - нужны обновления в ~/.local/share/lensfun).
@@ -232,4 +234,85 @@ fn test_match_frame() {
 	full := mf.with_strength(1)
 	assert full[ei * 3] > mf.lin[ei * 3] + 300
 	assert math.abs(int(full[ci * 3]) - int(mf.lin[ci * 3])) < 30
+}
+
+// Фрагмент кадра (настоящий 1:1): виньетирование и дисторсия + TCA по
+// прямоугольнику побитово равны той же области полного прохода.
+fn lens_noise(w int, h int) []u16 {
+	mut b := []u16{len: w * h * 3}
+	mut s := u32(99)
+	for i in 0 .. b.len {
+		s = s * 1664525 + 1013904223
+		b[i] = u16(s >> 18) + 1000
+	}
+	return b
+}
+
+fn lens_crop(src []u16, w int, r Region) []u16 {
+	mut out := []u16{len: r.w * r.h * 3}
+	for j in 0 .. r.h {
+		for i in 0 .. r.w * 3 {
+			out[j * r.w * 3 + i] = src[((r.y + j) * w + r.x) * 3 + i]
+		}
+	}
+	return out
+}
+
+fn test_region_matches_full() {
+	mut c := find('Canon', 'EOS R8', 'RF24-50mm F4.5-6.3 IS STM') or {
+		eprintln('ПРОПУСК: профиль RF 24-50 не найден в базе lensfun')
+		return
+	}
+	w := 600
+	h := 400
+	src := lens_noise(w, h)
+	// Полный проход: виньетирование, затем ремап
+	mut full := src.clone()
+	assert c.vignetting(unsafe { &u16(full.data) }, w, h, 24.0, 5.6, vign_default)
+	assert c.geometry(unsafe { &u16(full.data) }, w, h, 24.0)
+
+	lut := c.vign_lut(w, h, 24.0, 5.6, vign_default) or { panic('нет профиля') }
+	mut p := c.geometry_plan(w, h, 24.0) or { panic('нет геометрии') }
+	for r in [Region{0, 0, w, h}, Region{50, 30, 120, 80}, Region{0, 0, 40, 25},
+		Region{w - 70, h - 50, 70, 50}, Region{300, 0, 1, h}] {
+		sb := p.source_box(r)
+		assert sb.w > 0 && sb.h > 0
+		assert sb.x >= 0 && sb.y >= 0 && sb.x + sb.w <= w && sb.y + sb.h <= h
+		// Кусок источника, виньетирование по куску, ремап выхода r
+		mut piece := lens_crop(src, w, sb)
+		vign_apply_region(unsafe { &u16(piece.data) }, sb, w, h, lut)
+		mut got := []u16{len: r.w * r.h * 3}
+		p.remap(unsafe { &u16(piece.data) }, sb, r, unsafe { &u16(got.data) })
+		assert got == lens_crop(full, w, r), 'r=${r} sb=${sb}'
+	}
+	p.free()
+	c.free()
+}
+
+// Цена фрагмента на полном кадре R8 (6000x4000), 1100x900 у края - замер,
+// без проверок скорости (машины разные)
+fn test_region_cost() {
+	mut c := find('Canon', 'EOS R8', 'RF24-50mm F4.5-6.3 IS STM') or { return }
+	w := 6000
+	h := 4000
+	src := []u16{len: w * h * 3, init: 5000}
+	mut sw := time.new_stopwatch()
+	lut := c.vign_lut(w, h, 24.0, 5.6, vign_default) or { panic('') }
+	t_lut := sw.elapsed().milliseconds()
+	sw.restart()
+	mut p := c.geometry_plan(w, h, 24.0) or { panic('') }
+	t_plan := sw.elapsed().milliseconds()
+	r := Region{4500, 2800, 1100, 900}
+	sw.restart()
+	sb := p.source_box(r)
+	t_box := sw.elapsed().milliseconds()
+	sw.restart()
+	mut piece := lens_crop(src, w, sb)
+	vign_apply_region(unsafe { &u16(piece.data) }, sb, w, h, lut)
+	mut got := []u16{len: r.w * r.h * 3}
+	p.remap(unsafe { &u16(piece.data) }, sb, r, unsafe { &u16(got.data) })
+	t_remap := sw.elapsed().milliseconds()
+	eprintln('фрагмент 1100x900 полного кадра: профиль виньетки ${t_lut} мс, план ${t_plan} мс, кусок ${t_box} мс, виньетка+ремап ${t_remap} мс')
+	p.free()
+	c.free()
 }

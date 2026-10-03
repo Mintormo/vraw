@@ -78,6 +78,7 @@ mut:
 	// Сайдкар правок (sidecar.v): путь (пусто - не писать), ошибка записи
 	// уже показана (не повторять на каждую правку)
 	side_path string
+	raw_path  string // открытый RAW (полный путь) - для фрагмента 1:1 (detail_ui.v)
 	side_err  bool
 	// Браузер папки (browser.v): кадры папки открытого файла, текущий,
 	// лента и полоса над ней, фоновый воркер миниатюр
@@ -193,6 +194,8 @@ mut:
 	wb_tint_sl  &vgui.Slider   = unsafe { nil }
 	wb_pick     bool
 	cv          &vgui.Canvas = unsafe { nil }
+	// Настоящий 1:1 - фрагмент полного кадра поверх превью (detail_ui.v)
+	dt &DetailCtl = unsafe { nil }
 	tone_fx     fn () = unsafe { nil }
 	// Удаление дымки: карта кадра по st.linear (считается при первой
 	// надобности, сбрасывается с каждым новым linear), показ карты вместо
@@ -374,6 +377,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	// снимка (последняя посчитанная), подсветки клипа нет
 	if st.sharp_show || st.sharp_drag != .off {
 		cv.mark_dirty()
+		detail_refresh(mut st)
 		return
 	}
 	// В режиме кадрирования гистограмма - только по рамке (без того, что
@@ -396,6 +400,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	// До/после (compare.v): гистограмма и подсветка - у «после»
 	ba_apply(mut st, mut cv)
 	cv.mark_dirty()
+	detail_refresh(mut st)
 }
 
 // load_preview перепроявляет открытый RAW в линейное 16-битное превью
@@ -1262,6 +1267,7 @@ fn main() {
 
 	mut st := &State{}
 	st.settings = settings
+	st.dt = &DetailCtl{}
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = lens.load_db() or { unsafe { nil } }
@@ -1381,6 +1387,7 @@ fn main() {
 	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
 		crop_overlay(mut st, mut ctx)
 		ba_overlay(mut st, mut ctx) // шторка до/после
+		detail_watch(mut st) // настоящий 1:1: изменился вид - фрагмент
 	}
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
 		// Режим кадрирования (crop.v): рамка, ручки, линия горизонта
@@ -1982,6 +1989,7 @@ fn main() {
 		// указатель, освобождать нечего, просто забываем
 		st.corr = unsafe { nil }
 		st.file_gen++
+		detail_reset(mut st)
 		st.loading = true
 		ai_forget(mut st)
 		st.raw_pending = false
@@ -2004,6 +2012,7 @@ fn main() {
 		// Правки и история из сайдкара (производные поля снимков - по
 		// камерной кривой - заполнит on_load_done)
 		st.side_path = sidecar_path(path)
+		st.raw_path = path
 		st.side_err = false
 		st.load_msg = ''
 		side := load_sidecar(st.side_path) or {
@@ -2235,6 +2244,7 @@ fn main() {
 		}
 		st.corr = unsafe { nil }
 		st.file_gen++
+		detail_reset(mut st)
 		ai_forget(mut st)
 		st.raw_pending = false
 		st.dev_linear = []u16{}
@@ -2248,6 +2258,7 @@ fn main() {
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
 		st.side_path = ''
+		st.raw_path = ''
 		st.mark = Mark{}
 		set_cam_color(mut st, pipeline.CamColor{})
 		set_wb_pick(mut st, false)
@@ -2950,6 +2961,7 @@ fn main() {
 		st.dev.close()
 	}
 	wait_prep(mut st) // воркер пользуется профилем из st.lens_db
+	wait_details(mut st) // и фрагмент 1:1 - тоже
 	wait_thumbs(mut st)
 	wait_loads(mut st)
 	// Потоки сохранения уже дождались выше (повторный wait того же потока

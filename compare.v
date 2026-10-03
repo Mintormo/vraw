@@ -150,10 +150,12 @@ fn ba_refresh(mut st State) {
 			unsafe { vmemcpy(cv.pixels.data, st.ba_after.data, n) }
 			st.ba_after = []u8{}
 			cv.mark_dirty()
+			detail_refresh(mut st) // фрагмент 1:1 - снова поверх
 			return
 		}
 		ba_render(mut st)
 		ba_compose(mut st, mut cv)
+		detail_refresh(mut st) // до/после - без фрагмента 1:1
 		return
 	}
 	if !isnil(st.tone_fx) {
@@ -259,12 +261,14 @@ fn zoom_at(mut cv vgui.Canvas, bx f32, by f32, z f32) {
 }
 
 // toggle_zoom - вписан (или другой масштаб) - 100% в точку (bx, by),
-// 100% - обратно «вписать»
+// 100% - обратно «вписать». 100% - настоящие: пиксель полного кадра на
+// пиксель экрана (зум холста превью zoom_one), поверх - фрагмент полного
+// кадра (detail_ui.v)
 fn toggle_zoom(mut cv vgui.Canvas, bx f32, by f32) {
-	if !cv.auto_fit && cv.zoom == 1.0 {
+	if !cv.auto_fit && cv.zoom == zoom_one {
 		cv.fit_to_view()
 	} else {
-		zoom_at(mut cv, bx, by, 1.0)
+		zoom_at(mut cv, bx, by, zoom_one)
 	}
 }
 

@@ -242,10 +242,11 @@ fn test_zoom_at_point() {
 	cv.disp_h = 400
 	sx, sy := cv.buf_to_screen(1500, 400)
 	toggle_zoom(mut cv, 1500, 400)
-	assert !cv.auto_fit && cv.zoom == 1.0
+	// 100% - настоящие: пиксель полного кадра (зум превью half-size - 2)
+	assert !cv.auto_fit && cv.zoom == zoom_one
 	// Точка (1500, 400) после 100% - там же на экране
-	nx := cv.bounds.x - cv.scroll_x + 1500
-	ny := cv.bounds.y - cv.scroll_y + 400
+	nx := cv.bounds.x - cv.scroll_x + 1500 * zoom_one
+	ny := cv.bounds.y - cv.scroll_y + 400 * zoom_one
 	assert nx == sx && ny == sy
 	toggle_zoom(mut cv, 0, 0)
 	assert cv.auto_fit

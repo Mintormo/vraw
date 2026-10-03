@@ -2,6 +2,7 @@ module lens
 
 import math
 import runtime
+import pipeline { Region }
 
 // Обёртка над lensfun: поиск профиля объектива по метаданным кадра и
 // коррекция виньетирования на линейном 16-битном RGB-буфере.
@@ -191,14 +192,24 @@ pub fn find(cam_maker string, cam_model string, lens_model string) ?&Corrector {
 // даёт чёрные углы. Поэтому усиление снимается в f32-буфер, вырожденные
 // значения замещаются максимальным корректным, умножаем сами.
 pub fn (c &Corrector) vignetting(buf &u16, w int, h int, focal f32, aperture f32, strength f32) bool {
+	lut := c.vign_lut(w, h, focal, aperture, strength) or { return false }
+	apply_radial_gain(buf, Region{0, 0, w, h}, w, h, lut)
+	return true
+}
+
+// vign_lut - радиальный профиль усиления кадра w x h (то, что vignetting
+// умножает на буфер); none - в профиле нет данных виньетирования. Для
+// фрагмента полного кадра: профиль один на кадр, умножение -
+// vign_apply_region.
+pub fn (c &Corrector) vign_lut(w int, h int, focal f32, aperture f32, strength f32) ?[]f32 {
 	if isnil(c.lens) || w <= 0 || h <= 0 {
-		return false
+		return none
 	}
 	// Диафрагма бывает не записана (мех. объективы) - берём среднюю
 	ap := if aperture > 0.1 { aperture } else { f32(8.0) }
 	m := C.lf_modifier_new(c.lens, c.crop, w, h)
 	if isnil(m) {
-		return false
+		return none
 	}
 	// distance: расстояние до объекта из EXIF почти никогда не доступно,
 	// 1000 м - стандартный дефолт (влияние на виньетку минимально).
@@ -207,7 +218,7 @@ pub fn (c &Corrector) vignetting(buf &u16, w int, h int, focal f32, aperture f32
 		lf_rectilinear, lf_modify_vignetting, 0)
 	if got & lf_modify_vignetting == 0 {
 		C.lf_modifier_destroy(m)
-		return false
+		return none
 	}
 	// Карта усиления: коррекция единичного буфера = 1/затемнение
 	mut gain := []f32{len: w * h, init: 1.0}
@@ -215,7 +226,7 @@ pub fn (c &Corrector) vignetting(buf &u16, w int, h int, focal f32, aperture f32
 		lf_cr_intensity, w * int(sizeof(f32)))
 	C.lf_modifier_destroy(m)
 	if ok == 0 {
-		return false
+		return none
 	}
 	mut lut := vign_profile(gain, w, h, vign_knee, vign_cap)
 	if strength != 1 {
@@ -223,8 +234,14 @@ pub fn (c &Corrector) vignetting(buf &u16, w int, h int, focal f32, aperture f32
 			lut[i] = math.powf(lut[i], strength)
 		}
 	}
-	apply_radial_gain(buf, w, h, lut)
-	return true
+	return lut
+}
+
+// vign_apply_region - виньетирование куска r кадра w x h: buf - r.w x r.h
+// RGB; усиление - по расстоянию от центра ПОЛНОГО кадра, lut - vign_lut
+// того же кадра. Побитово равно той же области после vignetting.
+pub fn vign_apply_region(buf &u16, r Region, w int, h int, lut []f32) {
+	apply_radial_gain(buf, r, w, h, lut)
 }
 
 // vign_profile - радиальный профиль усиления (vign_lut_n точек от центра
@@ -281,29 +298,31 @@ fn soft_cap(g f32, knee f32, cap f32) f32 {
 
 // apply_radial_gain - умножить RGB-буфер на усиление lut по расстоянию
 // пикселя от центра (доля полудиагонали), линейная интерполяция профиля.
+// buf - кусок r кадра w x h (весь кадр - r = {0, 0, w, h}).
 // Строки - в потоки (корень на каждый пиксель полного кадра).
-fn apply_radial_gain(buf &u16, w int, h int, lut []f32) {
+fn apply_radial_gain(buf &u16, r Region, w int, h int, lut []f32) {
 	nt := imin(runtime.nr_cpus(), 16)
-	step := (h + nt - 1) / nt
+	step := (r.h + nt - 1) / nt
 	mut ts := []thread{}
-	for y0 := 0; y0 < h; y0 += step {
-		ts << spawn radial_rows(buf, w, h, lut, y0, imin(h, y0 + step))
+	for y0 := 0; y0 < r.h; y0 += step {
+		ts << spawn radial_rows(buf, r, w, h, lut, y0, imin(r.h, y0 + step))
 	}
 	for t in ts {
 		t.wait()
 	}
 }
 
-fn radial_rows(buf &u16, w int, h int, lut []f32, y0 int, y1 int) {
+// radial_rows - строки y0..y1 куска r (координаты кадра - r.x + i, r.y + j)
+fn radial_rows(buf &u16, r Region, w int, h int, lut []f32, y0 int, y1 int) {
 	cx := f64(w - 1) / 2
 	cy := f64(h - 1) / 2
 	rmax := math.sqrt(cx * cx + cy * cy)
 	k := f64(vign_lut_n - 1) / rmax
 	for y in y0 .. y1 {
-		dy := f64(y) - cy
+		dy := f64(r.y + y) - cy
 		unsafe {
-			mut p := &u16(buf) + y * w * 3
-			for x in 0 .. w {
+			mut p := &u16(buf) + y * r.w * 3
+			for x in r.x .. r.x + r.w {
 				dx := f64(x) - cx
 				f := math.sqrt(dx * dx + dy * dy) * k
 				mut i := int(f)
@@ -326,11 +345,12 @@ fn imin(a int, b int) int {
 	return if a < b { a } else { b }
 }
 
-// bilinear - выборка канала ch из плотного RGB-буфера u16 в дробной
-// точке (x, y) с билинейной интерполяцией; координаты вне кадра
-// прижимаются к краю.
+// bilinear - выборка канала ch кадра w x h в дробной точке (x, y) с
+// билинейной интерполяцией; координаты вне кадра прижимаются к краю.
+// s - кусок sb кадра (RGB, sb.w x sb.h), в нём должны быть все соседи
+// выборки (весь кадр - sb = {0, 0, w, h}).
 @[inline]
-fn bilinear(s &u16, w int, h int, ch int, x f32, y f32) u16 {
+fn bilinear(s &u16, sb Region, w int, h int, ch int, x f32, y f32) u16 {
 	mut fx := x
 	mut fy := y
 	if !(fx >= 0) { // ловит и NaN
@@ -349,11 +369,13 @@ fn bilinear(s &u16, w int, h int, ch int, x f32, y f32) u16 {
 	y1 := if y0 < h - 1 { y0 + 1 } else { y0 }
 	ax := fx - f32(x0)
 	ay := fy - f32(y0)
+	r0 := (y0 - sb.y) * sb.w - sb.x
+	r1 := (y1 - sb.y) * sb.w - sb.x
 	unsafe {
-		p00 := f32(s[(y0 * w + x0) * 3 + ch])
-		p10 := f32(s[(y0 * w + x1) * 3 + ch])
-		p01 := f32(s[(y1 * w + x0) * 3 + ch])
-		p11 := f32(s[(y1 * w + x1) * 3 + ch])
+		p00 := f32(s[(r0 + x0) * 3 + ch])
+		p10 := f32(s[(r0 + x1) * 3 + ch])
+		p01 := f32(s[(r1 + x0) * 3 + ch])
+		p11 := f32(s[(r1 + x1) * 3 + ch])
 		v := p00 * (1 - ax) * (1 - ay) + p10 * ax * (1 - ay) + p01 * (1 - ax) * ay +
 			p11 * ax * ay
 		return u16(v + 0.5)
@@ -371,10 +393,38 @@ fn bilinear(s &u16, w int, h int, ch int, x f32, y f32) u16 {
 // Вызывать ПОСЛЕ vignetting(): виньетка привязана к исходной геометрии
 // сенсора, править её нужно до перемещения пикселей (порядок lensfun).
 pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
-	if isnil(c.lens) || w <= 0 || h <= 0 {
-		return false
+	mut p := c.geometry_plan(w, h, focal) or { return false }
+	defer {
+		p.free()
 	}
-	mut m := c.geometry_modifier(w, h, focal, 0.0) or { return false }
+	// Ремап читает произвольные точки источника - нужна его копия.
+	mut src := []u16{len: w * h * 3}
+	unsafe { vmemcpy(src.data, buf, u64(w) * u64(h) * 3 * 2) }
+	full := Region{0, 0, w, h}
+	p.remap(unsafe { &u16(src.data) }, full, full, buf)
+	return true
+}
+
+// GeomPlan - дисторсия + TCA кадра w x h с подобранным масштабом: одна на
+// кадр, ремап - любого прямоугольника (remap). Для фрагмента полного
+// кадра: source_box - какой кусок источника нужен, remap - сам ремап.
+// Освобождать - free().
+@[heap]
+pub struct GeomPlan {
+mut:
+	m &C.lfModifier = unsafe { nil }
+pub:
+	w int
+	h int
+}
+
+// geometry_plan - план дисторсии + TCA кадра w x h; none - в профиле нет
+// данных геометрии
+pub fn (c &Corrector) geometry_plan(w int, h int, focal f32) ?&GeomPlan {
+	if isnil(c.lens) || w <= 0 || h <= 0 {
+		return none
+	}
+	mut m := c.geometry_modifier(w, h, focal, 0.0)?
 	// Авто-масштаб lensfun приблизительный (так и сказано в lensfun.h):
 	// бывает чуть меньше нужного, и край кадра берёт точки за пределами
 	// источника - после клампа это 3-4 повторённых крайних столбца.
@@ -387,35 +437,100 @@ pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
 		}
 		scale := C.lf_modifier_get_auto_scale(m, 0) * over * 1.001
 		C.lf_modifier_destroy(m)
-		m = c.geometry_modifier(w, h, focal, scale) or { return false }
+		m = c.geometry_modifier(w, h, focal, scale)?
 	}
-	// Ремап читает произвольные точки источника - нужна его копия.
-	mut src := []u16{len: w * h * 3}
-	unsafe { vmemcpy(src.data, buf, u64(w) * u64(h) * 3 * 2) }
+	return &GeomPlan{
+		m: m
+		w: w
+		h: h
+	}
+}
+
+pub fn (mut p GeomPlan) free() {
+	if !isnil(p.m) {
+		C.lf_modifier_destroy(p.m)
+		p.m = unsafe { nil }
+	}
+}
+
+// source_box - кусок источника, из которого remap читает выход r: все
+// точки выборки трёх каналов с соседями билинейной интерполяции (после
+// прижатия к кадру, как в bilinear)
+pub fn (p &GeomPlan) source_box(r Region) Region {
+	if r.w <= 0 || r.h <= 0 {
+		return Region{}
+	}
+	// Координаты - всегда полной строки (см. row_coords)
+	mut coords := []f32{len: p.w * 2 * 3}
+	mut x0 := p.w - 1
+	mut y0 := p.h - 1
+	mut x1 := 0
+	mut y1 := 0
+	fw := f32(p.w - 1)
+	fh := f32(p.h - 1)
+	for y in r.y .. r.y + r.h {
+		if !p.row_coords(y, mut coords) {
+			continue
+		}
+		for i := r.x * 6; i < (r.x + r.w) * 6; i += 2 {
+			fx := clamp_f(coords[i], fw)
+			fy := clamp_f(coords[i + 1], fh)
+			ix := int(fx)
+			iy := int(fy)
+			x0 = imin(x0, ix)
+			y0 = imin(y0, iy)
+			x1 = imax(x1, imin(ix + 1, p.w - 1))
+			y1 = imax(y1, imin(iy + 1, p.h - 1))
+		}
+	}
+	if x1 < x0 || y1 < y0 {
+		// lensfun не дал координат - выход читает себя (как полный ремап)
+		return r
+	}
+	return Region{x0, y0, x1 - x0 + 1, y1 - y0 + 1}
+}
+
+// remap - выход r (кадр w x h после дисторсии и TCA) в dst (r.w x r.h
+// RGB) из куска источника sb (обычно source_box(r) или шире).
+// Побитово равно той же области полного ремапа.
+pub fn (p &GeomPlan) remap(src &u16, sb Region, r Region, dst &u16) {
 	// Координаты построчно (на весь кадр сразу было бы w*h*24 байт -
 	// сотни МБ на полном кадре): по 3 пары (x,y) на пиксель - R, G, B.
-	mut coords := []f32{len: w * 2 * 3}
-	sp := unsafe { &u16(src.data) }
+	mut coords := []f32{len: p.w * 2 * 3}
 	unsafe {
-		mut dst := &u16(buf)
-		for y in 0 .. h {
-			if C.lf_modifier_apply_subpixel_geometry_distortion(m, 0.0, f32(y), w, 1,
-				&f32(coords.data)) == 0 {
-				dst += w * 3
+		mut d := &u16(dst)
+		for y in r.y .. r.y + r.h {
+			if !p.row_coords(y, mut coords) {
+				d += r.w * 3
 				continue
 			}
-			mut cp := &f32(coords.data)
-			for _ in 0 .. w {
+			mut cp := &f32(coords.data) + r.x * 6
+			for _ in 0 .. r.w {
 				for ch in 0 .. 3 {
-					dst[ch] = bilinear(sp, w, h, ch, cp[0], cp[1])
+					d[ch] = bilinear(src, sb, p.w, p.h, ch, cp[0], cp[1])
 					cp += 2
 				}
-				dst += 3
+				d += 3
 			}
 		}
 	}
-	C.lf_modifier_destroy(m)
-	return true
+}
+
+// row_coords - координаты источника ВСЕЙ строки y кадра (coords - w * 6),
+// фрагмент берёт из них свой кусок. Не короче: lensfun считает точки
+// строки накоплением от начальной (строка с x > 0 расходится с полной до
+// 0.2 px на RF 24-50) и блоками по 4 точки с отдельным хвостом (у строки
+// другой длины иначе считаются последние точки) - фрагмент разошёлся бы
+// с полным ремапом.
+fn (p &GeomPlan) row_coords(y int, mut coords []f32) bool {
+	return C.lf_modifier_apply_subpixel_geometry_distortion(p.m, 0.0, f32(y), p.w, 1,
+		&f32(coords.data)) != 0
+}
+
+// clamp_f - прижатие координаты к [0, hi] (NaN - к нулю), как в bilinear
+@[inline]
+fn clamp_f(v f32, hi f32) f32 {
+	return if !(v >= 0) { f32(0) } else if v > hi { hi } else { v }
 }
 
 // geometry_modifier - модификатор дисторсии + TCA; scale 0 - авто-масштаб
