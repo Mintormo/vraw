@@ -43,14 +43,9 @@ fn zlib_compress(data []u8) ![]u8 {
 	return res
 }
 
-struct TiffTag {
-	tag   int
-	typ   int // 3 - SHORT, 4 - LONG, 5 - RATIONAL, 2 - ASCII
-	count int
-	value u32 // значение (влезает в 4 байта) или смещение данных
-}
-
-fn encode_tiff(w int, h int, rgb []u8) ![]u8 {
+// encode_tiff - TIFF кадра; exif не nil - теги EXIF в IFD кадра и
+// Exif IFD за ним (exif.v)
+fn encode_tiff(w int, h int, rgb []u8, exif &Exif) ![]u8 {
 	row := w * 3
 	strips := (h + tiff_rows_per_strip - 1) / tiff_rows_per_strip
 	mut out := []u8{cap: rgb.len / 2}
@@ -82,64 +77,30 @@ fn encode_tiff(w int, h int, rgb []u8) ![]u8 {
 			out << 0 // данные TIFF - по чётным смещениям
 		}
 	}
-	// Данные тегов, не влезающие в 4 байта
-	bps_at := u32(out.len)
-	for _ in 0 .. 3 {
-		put_u16_le(mut out, 8)
-	}
-	res_at := u32(out.len) // 72/1 точек на дюйм - для X и Y одно значение
-	put_u32_le(mut out, 72)
-	put_u32_le(mut out, 1)
-	soft_at := u32(out.len)
-	out << 'vraw'.bytes()
-	out << 0
-	if out.len % 2 == 1 {
-		out << 0
-	}
-	mut off_val := offsets[0]
-	mut cnt_val := counts[0]
-	if strips > 1 {
-		off_val = u32(out.len)
-		for v in offsets {
-			put_u32_le(mut out, v)
-		}
-		cnt_val = u32(out.len)
-		for v in counts {
-			put_u32_le(mut out, v)
-		}
-	}
-	// IFD: теги строго по возрастанию номера
-	tags := [
-		TiffTag{256, 4, 1, u32(w)}, // ImageWidth
-		TiffTag{257, 4, 1, u32(h)}, // ImageLength
-		TiffTag{258, 3, 3, bps_at}, // BitsPerSample 8,8,8
-		TiffTag{259, 3, 1, 8}, // Compression: Deflate
-		TiffTag{262, 3, 1, 2}, // Photometric: RGB
-		TiffTag{273, 4, strips, off_val}, // StripOffsets
-		TiffTag{277, 3, 1, 3}, // SamplesPerPixel
-		TiffTag{278, 4, 1, tiff_rows_per_strip}, // RowsPerStrip
-		TiffTag{279, 4, strips, cnt_val}, // StripByteCounts
-		TiffTag{282, 5, 1, res_at}, // XResolution
-		TiffTag{283, 5, 1, res_at}, // YResolution
-		TiffTag{284, 3, 1, 1}, // PlanarConfiguration: вперемешку
-		TiffTag{296, 3, 1, 2}, // ResolutionUnit: дюймы
-		TiffTag{305, 2, 5, soft_at}, // Software
-		TiffTag{317, 3, 1, 2}, // Predictor: горизонтальный
+	// IFD кадра (данные тегов, не влезающие в 4 байта, put_ifd кладёт
+	// следом); теги сортируются по номеру
+	mut tags := [
+		long_entry(256, u32(w)), // ImageWidth
+		long_entry(257, u32(h)), // ImageLength
+		shorts_entry(258, [8, 8, 8]), // BitsPerSample
+		short_entry(259, 8), // Compression: Deflate
+		short_entry(262, 2), // Photometric: RGB
+		longs_entry(273, offsets), // StripOffsets
+		short_entry(277, 3), // SamplesPerPixel
+		long_entry(278, tiff_rows_per_strip), // RowsPerStrip
+		longs_entry(279, counts), // StripByteCounts
+		rational_entry(282, 72, 1), // XResolution
+		rational_entry(283, 72, 1), // YResolution
+		short_entry(284, 1), // PlanarConfiguration: вперемешку
+		short_entry(296, 2), // ResolutionUnit: дюймы
+		short_entry(317, 2), // Predictor: горизонтальный
 	]
 	set_u32_le(mut out, 4, u32(out.len))
-	put_u16_le(mut out, tags.len)
-	for t in tags {
-		put_u16_le(mut out, t.tag)
-		put_u16_le(mut out, t.typ)
-		put_u32_le(mut out, u32(t.count))
-		if t.typ == 3 && t.count == 1 {
-			// SHORT прижимается к началу поля значения
-			put_u16_le(mut out, int(t.value))
-			put_u16_le(mut out, 0)
-		} else {
-			put_u32_le(mut out, t.value)
-		}
+	if isnil(exif) {
+		tags << ascii_entry(305, 'vraw') // Software
+		put_ifd(mut out, tags)
+	} else {
+		put_exif_ifds(mut out, exif, tags) // Software - из exif
 	}
-	put_u32_le(mut out, 0) // следующего IFD нет
 	return out
 }

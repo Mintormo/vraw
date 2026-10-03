@@ -220,9 +220,9 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut mode_lb := vgui.label('Режим')
 	mut mode_row := vgui.create_hbox_fill()
 	mode_row.set_spacing(6)
-	mode_row.add_fixed(mode_lb, lbl_w)
-	mode_row.add(cb, 1)
-	mode_row.add_fixed(pick, 26)
+	mode_row.add(mode_lb, min: lbl_w)
+	mode_row.add(cb, flex: 1)
+	mode_row.add(pick)
 
 	// Движение ползунка - режим «Свой» (список обновит fx); второе
 	// значение берётся из показанного (у «как снято» - камерного)
@@ -286,23 +286,23 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	mut temp_row := vgui.create_hbox_fill()
 	temp_row.set_spacing(6)
-	temp_row.add_fixed(temp.lb, lbl_w)
-	temp_row.add(temp.sl, 1)
-	temp_row.add_fixed(temp.vl, val_w)
-	temp_row.add_fixed(t_reset, 26)
+	temp_row.add(temp.lb, min: lbl_w)
+	temp_row.add(temp.sl, flex: 1)
+	temp_row.add(temp.vl, min: val_w)
+	temp_row.add(t_reset)
 	mut n_reset := reset_button(mut st, 'Как снято')
 	n_reset.on_click = fn [mut st] () {
 		set_wb(mut st, '', 0, 0, wb_names[0])
 	}
 	mut tint_row := vgui.create_hbox_fill()
 	tint_row.set_spacing(6)
-	tint_row.add_fixed(tint.lb, lbl_w)
-	tint_row.add(tint.sl, 1)
-	tint_row.add_fixed(tint.vl, val_w)
-	tint_row.add_fixed(n_reset, 26)
+	tint_row.add(tint.lb, min: lbl_w)
+	tint_row.add(tint.sl, flex: 1)
+	tint_row.add(tint.vl, min: val_w)
+	tint_row.add(n_reset)
 	mut hint := vgui.label('Оттенок: минус - зеленее, плюс - пурпурнее')
 	hint.font_size = 12
 	st.hint_labels << hint
-	return [SectionRow{mode_row, 28}, SectionRow{temp_row, 26}, SectionRow{tint_row, 26},
-		SectionRow{hint, 16}]
+	return [SectionRow{mode_row}, SectionRow{temp_row}, SectionRow{tint_row},
+		SectionRow{hint}]
 }

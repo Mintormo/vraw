@@ -100,8 +100,6 @@ mut:
 	notes   []&vgui.Label
 }
 
-const exp_w = 560
-const exp_h = 250
 const exp_path_max = 66 // символов в строке пути (ширина окна минус поля)
 
 // show_export - открыть диалог (создать при первом вызове)
@@ -131,8 +129,6 @@ fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &ExportUi{}
 	mut dlg := vgui.create_dialog(
 		title:     'Экспорт'
-		width:     exp_w
-		height:    exp_h
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -158,8 +154,8 @@ fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.pct = pct
 	mut bar_row := vgui.create_hbox_fill()
 	bar_row.set_spacing(8)
-	bar_row.add(bar, 1)
-	bar_row.add_fixed(pct, 48)
+	bar_row.add(bar, flex: 1)
+	bar_row.add(pct, min: column_width(mut dlg.win, ['100%'], 8))
 	mut timing := vgui.label('')
 	u.timing = timing
 	u.notes << timing
@@ -185,20 +181,19 @@ fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.btn = btn
 	mut btn_row := vgui.create_hbox_fill()
-	btn_row.add(vgui.create_spacer(), 1)
-	btn_row.add_fixed(btn, set_btn_w)
+	btn_row.add(vgui.create_spacer(), flex: 1)
+	btn_row.add(btn, min: 100)
 
 	mut body := vgui.create_vbox_fill()
 	body.set_padding(16)
 	body.set_spacing(6)
-	body.add_fixed(files, set_note_h)
-	body.add_fixed(folder.label, set_note_h)
-	body.add_fixed(vgui.create_spacer(), 8)
-	body.add_fixed(stage, set_note_h + 2)
-	body.add_fixed(bar_row, set_row_h)
-	body.add_fixed(timing, set_note_h)
-	body.add(vgui.create_spacer(), 1)
-	body.add_fixed(btn_row, 30)
+	body.add(files)
+	body.add(folder.label)
+	body.add(stage)
+	body.add(bar_row)
+	body.add(timing)
+	body.add(vgui.create_spacer(), flex: 1)
+	body.add(btn_row)
 
 	dlg.add_widget(body)
 	dlg.add_widget(folder.tip) // после корня: рисуется поверх

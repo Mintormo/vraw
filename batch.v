@@ -354,9 +354,9 @@ fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, prog
 	if !progress(.write, 0, 0) {
 		return ExportCancelled{}
 	}
-	imgio.write(dst, job.format, img.width, img.height, img.rgb,
-		quality: job.settings.jpeg_quality
-	) or { return error('не удалось сохранить (${err})') }
+	write_image(dst, job.format, img, job.settings.jpeg_quality, &job.settings) or {
+		return error('не удалось сохранить (${err})')
+	}
 	return BatchDone{}
 }
 

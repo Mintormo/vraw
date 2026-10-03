@@ -53,8 +53,12 @@ const mark_ring = vgui.Color{20, 20, 22, 255}
 struct Frame {
 	path string
 mut:
-	edited bool // есть сайдкар правок
+	edited bool // есть правки (сайдкар, current > 0)
+	mark   Mark // звёзды и флажок отбора (rating.v)
 	name   &vgui.Label = unsafe { nil } // подпись: у текущего кадра - жирная
+	// Ячейка ленты (миниатюра + подпись): строки ListBox пересобираются
+	// по фильтру из этих ячеек (apply_filter)
+	cell &vgui.VBox = unsafe { nil }
 	// Миниатюра живёт только в пикселях холста (без отдельной копии: ~200 КБ
 	// на кадр); отметка «изменён» только добавляется - рисуется поверх
 	cv &vgui.Canvas = unsafe { nil }
@@ -289,15 +293,14 @@ fn wait_thumbs(mut st State) {
 }
 
 // load_folder - новая папка в ленте: список кадров, ячейки с пустыми
-// миниатюрами, отметки изменённых, фоновый расчёт миниатюр.
+// миниатюрами, отметки изменённых и пометки отбора (начало сайдкара,
+// read_side_head), строки по фильтру, фоновый расчёт миниатюр.
 fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	stop_thumbs(mut st)
 	st.thumb_gen++
 	st.folder = dir
 	paths := scan_folder(dir)
 	st.frames = []Frame{}
-	mut strip := st.strip
-	strip.clear()
 	for p in paths {
 		mut cv := vgui.canvas(thumb_w, thumb_h)
 		// Вписывание с сохранением пропорций (auto_fit): любая высота ленты
@@ -305,24 +308,35 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 		cv.enabled = false // пассивный: щелчок уходит в список
 		cv.set_wheel_zoom(false)
 		cv.set_pan_buttons(0)
+		idx := st.frames.len
+		// Звёзды и флажок - поверх миниатюры, без правки её пикселей
+		// (пометка меняется - достаточно перерисовать)
+		cv.on_overlay = fn [mut st, idx, cv] (mut ctx vgui.RenderContext) {
+			if idx < st.frames.len {
+				draw_thumb_marks(mut ctx, cv, st.frames[idx].mark)
+			}
+		}
 		mut name := vgui.label(os.file_name(p))
 		name.align = .center
 		name.font_size = 12
 		name.color = st.pal.secondary
 		mut cell := vgui.create_vbox_fill()
 		cell.set_spacing(4)
-		cell.add(cv, 1)
-		cell.add_fixed(name, strip_name_h)
-		strip.add_item_widget(cell)
+		cell.add(cv, flex: 1)
+		cell.add(name)
 		cv.fill(thumb_bg)
+		head := read_side_head(p)
 		st.frames << Frame{
 			path:   p
-			edited: os.exists(sidecar_path(p))
+			edited: head.edited
+			mark:   head.mark
 			name:   name
 			cv:     cv
+			cell:   cell
 		}
 		draw_mark(mut st, st.frames.len - 1)
 	}
+	apply_filter(mut st)
 	cur := paths.index(cur_path)
 	stop := &StopFlag{}
 	st.thumb_stop = stop
@@ -408,9 +422,11 @@ fn draw_dot(mut pix []u8, cx int, cy int, r int, c vgui.Color) {
 	}
 }
 
-// mark_edited - у текущего кадра появился сайдкар (первая правка)
+// mark_edited - у текущего кадра появились правки (запись сайдкара не
+// на «Открыт файл»; одна пометка отбора правкой не считается)
 fn mark_edited(mut st State) {
-	if st.frame_idx < 0 || st.frame_idx >= st.frames.len || st.frames[st.frame_idx].edited {
+	if st.hist_pos == 0 || st.frame_idx < 0 || st.frame_idx >= st.frames.len
+		|| st.frames[st.frame_idx].edited {
 		return
 	}
 	st.frames[st.frame_idx].edited = true
@@ -444,7 +460,7 @@ fn sync_strip(mut st State) {
 		return
 	}
 	mut strip := st.strip
-	strip.set_selected(st.frame_idx)
+	strip.set_selected(row_of(st, st.frame_idx)) // не прошёл фильтр - без выделения
 	for i, f in st.frames {
 		if isnil(f.name) {
 			continue
@@ -467,8 +483,21 @@ fn strip_info_text(mut st State) {
 		return
 	}
 	mut info := st.strip_info
-	pos := if st.frame_idx >= 0 { '${st.frame_idx + 1} из ${st.frames.len}' } else { '${st.frames.len} кадров' }
+	// С фильтром - номер и число кадров фильтра, всего в папке - в скобках
+	row := row_of(st, st.frame_idx)
+	total := if st.filter != 'all' { ' (в папке ${st.frames.len})' } else { '' }
+	pos := if row >= 0 {
+		'${row + 1} из ${st.shown.len}${total}'
+	} else {
+		'${st.shown.len} ${plural(st.shown.len, 'кадр', 'кадра', 'кадров')}${total}'
+	}
 	mut text := '${os.file_name(st.folder)}  ·  ${pos}'
+	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
+		mt := mark_text(st.frames[st.frame_idx].mark)
+		if mt.len > 0 {
+			text += '  ·  ${mt}'
+		}
+	}
 	n := st.strip.get_selection().len
 	if n > 1 {
 		text += '  ·  выделено ${n}'
@@ -480,14 +509,16 @@ fn strip_info_text(mut st State) {
 // остаётся открытый кадр - лента не прокручивается к последнему.
 // set_selection не зовёт on_select - подпись здесь.
 fn select_all_frames(mut st State) {
-	if isnil(st.strip) || st.frames.len == 0 {
+	if isnil(st.strip) || st.shown.len == 0 {
 		return
 	}
-	mut idx := []int{len: st.frames.len, init: index}
-	if st.frame_idx >= 0 {
+	// Строки ленты (с фильтром - только его кадры)
+	mut idx := []int{len: st.shown.len, init: index}
+	cur := row_of(st, st.frame_idx)
+	if cur >= 0 {
 		// Текущей становится последняя из списка - открытый кадр в конец
-		idx.delete(st.frame_idx)
-		idx << st.frame_idx
+		idx.delete(cur)
+		idx << cur
 	}
 	mut strip := st.strip
 	strip.set_selection(idx)
@@ -528,7 +559,8 @@ fn fit_strip_items(mut st State) {
 // перетаскивания горизонтального сплиттера bounds ленты ещё старые,
 // поэтому она считается от доли сплиттера «просмотр | панель».
 fn center_strip(mut st State) {
-	if isnil(st.strip) || st.frame_idx < 0 {
+	row := row_of(st, st.frame_idx)
+	if isnil(st.strip) || row < 0 {
 		return
 	}
 	mut strip := st.strip
@@ -542,7 +574,7 @@ fn center_strip(mut st State) {
 		return
 	}
 	iw := strip.item_width
-	mut x := f32(st.frame_idx) * iw + iw / 2 - view_w / 2
+	mut x := f32(row) * iw + iw / 2 - view_w / 2
 	if x < 0 {
 		x = 0
 	}
@@ -567,19 +599,19 @@ fn layout_strip(mut st State) {
 	sp.clear_second()
 	sb.clear()
 	if st.frames.len == 0 {
-		v.add(st.view_area, 1)
+		v.add(st.view_area, flex: 1)
 		return
 	}
-	sb.add_fixed(st.strip_bar, strip_bar_h)
+	sb.add(st.strip_bar)
 	if st.strip_open {
-		sb.add(st.strip, 1)
+		sb.add(st.strip, flex: 1)
 		sp.set_first(st.view_area)
 		sp.set_second(sb)
-		v.add(sp, 1)
+		v.add(sp, flex: 1)
 		fit_strip_items(mut st)
 	} else {
-		v.add(st.view_area, 1)
-		v.add_fixed(sb, strip_bar_h + 2 * strip_box_pad)
+		v.add(st.view_area, flex: 1)
+		v.add(sb)
 	}
 	if !isnil(st.strip_toggle) {
 		mut b := st.strip_toggle

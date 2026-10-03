@@ -868,8 +868,8 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	mut mode_row := vgui.create_hbox_fill()
 	mode_row.set_spacing(6)
-	mode_row.add(mode, 1)
-	mode_row.add_fixed(reset, 26)
+	mode_row.add(mode, flex: 1)
+	mode_row.add(reset)
 
 	// Пропорция и ориентация рамки
 	mut acb := vgui.combo_box()
@@ -913,9 +913,9 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut a_lb := vgui.label('Пропорция')
 	mut a_row := vgui.create_hbox_fill()
 	a_row.set_spacing(6)
-	a_row.add_fixed(a_lb, lbl_w)
-	a_row.add(acb, 1)
-	a_row.add_fixed(orient, 26)
+	a_row.add(a_lb, min: lbl_w)
+	a_row.add(acb, flex: 1)
+	a_row.add(orient)
 
 	// Своя пропорция W : H
 	mut aw := vgui.spinbox()
@@ -943,11 +943,11 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	colon.align = .center
 	mut c_row := vgui.create_hbox_fill()
 	c_row.set_spacing(6)
-	c_row.add_fixed(c_lb, lbl_w)
-	c_row.add(aw, 1)
-	c_row.add_fixed(colon, 10)
-	c_row.add(ah, 1)
-	c_row.add_fixed(vgui.label(''), 26)
+	c_row.add(c_lb, min: lbl_w)
+	c_row.add(aw, flex: 1)
+	c_row.add(colon)
+	c_row.add(ah, flex: 1)
+	c_row.add(icon_slot(), min: icon_slot_w)
 
 	mut total := vgui.label('Итог: -')
 	st.secondary_labels << total
@@ -1025,15 +1025,15 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	st.tips << ain_tip
 	mut tools := vgui.create_hbox_fill()
 	tools.set_spacing(6)
-	tools.add_fixed(vgui.label('Повернуть'), lbl_w)
-	tools.add_fixed(r_ccw, 26)
-	tools.add_fixed(r_cw, 26)
-	tools.add_fixed(f_h, 26)
-	tools.add_fixed(f_v, 26)
-	tools.add_fixed(hz, 26)
-	tools.add(vgui.label(''), 1)
-	tools.add_fixed(ain, 56)
-	tools.add_fixed(vgui.label('°'), 10)
+	tools.add(vgui.label('Повернуть'), min: lbl_w)
+	tools.add(r_ccw)
+	tools.add(r_cw)
+	tools.add(f_h)
+	tools.add(f_v)
+	tools.add(hz)
+	tools.add(vgui.label(''), flex: 1)
+	tools.add(ain)
+	tools.add(vgui.label('°'))
 
 	// Сетка поверх рамки - вид (настройки программы, не кадра)
 	mut gcb := vgui.combo_box()
@@ -1050,15 +1050,15 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut g_lb := vgui.label('Сетка')
 	mut g_row := vgui.create_hbox_fill()
 	g_row.set_spacing(6)
-	g_row.add_fixed(g_lb, lbl_w)
-	g_row.add(gcb, 1)
-	g_row.add_fixed(vgui.label(''), 26)
+	g_row.add(g_lb, min: lbl_w)
+	g_row.add(gcb, flex: 1)
+	g_row.add(icon_slot(), min: icon_slot_w)
 
 	mut hint := vgui.label('Enter - применить, Esc - отмена, двойной щелчок - вся рамка')
 	hint.font_size = 12
 	st.hint_labels << hint
-	return [SectionRow{mode_row, 28}, SectionRow{a_row, 28}, SectionRow{c_row, 28},
-		SectionRow{total, 18},
-		SectionRow{angle_row, 26}, SectionRow{tools, 28}, SectionRow{g_row, 28},
-		SectionRow{hint, 16}]
+	return [SectionRow{mode_row}, SectionRow{a_row}, SectionRow{c_row},
+		SectionRow{total},
+		SectionRow{angle_row}, SectionRow{tools}, SectionRow{g_row},
+		SectionRow{hint}]
 }

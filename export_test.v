@@ -5,6 +5,7 @@ import time
 import vgui
 import json2
 import pipeline
+import imgio
 
 fn test_tone_lut() {
 	assert tone_lut(identity_curve()).len == 0 // диагональ - кривой нет
@@ -112,6 +113,39 @@ fn test_develop_full() {
 		sb += b.rgb[i]
 	}
 	assert sb > sn * 11 / 10
+	// EXIF по метаданным кадра: камера, дата, съёмка; запись - только
+	// при включённом флажке и формате, который EXIF держит
+	m := n.meta
+	assert m.cam_make == 'Canon' && m.shot > 0 && m.iso > 0 && m.shutter > 0
+	x := export_exif(m, '© тест')
+	assert x.model == 'Canon EOS R8'
+	assert x.date == shot_date(m.shot, path).replace('-', ':') + x.date[10..]
+	assert x.date.len == 19 && x.iso > 0 && x.copyright == '© тест'
+	small := Image{
+		width:  4
+		height: 2
+		rgb:    []u8{len: 24, init: 128}
+		meta:   m
+	}
+	dir := os.join_path(os.temp_dir(), 'vraw_exif_main')
+	os.mkdir_all(dir)!
+	mut s := Settings{}
+	for f in [imgio.Format.jpeg, .png, .tiff, .bmp] {
+		p := os.join_path(dir, 'a.${f.ext()}')
+		write_image(p, f, small, 90, &s)!
+		has := os.read_file(p)!.contains('Canon EOS R8')
+		assert has == f.has_exif(), f.name()
+	}
+	s.export_no_exif = true
+	p := os.join_path(dir, 'b.jpg')
+	write_image(p, .jpeg, small, 90, &s)!
+	assert !os.read_file(p)!.contains('Canon EOS R8')
+}
+
+// Настройки старой версии (без поля) - EXIF при экспорте пишется
+fn test_settings_exif_default() {
+	old := json2.decode[Settings]('{"theme": "dark"}')!
+	assert !old.export_no_exif && old.exif_copyright == ''
 }
 
 // Размер на выход: длинная сторона ровно, пропорции сохраняются, кадр не

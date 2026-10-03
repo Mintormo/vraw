@@ -151,7 +151,7 @@ fn test_thumb_geom_sidecar() {
 	}, HistEntry{
 		name:  'Кадрирование'
 		state: e
-	}], 1))!
+	}], 1, Mark{}))!
 	g := thumb_geom(path)
 	assert g == out_geom(&e) && g.aspect == 1
 	os.rm(side) or {}

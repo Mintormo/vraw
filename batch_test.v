@@ -32,7 +32,7 @@ fn test_batch_items() {
 	}, HistEntry{
 		name:  'Экспозиция'
 		state: eb
-	}], 1))!
+	}], 1, Mark{}))!
 	os.write_file(sidecar_path(d), 'не json')!
 	mut st := &State{}
 	st.edit = neutral_edit()

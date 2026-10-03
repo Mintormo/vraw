@@ -503,6 +503,7 @@ fn test_select_all_frames() {
 		}
 	}
 	st.strip = strip
+	st.shown = [0, 1, 2, 3]
 	st.frame_idx = 1
 	select_all_frames(mut st)
 	assert st.strip.get_selection() == [0, 1, 2, 3]

@@ -501,16 +501,15 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 		ai_start(mut st, mut app)
 	}
 	u.start = start
-	// Высота подписей (ai_note_h) - с запасом на внутренний отступ Label
-	// (4 px сверху): VBox слоя отсекает по своей границе, при 16 px текст
-	// уходил под край
+	// Высоты рядов слоёв - их собственные (measure): Label сам учитывает
+	// свой внутренний отступ
 	mut hint := vgui.label('')
 	st.hint_labels << hint
 	u.hint = hint
 	mut idle := vgui.create_vbox_fill()
 	idle.set_spacing(ai_row_gap)
-	idle.add_fixed(start, ai_row_h)
-	idle.add_fixed(hint, ai_note_h)
+	idle.add(start)
+	idle.add(hint)
 	u.idle = layer(idle)
 
 	// Прогресс: полоса, проценты, отмена; под ними - что и сколько осталось
@@ -536,17 +535,17 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	u.run_icon = run_icon
 	mut prow := vgui.create_hbox_fill()
 	prow.set_spacing(6)
-	prow.add_fixed(run_icon, 20)
-	prow.add(bar, 1)
-	prow.add_fixed(pct, vw)
-	prow.add_fixed(cancel, 26)
+	prow.add(run_icon)
+	prow.add(bar, flex: 1)
+	prow.add(pct, min: vw)
+	prow.add(cancel)
 	mut status := vgui.label('')
 	st.secondary_labels << status
 	u.status = status
 	mut running := vgui.create_vbox_fill()
 	running.set_spacing(ai_row_gap)
-	running.add_fixed(prow, ai_row_h)
-	running.add_fixed(status, ai_note_h)
+	running.add(prow)
+	running.add(status)
 	u.running = layer(running)
 	u.running.visible = false
 
@@ -562,10 +561,10 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	}
 	mut srow := vgui.create_hbox_fill()
 	srow.set_spacing(6)
-	srow.add_fixed(strength.lb, lw)
-	srow.add(strength.sl, 1)
-	srow.add_fixed(strength.vl, vw)
-	srow.add_fixed(off, 26)
+	srow.add(strength.lb, min: lw)
+	srow.add(strength.sl, flex: 1)
+	srow.add(strength.vl, min: vw)
+	srow.add(off)
 	u.strength = strength.sl
 	mut ok_icon := vgui.icon('circle-check')
 	ok_icon.set_size(14)
@@ -575,12 +574,12 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	u.ok_label = ok_lb
 	mut orow := vgui.create_hbox_fill()
 	orow.set_spacing(4)
-	orow.add_fixed(ok_icon, 18)
-	orow.add(ok_lb, 1)
+	orow.add(ok_icon)
+	orow.add(ok_lb, flex: 1)
 	mut applied := vgui.create_vbox_fill()
 	applied.set_spacing(ai_row_gap)
-	applied.add_fixed(srow, ai_row_h)
-	applied.add_fixed(orow, ai_note_h)
+	applied.add(srow)
+	applied.add(orow)
 	u.applied = layer(applied)
 	u.applied.visible = false
 
@@ -602,15 +601,15 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	}
 	mut rrow := vgui.create_hbox_fill()
 	rrow.set_spacing(6)
-	rrow.add(redo, 1)
-	rrow.add_fixed(off2, 26)
+	rrow.add(redo, flex: 1)
+	rrow.add(off2)
 	mut redo_hint := vgui.label('')
 	st.hint_labels << redo_hint
 	u.redo_hint = redo_hint
 	mut stale := vgui.create_vbox_fill()
 	stale.set_spacing(ai_row_gap)
-	stale.add_fixed(rrow, ai_row_h)
-	stale.add_fixed(redo_hint, ai_note_h)
+	stale.add(rrow)
+	stale.add(redo_hint)
 	u.stale = layer(stale)
 	u.stale.visible = false
 
@@ -646,10 +645,7 @@ fn layer(w &vgui.Widget) &vgui.Stack {
 	return s
 }
 
-const ai_row_h = f32(28)
-const ai_note_h = f32(24)
 const ai_row_gap = f32(6)
-const ai_block_h = ai_row_h + ai_row_gap + ai_note_h
 
 // paint_ai - цвета значков блока по теме (paint_ui)
 fn paint_ai(mut st State, th vgui.Theme) {

@@ -215,13 +215,14 @@ mut:
 	load_cb &vgui.ComboBox  = unsafe { nil }
 	load_nt &vgui.Label     = unsafe { nil }
 	ai_cb   &vgui.CheckBox  = unsafe { nil }
+	exif_cb &vgui.CheckBox  = unsafe { nil }
+	copy_in &vgui.TextInput = unsafe { nil }
 	result  &vgui.Label     = unsafe { nil }
+	// Колонка подписей: по самой длинной (меряется шрифтом окна)
+	lbl_col f32
 	notes   []&vgui.Label
 }
 
-const xs_w = 680
-const xs_h = 680
-const xs_lbl_w = f32(150)
 const xs_path_max = 56
 
 const export_dir_names = ['Рядом с RAW-файлом', 'Выбранная папка']
@@ -263,6 +264,11 @@ fn set_export_targets(mut st State) {
 		keys << 'sel'
 		names << 'Выделенные в ленте (${sel.len})'
 	}
+	// Фильтр ленты (rating.v) оставил не все кадры - «по фильтру»
+	if st.filter != 'all' && st.shown.len > 0 && st.shown.len < st.frames.len {
+		keys << 'shown'
+		names << 'По фильтру ленты: ${filter_names[filter_keys.index(st.filter)].to_lower()} (${st.shown.len})'
+	}
 	if st.frames.len > 1 || (st.frames.len == 1 && keys.len == 0) {
 		keys << 'all'
 		names << 'Все кадры папки (${st.frames.len})'
@@ -281,12 +287,13 @@ fn set_export_targets(mut st State) {
 	cb.enabled = keys.len > 1
 }
 
-// strip_selection - выделенные в ленте кадры (индексы)
+// strip_selection - выделенные в ленте кадры (номера в st.frames: строки
+// ленты с фильтром - не номера кадров, rating.v)
 fn strip_selection(st &State) []int {
 	if isnil(st.strip) {
 		return []int{}
 	}
-	return st.strip.get_selection().filter(it >= 0 && it < st.frames.len)
+	return st.strip.get_selection().map(frame_of_row(st, it)).filter(it >= 0)
 }
 
 // export_target_paths - RAW-файлы по выбору «Кадры»
@@ -297,6 +304,9 @@ fn export_target_paths(st &State, what string) []string {
 		}
 		'sel' {
 			strip_selection(st).map(st.frames[it].path)
+		}
+		'shown' {
+			st.shown.map(st.frames[it].path)
 		}
 		'all' {
 			st.frames.map(it.path)
@@ -383,17 +393,17 @@ fn sync_export_setup(mut st State) {
 		u.size_mode = s.export_size
 		mut r := u.size_row
 		r.clear()
-		r.add_fixed(vgui.label('Размер'), xs_lbl_w)
-		r.add_fixed(u.size_cb, 190)
+		r.add(vgui.label('Размер'), min: u.lbl_col)
+		r.add(u.size_cb)
 		if s.export_size != '' {
-			r.add_fixed(sa, 110)
+			r.add(sa)
 			if s.export_size == 'fit' {
-				r.add_fixed(times, 10)
-				r.add_fixed(sb, 110)
+				r.add(times)
+				r.add(sb)
 			}
-			r.add_fixed(unit, 22)
+			r.add(unit)
 		}
-		r.add(vgui.create_spacer(), 1)
+		r.add(vgui.create_spacer(), flex: 1)
 	}
 	// Резкость на выход - только при уменьшении: «Как есть» - недоступна
 	mut shcb := u.sharp_cb
@@ -403,6 +413,15 @@ fn sync_export_setup(mut st State) {
 	ecb.set_selected(math.max(0, export_exists_keys.index(s.export_exists)))
 	mut acb := u.ai_cb
 	acb.checked = !s.export_no_ai
+	// EXIF: копирайт - только при включённом EXIF; поле в фокусе не
+	// перезаписывается (набор не сбивается)
+	mut xcb := u.exif_cb
+	xcb.checked = !s.export_no_exif
+	mut cin := u.copy_in
+	cin.enabled = !s.export_no_exif
+	if !cin.focused && cin.get_text() != s.exif_copyright {
+		cin.set_text(s.exif_copyright)
+	}
 	mut lcb := u.load_cb
 	li := math.max(0, load_keys.index(s.export_load))
 	lcb.set_selected(li)
@@ -495,8 +514,6 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &ExportSetupUi{}
 	mut dlg := vgui.create_dialog(
 		title:     'Экспорт'
-		width:     xs_w
-		height:    xs_h
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -508,11 +525,16 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		ui_scale:  parent.ctx.ui_scale
 	)!
 	u.dlg = dlg
-	row := fn (text string, w &vgui.Widget) &vgui.HBox {
+	// Колонка подписей - по самой длинной подписи шрифтом окна, поля и
+	// подсказки под ними встают ровно (+8 - поля Label, pad 4 с двух сторон)
+	lbl_col := column_width(mut dlg.win, ['Кадры', 'Папка', 'Имя файла', 'Если файл есть',
+		'Формат', 'Качество JPEG', 'Размер', 'Резкость на выход', 'Метаданные', 'Нагрузка'], 8)
+	u.lbl_col = lbl_col
+	row := fn [lbl_col] (text string, w &vgui.Widget) &vgui.HBox {
 		mut r := vgui.create_hbox_fill()
 		r.set_spacing(8)
-		r.add_fixed(vgui.label(text), xs_lbl_w)
-		r.add(w, 1)
+		r.add(vgui.label(text), min: lbl_col)
+		r.add(w, flex: 1)
 		return r
 	}
 
@@ -568,9 +590,9 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.dir_btn = dir_btn
 	mut dir_row := vgui.create_hbox_fill()
 	dir_row.set_spacing(8)
-	dir_row.add_fixed(vgui.label('Папка'), xs_lbl_w)
-	dir_row.add(dir_cb, 1)
-	dir_row.add_fixed(dir_btn, 110)
+	dir_row.add(vgui.label('Папка'), min: lbl_col)
+	dir_row.add(dir_cb, flex: 1)
+	dir_row.add(dir_btn)
 	dir_note := path_note('Папка: ', '', xs_path_max)
 	u.dir = dir_note
 	u.notes << dir_note.label
@@ -621,9 +643,10 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.q_sl = q_sl
 	mut q_row := vgui.create_hbox_fill()
 	q_row.set_spacing(8)
-	q_row.add_fixed(vgui.label('Качество JPEG'), xs_lbl_w)
-	q_row.add(q_sl, 1)
-	q_row.add_fixed(q_vl, 40)
+	q_row.add(vgui.label('Качество JPEG'), min: lbl_col)
+	q_row.add(q_sl, flex: 1)
+	// Ширина значения - под «100»: ползунок не дёргается от числа цифр
+	q_row.add(q_vl, min: column_width(mut dlg.win, ['100'], 8))
 	mut q_note := vgui.label('Больше - лучше и крупнее файл; ${jpeg_q_default} - хороший баланс')
 	u.notes << q_note
 
@@ -714,6 +737,34 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.ai_cb = ai_cb
 
+	// EXIF: дата съёмки, камера, объектив, параметры съёмки и копирайт
+	mut exif_cb := vgui.checkbox('Сохранять EXIF')
+	exif_cb.on_change = fn [mut st] (v bool) {
+		if st.suppress {
+			return
+		}
+		st.settings.export_no_exif = !v
+		export_setup_changed(mut st)
+	}
+	u.exif_cb = exif_cb
+	mut copy_in := vgui.text_input('копирайт, например «© Игорь 2026»')
+	copy_in.max_len = 200
+	copy_in.on_change = fn [mut st] (t string) {
+		if st.suppress {
+			return
+		}
+		st.settings.exif_copyright = t.trim_space()
+		save_settings(st.settings)
+	}
+	u.copy_in = copy_in
+	mut exif_row := vgui.create_hbox_fill()
+	exif_row.set_spacing(8)
+	exif_row.add(vgui.label('Метаданные'), min: lbl_col)
+	exif_row.add(exif_cb)
+	exif_row.add(copy_in, flex: 1)
+	mut exif_note := vgui.label('Дата съёмки, камера, объектив, выдержка - в JPEG, PNG и TIFF')
+	u.notes << exif_note
+
 	// Нагрузка: кадров одновременно и приоритет потоков экспорта
 	mut load_cb := vgui.combo_box()
 	load_cb.set_items(load_names)
@@ -745,36 +796,34 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	mut btn_row := vgui.create_hbox_fill()
 	btn_row.set_spacing(8)
-	btn_row.add(vgui.create_spacer(), 1)
-	btn_row.add_fixed(b_cancel, 110)
-	btn_row.add_fixed(ok, 110)
+	btn_row.add(vgui.create_spacer(), flex: 1)
+	btn_row.add(b_cancel, min: 100)
+	btn_row.add(ok, min: 100)
 
 	mut body := vgui.create_vbox_fill()
 	body.set_padding(16)
 	body.set_spacing(6)
-	body.add_fixed(row('Кадры', what_cb), set_row_h)
-	body.add_fixed(vgui.create_spacer(), 4)
-	body.add_fixed(dir_row, set_row_h)
-	body.add_fixed(indented(dir_note.label, xs_lbl_w + 8), set_note_h)
-	body.add_fixed(row('Имя файла', name), set_row_h)
-	body.add_fixed(indented(name_note, xs_lbl_w + 8), set_note_h)
-	body.add_fixed(row('Если файл есть', ex_cb), set_row_h)
-	body.add_fixed(vgui.create_spacer(), 6)
-	body.add_fixed(row('Формат', fmt_cb), set_row_h)
-	body.add_fixed(q_row, set_row_h)
-	body.add_fixed(indented(q_note, xs_lbl_w + 8), set_note_h)
-	body.add_fixed(size_row, set_row_h)
-	body.add_fixed(indented(size_note, xs_lbl_w + 8), set_note_h)
-	body.add_fixed(row('Резкость на выход', sharp_cb), set_row_h)
-	body.add_fixed(indented(sharp_note, xs_lbl_w + 8), set_note_h)
-	body.add_fixed(vgui.create_spacer(), 6)
-	body.add_fixed(ai_cb, set_row_h)
-	body.add_fixed(vgui.create_spacer(), 4)
-	body.add_fixed(row('Нагрузка', load_cb), set_row_h)
-	body.add_fixed(indented(load_note, xs_lbl_w + 8), set_note_h)
-	body.add(vgui.create_spacer(), 1)
-	body.add_fixed(result, set_row_h)
-	body.add_fixed(btn_row, 30)
+	body.add(row('Кадры', what_cb))
+	body.add(dir_row)
+	body.add(indented(dir_note.label, lbl_col + 8))
+	body.add(row('Имя файла', name))
+	body.add(indented(name_note, lbl_col + 8))
+	body.add(row('Если файл есть', ex_cb))
+	body.add(row('Формат', fmt_cb))
+	body.add(q_row)
+	body.add(indented(q_note, lbl_col + 8))
+	body.add(size_row)
+	body.add(indented(size_note, lbl_col + 8))
+	body.add(row('Резкость на выход', sharp_cb))
+	body.add(indented(sharp_note, lbl_col + 8))
+	body.add(exif_row)
+	body.add(indented(exif_note, lbl_col + 8))
+	body.add(ai_cb)
+	body.add(row('Нагрузка', load_cb))
+	body.add(indented(load_note, lbl_col + 8))
+	body.add(vgui.create_spacer(), flex: 1)
+	body.add(result)
+	body.add(btn_row)
 
 	dlg.add_widget(body)
 	dlg.add_widget(dir_note.tip) // после корня: рисуется поверх

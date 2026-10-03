@@ -97,6 +97,13 @@ pub fn format_by_path(path string) ?Format {
 pub struct WriteOpts {
 pub:
 	quality int = 92 // JPEG, 1..100
+	// метаданные EXIF (exif.v): JPEG, PNG и TIFF; nil - без них
+	exif &Exif = unsafe { nil }
+}
+
+// has_exif - формат держит EXIF (JPEG, PNG, TIFF)
+pub fn (f Format) has_exif() bool {
+	return f in [Format.jpeg, .png, .tiff]
 }
 
 // write - записать RGB-кадр (w * h * 3 байт) в формате f
@@ -107,15 +114,21 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	match f {
 		.jpeg {
 			stbi.stbi_write_jpg(path, w, h, 3, rgb.data, o.quality)!
+			if !isnil(o.exif) {
+				add_exif(path, o.exif, jpeg_with_exif)!
+			}
 		}
 		.png {
 			stbi.stbi_write_png(path, w, h, 3, rgb.data, w * 3)!
+			if !isnil(o.exif) {
+				add_exif(path, o.exif, png_with_exif)!
+			}
 		}
 		.bmp {
 			stbi.stbi_write_bmp(path, w, h, 3, rgb.data)!
 		}
 		.tiff {
-			os.write_file_array(path, encode_tiff(w, h, rgb)!)!
+			os.write_file_array(path, encode_tiff(w, h, rgb, o.exif)!)!
 		}
 		.qoi {
 			os.write_file_array(path, encode_qoi(w, h, rgb))!
@@ -127,4 +140,11 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 			os.write_file_array(path, encode_gif(w, h, rgb))!
 		}
 	}
+}
+
+// add_exif - вставить EXIF в только что записанный stbi файл (stb пишет
+// сразу в файл; перечитать 8 МБ JPEG - миллисекунды)
+fn add_exif(path string, e &Exif, with fn ([]u8, Exif) ![]u8) ! {
+	data := os.read_bytes(path)!
+	os.write_file_array(path, with(data, *e)!)!
 }

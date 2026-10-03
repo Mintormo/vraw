@@ -75,7 +75,7 @@ fn test_paste_to_file_new_and_existing() {
 	// Те же настройки ещё раз - записывать нечего
 	assert !paste_to_file(raw_path, src, ['tone'], 'Вставка настроек')!
 	// Вторая группа - новая запись; отменённое «будущее» отрезается
-	text := encode_history(l.history, 0) // откат к «Открыт файл»
+	text := encode_history(l.history, 0, Mark{}) // откат к «Открыт файл»
 	os.write_file(sidecar_path(raw_path), text)!
 	assert paste_to_file(raw_path, src, ['color'], 'Пресет: Облачно')!
 	l2 := load_sidecar(sidecar_path(raw_path))!

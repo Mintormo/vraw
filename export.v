@@ -9,6 +9,7 @@ module main
 // TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> Capture-резкость
 // -> маска -> кадрирование и поворот (сырьё и маска) -> pipeline -> размер
 // «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит.
+import time
 import raw
 import lens
 import pipeline
@@ -27,11 +28,53 @@ fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, vign f32)
 	return true
 }
 
-// Image - проявленный 8-битный RGB-кадр
+// Image - проявленный 8-битный RGB-кадр и метаданные RAW (для EXIF)
 struct Image {
 	width  int
 	height int
 	rgb    []u8 // width * height * 3
+	meta   raw.Meta
+}
+
+// exif_time - дата для EXIF: «ГГГГ:ММ:ДД чч:мм:сс»
+fn exif_time(t time.Time) string {
+	return t.custom_format('YYYY:MM:DD HH:mm:ss')
+}
+
+// export_exif - EXIF готового файла по метаданным RAW. Модель - полная,
+// как пишет сама камера («Canon EOS R8»: LibRaw отдаёт «EOS R8»); дата
+// съёмки - часы камеры (LibRaw переводит EXIF mktime'ом, см. raw.Meta),
+// дата записи - сейчас.
+fn export_exif(m raw.Meta, copyright string) imgio.Exif {
+	model := if m.cam_make.len > 0 && !m.cam_model.starts_with(m.cam_make) {
+		'${m.cam_make} ${m.cam_model}'
+	} else {
+		m.cam_model
+	}
+	return imgio.Exif{
+		make:      m.cam_make
+		model:     model
+		lens_make: m.lens_make
+		lens:      m.lens
+		date:      if m.shot > 0 { exif_time(time.unix(m.shot).local()) } else { '' }
+		modified:  exif_time(time.now())
+		exposure:  m.shutter
+		fnumber:   m.aperture
+		focal:     m.focal
+		iso:       int(m.iso + 0.5)
+		artist:    m.artist
+		copyright: copyright
+	}
+}
+
+// write_image - кадр в файл; EXIF - если включён и формат его держит
+fn write_image(path string, f imgio.Format, img Image, quality int, s &Settings) ! {
+	if !s.export_no_exif && f.has_exif() {
+		e := export_exif(img.meta, s.exif_copyright)
+		imgio.write(path, f, img.width, img.height, img.rgb, quality: quality, exif: &e)!
+		return
+	}
+	imgio.write(path, f, img.width, img.height, img.rgb, quality: quality)!
 }
 
 // ExportStage - этапы проявки полного кадра, в порядке выполнения.
@@ -262,5 +305,6 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		width:  fw
 		height: fh
 		rgb:    rgb
+		meta:   d.meta()
 	}
 }

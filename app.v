@@ -100,6 +100,15 @@ mut:
 	thumb_threads []thread
 	thumb_done    fn (ThumbResult) = unsafe { nil }
 	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
+	// Отбор (rating.v): пометка открытого кадра (в его сайдкаре), фильтр
+	// ленты и кадры, прошедшие его (строки ленты), список фильтра на
+	// полосе; переход к кадру (goto_frame из main) - для «Переходить к
+	// следующему» после пометки
+	mark       Mark
+	filter     string = 'all'
+	shown      []int
+	filter_cb  &vgui.ComboBox = unsafe { nil }
+	goto_frame fn (int) = unsafe { nil }
 	// Приложение - для фоновых потоков, запускаемых из обработчиков
 	// (refresh_thumb); vgui трогают только через app.post
 	app &vgui.App = unsafe { nil }
@@ -231,6 +240,21 @@ mut:
 	clip_hi    bool
 	clip_lo    bool
 	m_clipwarn &vgui.MenuItem = unsafe { nil }
+	// До/после (compare.v) - вид, не правка: удержание «\», шторка и её
+	// положение (доля ширины), перетаскивание линии; буферы «до» (кэш по
+	// ba_key) и «после» (для шторки без пересчёта); пункт меню шторки.
+	// Щелчок по снимку - 100%: где нажали (буфер превью)
+	ba_hold    bool
+	ba_split   bool
+	ba_pos     f32 = 0.5
+	ba_drag    bool
+	ba_key     BaKey
+	ba_before  []u8
+	ba_after   []u8
+	m_split    &vgui.MenuItem = unsafe { nil }
+	click_down bool
+	click_x    f32
+	click_y    f32
 }
 
 // Превью - половинного размера (LibRaw half-size): радиус резкости задан
@@ -324,6 +348,9 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	if st.suppress || st.linear.len == 0 {
 		return
 	}
+	// «После» шторки до/после пишет ba_apply в конце; показ резкости
+	// выходит раньше - старый буфер не должен вернуться на холст
+	st.ba_after = []u8{}
 	ensure_geom(mut st, mut cv)
 	npix := st.gw * st.gh
 	if (st.edit.params.haze != 0 || st.haze_show) && st.haze.d.len != npix {
@@ -366,6 +393,8 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		mark_clipping(mut cv.pixels, st.clip_hi, st.clip_lo)
 	}
 	sync_crop_total(mut st)
+	// До/после (compare.v): гистограмма и подсветка - у «после»
+	ba_apply(mut st, mut cv)
 	cv.mark_dirty()
 }
 
@@ -594,6 +623,7 @@ struct SaveJob {
 	quality   int  // JPEG
 	size      ExportSize // размер на выход
 	load      LoadLevel  // нагрузка: приоритет потока экспорта
+	settings  Settings   // EXIF и копирайт (write_image)
 	no_ai     bool // AI у кадра есть, но при экспорте отключён (для итога)
 	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
 	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
@@ -640,7 +670,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		report(mut app, on_done, .cancelled, 'Экспорт отменён')
 		return
 	}
-	imgio.write(job.dst, job.format, img.width, img.height, img.rgb, quality: job.quality) or {
+	write_image(job.dst, job.format, img, job.quality, &job.settings) or {
 		report(mut app, on_done, .failed, 'Не удалось сохранить: ${err}')
 		return
 	}
@@ -794,10 +824,10 @@ fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, 
 	}
 	mut row := vgui.create_hbox_fill()
 	row.set_spacing(6)
-	row.add_fixed(lb, lw)
-	row.add(sl, 1)
-	row.add_fixed(vl, vw)
-	row.add_fixed(b, 26)
+	row.add(lb, min: lw)
+	row.add(sl, flex: 1)
+	row.add(vl, min: vw)
+	row.add(b)
 	return row
 }
 
@@ -881,6 +911,9 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 	if cfg.digits == 0 {
 		sl.step = 1
 	}
+	// Колесо мыши - прокрутке панели: курсор, проезжая по ползунку, не
+	// должен менять настройку кадра
+	sl.wheel = false
 	key := if cfg.hname.len > 0 { cfg.hname } else { cfg.label }
 	sl.on_change = fn [mut st, mut vl, mut sl, cfg, key] (v f32) {
 		cfg.set(mut st.edit, v)
@@ -963,10 +996,10 @@ fn make_placeholder(th vgui.Theme) &Placeholder {
 
 	mut col := vgui.create_vbox_fill()
 	col.set_spacing(6)
-	col.add_fixed(ic, 76)
-	col.add_fixed(title, 32)
-	col.add_fixed(hint, 22)
-	col.add_fixed(fmts, 22)
+	col.add(ic)
+	col.add(title)
+	col.add(hint)
+	col.add(fmts)
 	mut center := vgui.create_centered(560, 170)
 	center.set_child(col)
 
@@ -1178,20 +1211,28 @@ const hsl_label_colors = [vgui.Color{235, 105, 105, 255}, vgui.Color{238, 158, 8
 	vgui.Color{160, 116, 234, 255}, vgui.Color{220, 104, 206, 255}]
 const hsl_modes = ['Оттенок', 'Насыщенность', 'Яркость']
 
-// SectionRow - ряд секции аккордеона: виджет и его фиксированная высота
+// SectionRow - ряд секции аккордеона (высота - его собственная, measure)
 struct SectionRow {
 	w &vgui.Widget
-	h f32
 }
 
-// section собирает содержимое секции аккордеона: VBox из фиксированных
-// рядов (fit_content считает высоту секции по их сумме) с отступами.
+// icon_slot - пустое место шириной кнопки-значка (icon_button): ряды без
+// кнопки сброса держат общую с соседями колонку
+const icon_slot_w = f32(15) + 2 * vgui.measure_pad_y
+
+fn icon_slot() &vgui.Label {
+	return vgui.label('')
+}
+
+// section собирает содержимое секции аккордеона: VBox из рядов
+// естественной высоты с отступами (fit_content аккордеона берёт её
+// из measure).
 fn section(rows []SectionRow) &vgui.VBox {
 	mut v := vgui.create_vbox_fill()
 	v.set_spacing(6)
 	v.set_padding(8)
 	for r in rows {
-		v.add_fixed(r.w, r.h)
+		v.add(r.w)
 	}
 	return v
 }
@@ -1339,6 +1380,7 @@ fn main() {
 	// Рамка кадрирования, ручки и сетка - поверх снимка, без пересчёта
 	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
 		crop_overlay(mut st, mut ctx)
+		ba_overlay(mut st, mut ctx) // шторка до/после
 	}
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
 		// Режим кадрирования (crop.v): рамка, ручки, линия горизонта
@@ -1347,7 +1389,13 @@ fn main() {
 		}
 		if st.wb_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
 			wb_pick_at(mut st, ev.x, ev.y)
+			return
 		}
+		// Линия шторки до/после, иначе щелчок - 100% / вписать (compare.v)
+		if ba_input(mut st, ev) {
+			return
+		}
+		zoom_click(mut st, ev)
 	}
 	// Шумодав и ореолы - подготовка сырья (~1 с на превью, в фоне): LibRaw
 	// и коррекция объектива не перезапускаются - сырьё в raw_linear.
@@ -1642,7 +1690,7 @@ fn main() {
 			sync_curve_editor(mut st)
 		}
 		st.curve_btns << b
-		ch_row.add(b, 1)
+		ch_row.add(b, flex: 1)
 	}
 	mut curve_reset := reset_button(mut st, 'Сбросить кривую канала')
 	curve_reset.on_click = fn [mut st, mut cv, mut hist] () {
@@ -1653,7 +1701,7 @@ fn main() {
 		record(mut st, 'curve${st.curve_ch}', 'Кривая ${curve_names[st.curve_ch]}: сброс',
 			false)
 	}
-	ch_row.add_fixed(curve_reset, 26)
+	ch_row.add(curve_reset)
 	mut curve_hint := vgui.label('Щелчок - точка, правая кнопка - удалить, двойной - сброс')
 	st.hint_labels << curve_hint
 	curve_hint.font_size = 12
@@ -1688,7 +1736,7 @@ fn main() {
 			})
 			mut lb := s.lb
 			st.hsl_labels << lb // цвет диапазона, под тему - paint_ui
-			rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w), 26}
+			rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w)}
 		}
 		hsl_tabs.add_tab(hsl_modes[m], section(rows))
 	}
@@ -1962,6 +2010,7 @@ fn main() {
 			st.load_msg = '${os.file_name(path)}: правки не прочитаны (${err.msg()})'
 			LoadedSidecar{}
 		}
+		st.mark = side.mark
 		if side.history.len > 0 {
 			set_edit(mut st, side.history[side.current].state)
 			st.history = side.history.clone()
@@ -2080,6 +2129,7 @@ fn main() {
 		open_file(st.frames[idx].path)
 		sync_strip(mut st)
 	}
+	st.goto_frame = goto_frame
 	st.thumb_done = fn [mut st] (res ThumbResult) {
 		take_thumb(mut st, res)
 	}
@@ -2088,8 +2138,9 @@ fn main() {
 	strip.pad = strip_pad
 	// Одиночный щелчок (и стрелки при фокусе на ленте) только выделяет
 	// миниатюру; открыть кадр - двойным щелчком или Enter
-	strip.on_dbl_click = fn [goto_frame] (idx int, text string) {
-		goto_frame(idx)
+	// Строка ленты - не номер кадра: с фильтром строк меньше (rating.v)
+	strip.on_dbl_click = fn [mut st, goto_frame] (row int, text string) {
+		goto_frame(frame_of_row(st, row))
 	}
 	// Ctrl/Shift+щелчок - несколько кадров: в них вставляются настройки
 	// (presets.v); число выделенных - в подписи над лентой
@@ -2107,10 +2158,21 @@ fn main() {
 		set_strip_open(mut st, !st.strip_open)
 	}
 	st.strip_toggle = strip_toggle
+	// Фильтр ленты по пометкам отбора (rating.v)
+	mut filter_cb := vgui.combo_box()
+	filter_cb.set_items(filter_names)
+	filter_cb.set_selected(0)
+	filter_cb.on_change = fn [mut st] (i int, _ string) {
+		if i >= 0 && i < filter_keys.len && filter_keys[i] != st.filter {
+			set_filter(mut st, filter_keys[i])
+		}
+	}
+	st.filter_cb = filter_cb
 	mut strip_bar := vgui.create_hbox_fill()
 	strip_bar.set_spacing(8)
-	strip_bar.add(strip_info, 1)
-	strip_bar.add_fixed(strip_toggle, 130)
+	strip_bar.add(strip_info, flex: 1)
+	strip_bar.add(filter_cb)
+	strip_bar.add(strip_toggle)
 	st.strip_bar = strip_bar
 	// ←/→, Home/End - соседний, первый, последний кадр (если фокус не у
 	// ползунка: его стрелки двигают значение)
@@ -2129,17 +2191,18 @@ fn main() {
 			crop_cancel(mut st)
 		}
 	})
+	// Соседи - среди кадров фильтра ленты
 	win.bind_hotkey('Left', fn [mut st, goto_frame] () {
-		goto_frame(st.frame_idx - 1)
+		goto_frame(next_shown(st, st.frame_idx, -1))
 	})
 	win.bind_hotkey('Right', fn [mut st, goto_frame] () {
-		goto_frame(st.frame_idx + 1)
+		goto_frame(next_shown(st, st.frame_idx, 1))
 	})
-	win.bind_hotkey('Home', fn [goto_frame] () {
-		goto_frame(0)
+	win.bind_hotkey('Home', fn [mut st, goto_frame] () {
+		goto_frame(frame_of_row(st, 0))
 	})
 	win.bind_hotkey('End', fn [mut st, goto_frame] () {
-		goto_frame(st.frames.len - 1)
+		goto_frame(frame_of_row(st, st.shown.len - 1))
 	})
 
 	// ── Файл: открыть файл или папку, экспорт (меню «Файл») ──
@@ -2182,6 +2245,7 @@ fn main() {
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
 		st.side_path = ''
+		st.mark = Mark{}
 		set_cam_color(mut st, pipeline.CamColor{})
 		set_wb_pick(mut st, false)
 		set_edit(mut st, neutral_edit())
@@ -2310,6 +2374,7 @@ fn main() {
 			quality:  st.settings.jpeg_quality
 			size:     st.settings.export_size_opts()
 			load:     load_level(st.settings.export_load)
+			settings: st.settings
 			ai_cache: ai_cache
 			ctl:      ctl
 			on_stage: st.exp_progress
@@ -2521,6 +2586,43 @@ fn main() {
 	bar.add_menu('Пресеты', []&vgui.MenuItem{})
 	rebuild_presets_menu(mut st)
 
+	// «Отбор» (rating.v): звёзды и флажки - клавишами, как в Lightroom;
+	// действуют на выделенные в ленте кадры, без выделения - на открытый
+	mut pick_items := []&vgui.MenuItem{}
+	for r in 0 .. 6 {
+		mut it := vgui.menu_action(if r == 0 {
+			'Без звёзд'
+		} else {
+			'${r} ${plural(r, 'звезда', 'звезды', 'звёзд')}'
+		})
+		it.shortcut = '${r}'
+		it.on_click = fn [mut st, r] () {
+			set_rating(mut st, r)
+		}
+		pick_items << it
+	}
+	pick_items << vgui.menu_separator()
+	flag_names := ['Отобран', 'Отклонён', 'Снять флажок']
+	flag_keys := ['P', 'X', 'U']
+	flag_vals := [1, -1, 0]
+	for k in 0 .. 3 {
+		mut it := vgui.menu_action(flag_names[k])
+		it.shortcut = flag_keys[k]
+		f := flag_vals[k]
+		it.on_click = fn [mut st, f] () {
+			set_flag(mut st, f)
+		}
+		pick_items << it
+	}
+	pick_items << vgui.menu_separator()
+	mut m_advance := vgui.menu_checkbox('Переходить к следующему кадру', st.settings.auto_advance)
+	m_advance.on_toggle = fn [mut st] (v bool) {
+		st.settings.auto_advance = v
+		save_settings(st.settings)
+	}
+	pick_items << m_advance
+	bar.add_menu('Отбор', pick_items)
+
 	mut m_fit := vgui.menu_action('Вписать')
 	m_fit.shortcut = 'Ctrl+0'
 	m_fit.on_click = fn [mut cv] () {
@@ -2539,6 +2641,22 @@ fn main() {
 	m_z200.on_click = fn [mut cv] () {
 		cv.set_zoom(2.0)
 	}
+	// Увеличение 100% и обратно (щелчок по снимку - то же в точку щелчка)
+	mut m_zoom := vgui.menu_action('100% / вписать')
+	m_zoom.shortcut = 'Z'
+	m_zoom.on_click = fn [mut st] () {
+		toggle_zoom_center(mut st)
+	}
+	win.bind_hotkey('Space', fn [mut st] () {
+		toggle_zoom_center(mut st)
+	})
+	// До/после (compare.v): шторка - Y, весь снимок «до» - пока зажата «\»
+	mut m_split := vgui.menu_checkbox('До/после: шторка', false)
+	m_split.shortcut = 'Y'
+	m_split.on_toggle = fn [mut st] (v bool) {
+		set_ba_split(mut st, v)
+	}
+	st.m_split = m_split
 	mut m_strip := vgui.menu_checkbox('Лента кадров', st.strip_open)
 	m_strip.on_toggle = fn [mut st] (v bool) {
 		set_strip_open(mut st, v)
@@ -2572,8 +2690,8 @@ fn main() {
 		st.m_theme << it
 		m_themes.add(it)
 	}
-	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, vgui.menu_separator(), m_clipwarn,
-		m_strip, m_bg, m_themes])
+	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
+		m_clipwarn, m_strip, m_bg, m_themes])
 
 	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
@@ -2584,11 +2702,11 @@ fn main() {
 	}
 	mut exp_row := vgui.create_hbox_fill()
 	exp_row.set_spacing(6)
-	exp_row.add_fixed(exp.lb, lbl_w)
-	exp_row.add(exp_sl, 1)
-	exp_row.add_fixed(exp.vl, val_w)
-	exp_row.add_fixed(b_autoexp, 26)
-	exp_row.add_fixed(b_expreset, 26)
+	exp_row.add(exp.lb, min: lbl_w)
+	exp_row.add(exp_sl, flex: 1)
+	exp_row.add(exp.vl, min: val_w)
+	exp_row.add(b_autoexp)
+	exp_row.add(b_expreset)
 	mut sh_row := edit_row(mut st, mut sh, lbl_w, val_w)
 	mut con_row := edit_row(mut st, mut con, lbl_w, val_w)
 	mut vib_row := edit_row(mut st, mut vib, lbl_w, val_w)
@@ -2644,74 +2762,74 @@ fn main() {
 	acc.spacing = 4
 	acc.header_height = 30
 	acc.add_section_expanded('Коррекция', section([
-		SectionRow{lens_cb, 26},
-		SectionRow{lens_lb, 16},
-		SectionRow{crv_cb, 26},
-		SectionRow{hl_row, 26},
+		SectionRow{lens_cb},
+		SectionRow{lens_lb},
+		SectionRow{crv_cb},
+		SectionRow{hl_row},
 	]))
 	acc.add_section('Кадрирование и поворот', section(crop_rows))
 	acc.add_section_expanded('Баланс белого', section(wb_rows))
 	acc.add_section_expanded('Экспозиция и тон', section([
-		SectionRow{exp_row, 26},
-		SectionRow{sh_row, 26},
-		SectionRow{con_row, 26},
-		SectionRow{vib_row, 26},
-		SectionRow{sat_row, 26},
+		SectionRow{exp_row},
+		SectionRow{sh_row},
+		SectionRow{con_row},
+		SectionRow{vib_row},
+		SectionRow{sat_row},
 	]))
 	acc.add_section('Удаление дымки', section([
-		SectionRow{hzs_row, 26},
-		SectionRow{hzd_row, 26},
-		SectionRow{hz_map_cb, 26},
-		SectionRow{hz_hint, 16},
+		SectionRow{hzs_row},
+		SectionRow{hzd_row},
+		SectionRow{hz_map_cb},
+		SectionRow{hz_hint},
 	]))
 	acc.add_section('Тени/Света', section([
-		SectionRow{hlt_row, 26},
-		SectionRow{sht_row, 26},
+		SectionRow{hlt_row},
+		SectionRow{sht_row},
 	]))
 	mut eq_items := []SectionRow{}
 	for row in eq_rows {
-		eq_items << SectionRow{row, 26}
+		eq_items << SectionRow{row}
 	}
 	acc.add_section('Тон-эквалайзер (EV)', section(eq_items))
 	acc.add_section('Кривые', section([
-		SectionRow{ch_row, 28},
-		SectionRow{ed, 300},
-		SectionRow{curve_hint, 16},
+		SectionRow{ch_row},
+		SectionRow{ed},
+		SectionRow{curve_hint},
 	]))
 	// Высота вкладок: заголовок TabBox + 8 рядов с отступами секции
 	acc.add_section('HSL', section([
-		SectionRow{hsl_tabs, 32 + 8 * 26 + 7 * 6 + 16},
+		SectionRow{hsl_tabs},
 	]))
 	acc.add_section('Шумодав и ореолы', section([
-		SectionRow{ai_caption, 16},
-		SectionRow{ai_block, ai_block_h},
-		SectionRow{vgui.separator(), 9},
-		SectionRow{classic_caption, 16},
-		SectionRow{imp_row, 26},
-		SectionRow{nrl_row, 26},
-		SectionRow{nrc_row, 26},
-		SectionRow{df_row, 26},
+		SectionRow{ai_caption},
+		SectionRow{ai_block},
+		SectionRow{vgui.separator()},
+		SectionRow{classic_caption},
+		SectionRow{imp_row},
+		SectionRow{nrl_row},
+		SectionRow{nrc_row},
+		SectionRow{df_row},
 	]))
 	acc.add_section('Резкость', section([
-		SectionRow{dc_caption, 16},
-		SectionRow{dca_row, 26},
-		SectionRow{dcr_row, 26},
-		SectionRow{dcc_row, 26},
-		SectionRow{dc_hint, 16},
-		SectionRow{vgui.separator(), 9},
-		SectionRow{usm_caption, 16},
-		SectionRow{sha_row, 26},
-		SectionRow{shr_row, 26},
-		SectionRow{shd_row, 26},
-		SectionRow{shm_row, 26},
-		SectionRow{sh_rgb_cb, 26},
-		SectionRow{sh_show_cb, 26},
-		SectionRow{sharp_hint, 16},
+		SectionRow{dc_caption},
+		SectionRow{dca_row},
+		SectionRow{dcr_row},
+		SectionRow{dcc_row},
+		SectionRow{dc_hint},
+		SectionRow{vgui.separator()},
+		SectionRow{usm_caption},
+		SectionRow{sha_row},
+		SectionRow{shr_row},
+		SectionRow{shd_row},
+		SectionRow{shm_row},
+		SectionRow{sh_rgb_cb},
+		SectionRow{sh_show_cb},
+		SectionRow{sharp_hint},
 	]))
 	// История - последней секцией, открыта: 8 строк списка и подсказка
 	acc.add_section_expanded('История', section([
-		SectionRow{hist_lb, 8 * 22 + 8},
-		SectionRow{hist_hint, 16},
+		SectionRow{hist_lb},
+		SectionRow{hist_hint},
 	]))
 
 	mut scroll := vgui.scroll_box(0)
@@ -2725,8 +2843,8 @@ fn main() {
 	right.set_spacing(6)
 	right.set_padding(10)
 	st.right = right
-	right.add_fixed(hist, 120)
-	right.add(scroll, 1)
+	right.add(hist)
+	right.add(scroll, flex: 1)
 
 	// Область снимка: фон, выбранный в меню «Вид», картинка с отступом от
 	// краёв. Холст и заглушка лежат друг на друге в Stack, видим один.
@@ -2736,13 +2854,13 @@ fn main() {
 	mut view_area := vgui.create_vbox_fill()
 	view_area.set_padding(16)
 	view_area.set_bg(ph.edge) // выбранный фон - когда виден снимок (sync_view_bg)
-	view_area.add(view_stack, 1)
+	view_area.add(view_stack, flex: 1)
 	st.view_area = view_area
 	st.view_stack = view_stack
 	// Область просмотра - снимок и под ним лента кадров папки
 	// (layout_strip, когда открыт файл или папка)
 	mut viewer := vgui.create_vbox_fill()
-	viewer.add(view_area, 1)
+	viewer.add(view_area, flex: 1)
 	st.viewer = viewer
 	// Высота ленты - вертикальным сплиттером; после перетаскивания ячейки
 	// подстраиваются под новую высоту
@@ -2779,8 +2897,8 @@ fn main() {
 
 	// Корень: меню вверху, под ним рабочая область
 	mut root := vgui.create_vbox_fill()
-	root.add_fixed(bar, 28)
-	root.add(top, 1)
+	root.add(bar)
+	root.add(top, flex: 1)
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).
@@ -2791,6 +2909,10 @@ fn main() {
 		win.add_widget(t)
 	}
 	win.add_widget(nm)
+	// Удержание «\» (до/после) и буквы в русской раскладке (compare.v)
+	win.add_widget(&KeyWatch{
+		st: st
+	})
 	app.add_window(win)
 
 	// Путь к RAW можно передать аргументом: vraw файл.CR3

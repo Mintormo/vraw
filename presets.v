@@ -130,16 +130,11 @@ fn plural(n int, one string, few string, many string) string {
 // paste_targets - RAW-файлы для вставки: выделенные в ленте, если их
 // больше одного; иначе открытый кадр, а без него - выделенный в ленте.
 fn paste_targets(st &State) []string {
-	mut sel := []int{}
-	if !isnil(st.strip) {
-		sel = st.strip.get_selection()
-	}
+	sel := strip_selection(st) // номера кадров (с фильтром строки - не они)
 	mut out := []string{}
 	if sel.len > 1 || st.history.len == 0 {
 		for i in sel {
-			if i >= 0 && i < st.frames.len {
-				out << st.frames[i].path
-			}
+			out << st.frames[i].path
 		}
 		return out
 	}
@@ -175,7 +170,7 @@ fn paste_to_file(raw_path string, src EditState, groups []string, name string) !
 		name:  name
 		state: e
 	}
-	write_atomic(side, encode_history(hist, hist.len - 1))!
+	write_atomic(side, encode_history(hist, hist.len - 1, loaded.mark))!
 	return true
 }
 
@@ -519,8 +514,6 @@ mut:
 	preset   bool // true - сохранение пресета (поле имени), false - копирование
 }
 
-const grp_w = 440
-const grp_h = 466 // 9 групп (с кадрированием)
 
 // show_groups - окно групп: preset = false - «Копировать настройки»,
 // true - «Сохранить пресет» (с полем имени). Флажки - последний выбор.
@@ -617,23 +610,20 @@ fn layout_groups(mut u GroupsUi) {
 	mut body := u.body
 	body.clear()
 	if u.preset {
-		body.add_fixed(u.name_row, set_row_h)
-		body.add_fixed(vgui.create_spacer(), 6)
+		body.add(u.name_row)
 	}
-	body.add_fixed(u.title, set_note_h + 4)
+	body.add(u.title)
 	for cb in u.cbs {
-		body.add_fixed(cb, 26)
+		body.add(cb)
 	}
-	body.add(vgui.create_spacer(), 1)
-	body.add_fixed(u.btn_row, 30)
+	body.add(vgui.create_spacer(), flex: 1)
+	body.add(u.btn_row)
 }
 
 fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &GroupsUi{}
 	mut dlg := vgui.create_dialog(
 		title:     'Копировать настройки'
-		width:     grp_w
-		height:    grp_h
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -654,8 +644,8 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.name = name
 	mut name_row := vgui.create_hbox_fill()
 	name_row.set_spacing(8)
-	name_row.add_fixed(name_l, 110)
-	name_row.add(name, 1)
+	name_row.add(name_l)
+	name_row.add(name, flex: 1)
 
 	u.name_row = name_row
 	mut title := vgui.label('')
@@ -692,11 +682,11 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.ok = ok
 	mut btn_row := vgui.create_hbox_fill()
 	btn_row.set_spacing(8)
-	btn_row.add_fixed(b_all, 70)
-	btn_row.add_fixed(b_none, 80)
-	btn_row.add(vgui.create_spacer(), 1)
-	btn_row.add_fixed(b_cancel, 90)
-	btn_row.add_fixed(ok, 110)
+	btn_row.add(b_all)
+	btn_row.add(b_none)
+	btn_row.add(vgui.create_spacer(), flex: 1)
+	btn_row.add(b_cancel, min: 100)
+	btn_row.add(ok, min: 100)
 	u.btn_row = btn_row
 	mut body := vgui.create_vbox_fill()
 	body.set_padding(16)

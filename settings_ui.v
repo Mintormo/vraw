@@ -55,12 +55,6 @@ mut:
 	notes    []&vgui.Label // вторичные подписи - цвет по теме
 }
 
-const set_w = 640
-const set_h = 590
-const set_row_h = f32(28)
-const set_note_h = f32(20)
-const set_state_w = f32(150)
-const set_btn_w = f32(110)
 // fmt_title - формат в списке настроек: название и что это
 fn fmt_title(f imgio.Format) string {
 	return match f {
@@ -185,18 +179,20 @@ fn path_tip(path string) string {
 // indented - виджет с отступом слева (под текстом переключателя)
 fn indented(w &vgui.Widget, pad f32) &vgui.HBox {
 	mut row := vgui.create_hbox_fill()
-	row.add_fixed(vgui.create_spacer(), pad)
-	row.add(w, 1)
+	row.set_spacing(0)
+	row.add(vgui.label(''), min: pad) // pad - колонка подписей окна (по тексту)
+	row.add(w, flex: 1)
 	return row
 }
 
-// labeled - «подпись | виджет» для рядов оформления
-fn labeled(text string, w &vgui.Widget) &vgui.HBox {
+// labeled - «подпись | виджет» для рядов оформления; col - колонка
+// подписей (по самой длинной), w_min - общая ширина виджетов колонки
+fn labeled(text string, w &vgui.Widget, col f32, w_min f32) &vgui.HBox {
 	mut row := vgui.create_hbox_fill()
 	row.set_spacing(8)
-	row.add_fixed(vgui.label(text), 170)
-	row.add_fixed(w, 240)
-	row.add(vgui.create_spacer(), 1)
+	row.add(vgui.label(text), min: col)
+	row.add(w, min: w_min)
+	row.add(vgui.create_spacer(), flex: 1)
 	return row
 }
 
@@ -204,8 +200,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &SettingsUi{}
 	mut dlg := vgui.create_dialog(
 		title:     'Настройки'
-		width:     set_w
-		height:    set_h
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -233,6 +227,20 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.bg_cb = bg_cb
 
 	// ── AI-шумодав: движок ──
+	// Колонки состояния и кнопок у строк ORT и моделей - по самым длинным
+	// их текстам (шрифтом окна): кнопки стоят ровной колонкой
+	mut dw := &dlg.win
+	state_col := column_width(mut dw, ['установлен', 'нет · 11.0 МБ', 'скачана · 117.0 МБ',
+		'нет в папке моделей'], 8)
+	btn_col := column_width(mut dw, ['Скачать', 'Удалить', 'Точно?', 'Готов'], 0) +
+		2 * vgui.measure_pad_x
+	look_col := column_width(mut dw, ['Тема', 'Фон вокруг снимка'], 8)
+	// Списки оформления - одной ширины, по самому длинному пункту обоих
+	// (24 - стрелка ComboBox, как в его measure)
+	mut look_items := theme_names.clone()
+	look_items << bg_names
+	look_w := column_width(mut dw, look_items, 0) +
+		2 * theme_cb.pad + 24
 	mut rt_btn := vgui.button('Скачать')
 	rt_btn.on_click = fn [mut st, mut app] () {
 		start_download(mut st, mut app, '')
@@ -242,23 +250,21 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.rt_state = rt_state
 	mut rt_row := vgui.create_hbox_fill()
 	rt_row.set_spacing(8)
-	rt_row.add(vgui.label('ONNX Runtime ${ai.runtime_version}'), 1)
-	rt_row.add_fixed(rt_state, set_state_w)
-	rt_row.add_fixed(rt_btn, set_btn_w)
+	rt_row.add(vgui.label('ONNX Runtime ${ai.runtime_version}'), flex: 1)
+	rt_row.add(rt_state, min: state_col)
+	rt_row.add(rt_btn, min: btn_col)
 
 	mut body := vgui.create_vbox_fill()
 	body.set_padding(16)
 	body.set_spacing(6)
-	body.add_fixed(caption('Оформление'), 20)
-	body.add_fixed(labeled('Тема', theme_cb), set_row_h)
-	body.add_fixed(labeled('Фон вокруг снимка', bg_cb), set_row_h)
-	body.add_fixed(vgui.create_spacer(), 8)
+	body.add(caption('Оформление'))
+	body.add(labeled('Тема', theme_cb, look_col, look_w))
+	body.add(labeled('Фон вокруг снимка', bg_cb, look_col, look_w))
 
-	body.add_fixed(caption('AI-шумодав'), 20)
-	body.add_fixed(rt_row, set_row_h)
-	body.add_fixed(note(mut u, 'Движок нейросетей (открытый, MIT) - нужен всем моделям'), set_note_h)
-	body.add_fixed(vgui.create_spacer(), 4)
-	body.add_fixed(vgui.label('Модель (для новых прогонов; кадр помнит свою):'), set_note_h + 2)
+	body.add(caption('AI-шумодав'))
+	body.add(rt_row)
+	body.add(note(mut u, 'Движок нейросетей (открытый, MIT) - нужен всем моделям'))
+	body.add(vgui.label('Модель (для новых прогонов; кадр помнит свою):'))
 
 	// ── Модели каталога: переключатель, состояние, кнопка ──
 	for info in ai.models {
@@ -290,11 +296,11 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		}
 		mut row := vgui.create_hbox_fill()
 		row.set_spacing(8)
-		row.add(radio, 1)
-		row.add_fixed(state, set_state_w)
-		row.add_fixed(btn, set_btn_w)
-		body.add_fixed(row, set_row_h)
-		body.add_fixed(indented(note(mut u, info.note), 26), set_note_h)
+		row.add(radio, flex: 1)
+		row.add(state, min: state_col)
+		row.add(btn, min: btn_col)
+		body.add(row)
+		body.add(indented(note(mut u, info.note), radio.circle_size + radio.gap))
 		u.rows << ModelRow{
 			id:    id
 			radio: radio
@@ -323,23 +329,22 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.dl_stop = dl_stop
 	mut bar_row := vgui.create_hbox_fill()
 	bar_row.set_spacing(8)
-	bar_row.add(dl_bar, 1)
-	bar_row.add_fixed(dl_stop, set_btn_w)
+	bar_row.add(dl_bar, flex: 1)
+	bar_row.add(dl_stop, min: btn_col)
 	mut dl_v := vgui.create_vbox_fill()
 	dl_v.set_spacing(4)
-	dl_v.add_fixed(dl_text, set_note_h)
-	dl_v.add_fixed(bar_row, set_row_h)
+	dl_v.add(dl_text)
+	dl_v.add(bar_row)
 	u.dl_box = layer(dl_v)
-	body.add_fixed(vgui.create_spacer(), 4)
-	body.add_fixed(u.dl_box, set_note_h + 4 + set_row_h)
+	body.add(u.dl_box)
 
 	// ── Где что лежит, закрыть ──
-	body.add(vgui.create_spacer(), 1)
+	body.add(vgui.create_spacer(), flex: 1)
 	paths := [path_note('Настройки: ', settings_path(), set_path_max),
 		path_note('Модели: ', st.ai_places.models, set_path_max)]
 	for p in paths {
 		u.notes << p.label
-		body.add_fixed(p.label, set_note_h)
+		body.add(p.label)
 	}
 	mut close := vgui.button('Закрыть')
 	close.style = .accent
@@ -347,10 +352,9 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		dlg.close_with_result(0)
 	}
 	mut close_row := vgui.create_hbox_fill()
-	close_row.add(vgui.create_spacer(), 1)
-	close_row.add_fixed(close, set_btn_w)
-	body.add_fixed(vgui.create_spacer(), 4)
-	body.add_fixed(close_row, 30)
+	close_row.add(vgui.create_spacer(), flex: 1)
+	close_row.add(close, min: btn_col)
+	body.add(close_row)
 
 	dlg.add_widget(body)
 	// Подсказки - после корня: рисуются поверх

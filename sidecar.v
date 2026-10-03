@@ -112,13 +112,25 @@ struct SideEntry {
 // отдельно, чтобы будущей пакетной обработке и копированию настроек не
 // разбирать историю. Поле camera_curve из старых сайдкаров (его читал
 // убранный консольный vraw) json2 при чтении пропускает.
+// Рейтинг, флажок и позиция - в начале документа (json2 пишет поля по
+// порядку): ленте при открытии папки хватает первых строк файла
+// (read_side_head), разбирать историю не нужно.
 struct SideFile {
 mut:
 	app     string = 'vraw'
 	version int    = sidecar_version
-	state   SideState
+	rating  int // звёзды 0..5 (отбор, вне истории правок)
+	flag    int // 1 - отобран, -1 - отклонён, 0 - нет
 	current int
+	state   SideState
 	history []SideEntry
+}
+
+// Mark - пометка отбора кадра: звёзды и флажок. Не правка (в историю не
+// идёт), но живёт в том же сайдкаре.
+struct Mark {
+	rating int // 0..5
+	flag   int // 1 - отобран, -1 - отклонён, 0 - нет
 }
 
 // side_state - настройки снимка в формате файла (без производных полей)
@@ -240,13 +252,15 @@ fn edit_state(s SideState) !EditState {
 
 // encode_sidecar - история State как JSON-документ сайдкара
 fn encode_sidecar(st &State) string {
-	return encode_history(st.history, st.hist_pos)
+	return encode_history(st.history, st.hist_pos, st.mark)
 }
 
 // encode_history - история и текущая позиция как JSON-документ сайдкара
 // (и для кадра, который не открыт: вставка настроек, presets.v)
-fn encode_history(history []HistEntry, pos int) string {
+fn encode_history(history []HistEntry, pos int, mark Mark) string {
 	mut f := SideFile{
+		rating:  mark.rating
+		flag:    mark.flag
 		state:   side_state(history[pos].state)
 		current: pos
 	}
@@ -264,6 +278,7 @@ fn encode_history(history []HistEntry, pos int) string {
 struct LoadedSidecar {
 	history []HistEntry
 	current int
+	mark    Mark
 }
 
 // decode_sidecar - сайдкар из JSON с проверкой: чужой файл, новая
@@ -290,7 +305,104 @@ fn decode_sidecar(text string) !LoadedSidecar {
 	return LoadedSidecar{
 		history: hs
 		current: f.current
+		mark:    clamp_mark(f.rating, f.flag)
 	}
+}
+
+// clamp_mark - пометка из файла в допустимых пределах
+fn clamp_mark(rating int, flag int) Mark {
+	return Mark{
+		rating: if rating < 0 { 0 } else if rating > 5 { 5 } else { rating }
+		flag:   if flag > 0 { 1 } else if flag < 0 { -1 } else { 0 }
+	}
+}
+
+// SideHead - начало сайдкара для ленты: пометка и есть ли правки
+// (current > 0 - настройки отличаются от «Открыт файл»)
+struct SideHead {
+	mark   Mark
+	edited bool
+}
+
+// SideMarks - то же полным разбором (сайдкары до 03.10.2026: «current»
+// стоял после настроек); остальные поля json2 пропускает
+struct SideMarks {
+	app     string
+	rating  int
+	flag    int
+	current int
+}
+
+// head_int - целое значение ключа «"key": N» в начале JSON
+fn head_int(head string, key string) ?int {
+	k := '"${key}":'
+	i := head.index(k) or { return none }
+	mut j := i + k.len
+	for j < head.len && head[j] == ` ` {
+		j++
+	}
+	mut e := j
+	if e < head.len && head[e] == `-` {
+		e++
+	}
+	for e < head.len && head[e] >= `0` && head[e] <= `9` {
+		e++
+	}
+	if e == j || (e == j + 1 && head[j] == `-`) || e >= head.len {
+		return none // число могло оборваться на краю прочитанного
+	}
+	return head[j..e].int()
+}
+
+// read_side_head - пометка и признак правок кадра по его сайдкару:
+// первые полкилобайта (~20 мкс), у старого файла - полный разбор
+// (~0.6 мс на 100 КБ). Нет файла или он испорчен - без пометки и правок.
+fn read_side_head(raw_path string) SideHead {
+	path := sidecar_path(raw_path)
+	mut f := os.open(path) or { return SideHead{} }
+	mut buf := []u8{len: 512}
+	n := f.read(mut buf) or { 0 }
+	f.close()
+	head := buf[..n].bytestr()
+	if head.contains('"app": "vraw"') {
+		if cur := head_int(head, 'current') {
+			return SideHead{
+				mark:   clamp_mark(head_int(head, 'rating') or { 0 }, head_int(head, 'flag') or { 0 })
+				edited: cur > 0
+			}
+		}
+	}
+	text := os.read_file(path) or { return SideHead{} }
+	m := json2.decode[SideMarks](text) or { return SideHead{} }
+	if m.app != 'vraw' {
+		return SideHead{}
+	}
+	return SideHead{
+		mark:   clamp_mark(m.rating, m.flag)
+		edited: m.current > 0
+	}
+}
+
+// write_mark - пометка кадра, который не открыт: в его сайдкар (нет
+// сайдкара - новый с одной записью «Открыт файл»); испорченный сайдкар
+// не перезаписывается
+fn write_mark(raw_path string, mark Mark) ! {
+	side := sidecar_path(raw_path)
+	loaded := load_sidecar(side) or { return error('сайдкар не прочитан (${err.msg()})') }
+	if loaded.history.len == 0 {
+		if mark == Mark{} {
+			return // сайдкара нет и пометки нет - писать нечего
+		}
+		write_atomic(side, encode_history([HistEntry{
+			name:  'Открыт файл'
+			state: neutral_edit()
+		}], 0, mark))!
+		return
+	}
+	if loaded.mark == mark {
+		return
+	}
+	write_atomic(side, encode_history(loaded.history, loaded.current, mark))!
 }
 
 // load_sidecar читает сайдкар; пустая история - файла нет, ошибка -
@@ -303,8 +415,9 @@ fn load_sidecar(path string) !LoadedSidecar {
 	return decode_sidecar(text)!
 }
 
-// sync_sidecar записывает историю в сайдкар (после правки или перехода).
-// Только что открытый файл без правок сайдкар не создаёт; если сайдкар
+// sync_sidecar записывает историю и пометку в сайдкар (после правки,
+// перехода или пометки). Только что открытый файл без правок и пометки
+// сайдкар не создаёт; если сайдкар
 // уже есть - он обновляется всегда (откат к «Открыт файл» тоже правка
 // состояния). Запись атомарная: временный файл + переименование, чтобы
 // сбой посреди записи не оставил обрезанный JSON. Ошибка записи
@@ -313,14 +426,15 @@ fn sync_sidecar(mut st State) {
 	if st.side_path.len == 0 || st.history.len == 0 {
 		return
 	}
-	if st.history.len == 1 && !os.exists(st.side_path) {
+	// Без правок и пометки сайдкар не создаётся
+	if st.history.len == 1 && st.mark == Mark{} && !os.exists(st.side_path) {
 		return
 	}
 	write_atomic(st.side_path, encode_sidecar(st)) or {
 		sidecar_error(mut st, err)
 		return
 	}
-	mark_edited(mut st) // отметка «изменён» на миниатюре ленты
+	mark_edited(mut st) // отметка «изменён» на миниатюре ленты (при правках)
 	sync_thumb(mut st) // кадрирование и поворот - на миниатюре
 }
 

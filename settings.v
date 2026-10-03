@@ -25,6 +25,11 @@ mut:
 	// Отрицание нарочно: в settings.json старой версии поля нет, json2
 	// даст false - AI при экспорте остаётся включённым
 	export_no_ai bool
+	// EXIF в готовом файле (imgio/exif.v): отрицание по той же причине -
+	// в старом settings.json поля нет, EXIF по умолчанию пишется;
+	// копирайт - в каждый файл (пусто - тега нет)
+	export_no_exif bool
+	exif_copyright string
 	// окно «Экспорт» (export_setup.v) - последний выбор: папка ('raw' -
 	// рядом с RAW, 'dir' - export_dir), шаблон имени, файл уже есть
 	// ('number' - добавить номер, 'overwrite'), размер на выход
@@ -52,6 +57,8 @@ mut:
 	// для кадра без рамки; сетка поверх рамки
 	crop_aspect string
 	crop_grid   string = 'thirds'
+	// отбор (rating.v): после пометки открытого кадра - к следующему
+	auto_advance bool
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -96,6 +103,8 @@ fn load_settings() Settings {
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()
 		export_no_ai:  s.export_no_ai
+		export_no_exif: s.export_no_exif
+		exif_copyright: s.exif_copyright.trim_space()
 		export_dir_mode: if s.export_dir_mode == 'dir' && s.export_dir != '' { 'dir' } else { 'raw' }
 		export_dir:      s.export_dir
 		export_name:     name_tmpl_migrate(s.export_name)
@@ -114,6 +123,7 @@ fn load_settings() Settings {
 		}
 		crop_aspect: if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
 		crop_grid:   if s.crop_grid in crop_grids { s.crop_grid } else { 'thirds' }
+		auto_advance: s.auto_advance
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {
 			s.jpeg_quality
