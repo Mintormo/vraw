@@ -996,7 +996,7 @@ fn make_placeholder(th vgui.Theme) &Placeholder {
 
 	mut col := vgui.create_vbox_fill()
 	col.set_spacing(6)
-	col.add(ic)
+	col.add(ic, align: .center) // фиксированный поперёк - иначе к левому краю
 	col.add(title)
 	col.add(hint)
 	col.add(fmts)
@@ -2136,6 +2136,9 @@ fn main() {
 	st.app = app
 	mut strip := vgui.list_box_h(strip_item_width(strip_pane_h))
 	strip.pad = strip_pad
+	// Колесо крутит ленту по наведению, без фокуса (vgui ListBox), и на
+	// краю не уходит дальше; щелчок колеса - один кадр (fit_strip_items)
+	strip.scroll_x_speed = strip.item_width
 	// Одиночный щелчок (и стрелки при фокусе на ленте) только выделяет
 	// миниатюру; открыть кадр - двойным щелчком или Enter
 	// Строка ленты - не номер кадра: с фильтром строк меньше (rating.v)

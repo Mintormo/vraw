@@ -550,6 +550,8 @@ fn fit_strip_items(mut st State) {
 	}
 	mut strip := st.strip
 	strip.item_width = strip_item_width(pane)
+	// Щелчок колеса - один кадр
+	strip.scroll_x_speed = strip.item_width
 	center_strip(mut st)
 }
 
