@@ -56,9 +56,23 @@ fn test_blend() {
 	assert a == [u16(7), 8, 9]
 }
 
+// CallCount - прогресс шумодава: считает вызовы
 struct CallCount {
 mut:
 	n int
+}
+
+fn (mut c CallCount) step(done int, total int) bool {
+	c.n++
+	assert done <= total
+	return true
+}
+
+// StopAtOnce - прогресс, отменяющий шумодав после первой плитки
+struct StopAtOnce {}
+
+fn (mut s StopAtOnce) step(_ int, _ int) bool {
+	return false
 }
 
 // lcg - детерминированный шум для теста
@@ -137,12 +151,8 @@ fn check_model(info ModelInfo, cache &Cache) ! {
 		}
 	}
 	// Счётчик - по указателю: замыкание захватывает значения копией
-	mut calls := &CallCount{}
-	out := denoise(m, unsafe { &u16(src.data) }, w, h, fn [mut calls] (done int, total int) bool {
-		calls.n++
-		assert done <= total
-		return true
-	})!
+	mut calls := CallCount{}
+	out := denoise(m, unsafe { &u16(src.data) }, w, h, mut calls)!
 	assert calls.n == tile_count(w, h)
 	assert calls.n == 4
 	mut err_in := f64(0)
@@ -162,9 +172,8 @@ fn check_model(info ModelInfo, cache &Cache) ! {
 	right := out[(h / 2 * w + w - 10) * 3 + 1]
 	assert right > left + 10000
 	// Отмена после первой плитки
-	denoise(m, unsafe { &u16(src.data) }, w, h, fn (done int, total int) bool {
-		return false
-	}) or {
+	mut stop := StopAtOnce{}
+	denoise(m, unsafe { &u16(src.data) }, w, h, mut stop) or {
 		assert err is Cancelled
 		c.free()
 		return

@@ -18,12 +18,14 @@ module pipeline
 // резко отклоняется от окрестности (кайма), цветность подтягивается
 // к размытому значению окрестности.
 import math
+import bigbuf
 
 // to_yuv_sqrt раскладывает линейный RGB на плоскости y/u/v в sqrt-домене.
+// Плоскости - вне сборщика (bigbuf): вызывающий освобождает их сам.
 fn to_yuv_sqrt(buf &u16, npix int) ([]f32, []f32, []f32) {
-	mut y := []f32{len: npix}
-	mut u := []f32{len: npix}
-	mut v := []f32{len: npix}
+	mut y := bigbuf.new_f32(npix)
+	mut u := bigbuf.new_f32(npix)
+	mut v := bigbuf.new_f32(npix)
 	unsafe {
 		mut s := &u16(buf)
 		py := &f32(y.data)
@@ -118,10 +120,19 @@ fn atrous_blur(src []f32, mut tmp []f32, mut dst []f32, w int, h int, step int) 
 // как есть), остаток и усечённые детали складываются обратно.
 fn atrous_denoise(mut a []f32, w int, h int, thresholds []f32) {
 	npix := w * h
-	mut acc := []f32{len: npix} // сумма усечённых деталей
-	mut tmp := []f32{len: npix}
-	mut cur := a.clone()
-	mut next := []f32{len: npix}
+	// Рабочие плоскости - вне сборщика (bigbuf), на полном кадре это
+	// 4 x 96 МБ на каждую плоскость yuv
+	mut acc := bigbuf.new_f32(npix) // сумма усечённых деталей
+	mut tmp := bigbuf.new_f32(npix)
+	mut cur := bigbuf.new_f32(npix)
+	mut next := bigbuf.new_f32(npix)
+	defer {
+		bigbuf.free(mut acc)
+		bigbuf.free(mut tmp)
+		bigbuf.free(mut cur)
+		bigbuf.free(mut next)
+	}
+	unsafe { vmemcpy(cur.data, a.data, npix * int(sizeof(f32))) }
 	for l in 0 .. thresholds.len {
 		atrous_blur(cur, mut tmp, mut next, w, h, 1 << l)
 		t2 := thresholds[l] * thresholds[l]
@@ -211,8 +222,12 @@ pub fn impulse(buf &u16, w int, h int, strength f32) {
 	}
 	npix := w * h
 	t := f32(55.0) - strength * f32(0.5) // sqrt-домен: 100 -> 5, 50 -> 30
-	mut a := []f32{len: npix}
-	mut b := []f32{len: npix}
+	mut a := bigbuf.new_f32(npix)
+	mut b := bigbuf.new_f32(npix)
+	defer {
+		bigbuf.free(mut a)
+		bigbuf.free(mut b)
+	}
 	for ch in 0 .. 3 {
 		unsafe {
 			s := buf
@@ -244,6 +259,11 @@ pub fn denoise(buf &u16, w int, h int, luma f32, chroma f32) {
 	}
 	npix := w * h
 	mut y, mut u, mut v := to_yuv_sqrt(buf, npix)
+	defer {
+		bigbuf.free(mut y)
+		bigbuf.free(mut u)
+		bigbuf.free(mut v)
+	}
 	if luma > 0 {
 		t := luma * f32(6.0 / 100.0)
 		atrous_denoise(mut y, w, h, [t, t * 0.6, t * 0.35])
@@ -268,12 +288,20 @@ pub fn defringe(buf &u16, w int, h int, strength f32) {
 		return
 	}
 	npix := w * h
-	y, u, v := to_yuv_sqrt(buf, npix)
+	mut y, mut u, mut v := to_yuv_sqrt(buf, npix)
 	// Размытая цветность окрестности: два уровня B3 (шаги 1 и 2) ~ гаусс
 	// с радиусом ~6 - шире типичной каймы в 2-4 пикселя
-	mut tmp := []f32{len: npix}
-	mut ub := []f32{len: npix}
-	mut vb := []f32{len: npix}
+	mut tmp := bigbuf.new_f32(npix)
+	mut ub := bigbuf.new_f32(npix)
+	mut vb := bigbuf.new_f32(npix)
+	defer {
+		bigbuf.free(mut y)
+		bigbuf.free(mut u)
+		bigbuf.free(mut v)
+		bigbuf.free(mut tmp)
+		bigbuf.free(mut ub)
+		bigbuf.free(mut vb)
+	}
 	atrous_blur(u, mut tmp, mut ub, w, h, 1)
 	atrous_blur(ub, mut tmp, mut ub, w, h, 2)
 	atrous_blur(v, mut tmp, mut vb, w, h, 1)

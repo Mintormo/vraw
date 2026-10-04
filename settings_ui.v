@@ -490,6 +490,17 @@ fn start_download(mut st State, mut app vgui.App, model string) {
 	sync_settings_ui(mut st)
 }
 
+// DlTick - одно сообщение о прогрессе скачивания (post_result, post.v)
+struct DlTick {
+	on_progress fn (&DlCtl, i64) = unsafe { nil }
+	ctl         &DlCtl = unsafe { nil }
+	all         i64
+}
+
+fn deliver_dl_tick(t DlTick) {
+	t.on_progress(t.ctl, t.all)
+}
+
 // dl_progress_fn - прогресс одной части задания (base - байт до неё) в
 // главный поток; сообщается не чаще, чем раз в ~0.5 МБ
 fn dl_progress_fn(mut app vgui.App, ctl &DlCtl, base i64, on_progress fn (&DlCtl, i64)) fn (i64, i64) bool {
@@ -498,8 +509,10 @@ fn dl_progress_fn(mut app vgui.App, ctl &DlCtl, base i64, on_progress fn (&DlCtl
 		all := base + done
 		if all - c.posted >= 500_000 || all == c.total {
 			c.posted = all
-			app.post(fn [on_progress, ctl, all] () {
-				on_progress(ctl, all)
+			post_result(mut app, deliver_dl_tick, DlTick{
+				on_progress: on_progress
+				ctl:         ctl
+				all:         all
 			})
 		}
 		return !c.cancel
@@ -535,9 +548,7 @@ fn dl_worker(p ai.Places, need_rt bool, ctl &DlCtl, mut app vgui.App, on_progres
 			}
 		}
 	}
-	app.post(fn [on_done, res] () {
-		on_done(res)
-	})
+	post_result(mut app, on_done, res)
 }
 
 // dl_take - итог скачивания (главный поток)

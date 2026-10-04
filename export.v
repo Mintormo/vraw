@@ -14,6 +14,7 @@ import raw
 import lens
 import pipeline
 import ai
+import bigbuf
 import imgio
 
 // correct_lens - коррекция объектива на месте (виньетирование с силой vign
@@ -29,11 +30,18 @@ fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, vign f32)
 }
 
 // Image - проявленный 8-битный RGB-кадр и метаданные RAW (для EXIF)
+// Image - готовый кадр экспорта; rgb бывает вне сборщика (bigbuf) -
+// после записи освобождать free()
 struct Image {
 	width  int
 	height int
-	rgb    []u8 // width * height * 3
-	meta   raw.Meta
+mut:
+	rgb  []u8 // width * height * 3
+	meta raw.Meta
+}
+
+fn (mut im Image) free() {
+	bigbuf.free(mut im.rgb)
 }
 
 // exif_time - дата для EXIF: «ГГГГ:ММ:ДД чч:мм:сс»
@@ -175,22 +183,40 @@ fn (e ExportCancelled) msg() string {
 	return 'экспорт отменён'
 }
 
-// ExportOpts - модель AI-шумодава (общая, грузится один раз) и прогресс:
-// progress(этап, done, total) зовётся в начале каждого этапа (0, 0) и
-// после каждой плитки AI; false - отмена, develop_full вернёт
-// ExportCancelled. Без модели кадр с включённым AI не проявляется -
-// ошибка, а не молча другой результат. progress по умолчанию nil (без
-// прогресса): анонимная функция значением по умолчанию в @[params]-поле
-// ломает C-кодоген V.
+// StageProgress - прогресс экспорта: stage(этап, done, total) зовётся в
+// начале каждого этапа (0, 0) и после каждой плитки AI; false - отмена.
+// Интерфейс, а не замыкание (post.v: замыкания V держат чужие буферы).
+interface StageProgress {
+mut:
+	stage(s ExportStage, done int, total int) bool
+}
+
+// NoStage - прогресс не нужен
+struct NoStage {}
+
+fn (mut n NoStage) stage(_ ExportStage, _ int, _ int) bool {
+	return true
+}
+
+// AiStage - прогресс AI-шумодава как этап .ai прогресса экспорта
+struct AiStage {
+mut:
+	p StageProgress
+}
+
+fn (mut a AiStage) step(done int, total int) bool {
+	return a.p.stage(.ai, done, total)
+}
+
+// ExportOpts - модель AI-шумодава (общая, грузится один раз) и прогресс
+// (StageProgress; none - без прогресса); false из него - отмена,
+// develop_full вернёт ExportCancelled. Без модели кадр с включённым AI не
+// проявляется - ошибка, а не молча другой результат.
 @[params]
 struct ExportOpts {
 	ai_cache &ai.Cache = unsafe { nil }
-	progress fn (ExportStage, int, int) bool = unsafe { nil }
+	progress ?StageProgress
 	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
-}
-
-fn no_progress(_ ExportStage, _ int, _ int) bool {
-	return true
 }
 
 // develop_full - проявка RAW-файла по настройкам кадра e в 8-битный RGB
@@ -201,110 +227,147 @@ fn no_progress(_ ExportStage, _ int, _ int) bool {
 // кадру, ~2.5 мин на 24 Мп. Отмена проверяется между этапами и между
 // плитками AI.
 fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Image {
-	progress := if isnil(o.progress) { no_progress } else { o.progress }
-	if !progress(.decode, 0, 0) {
+	mut progress := o.progress or { StageProgress(NoStage{}) }
+	if !progress.stage(.decode, 0, 0) {
 		return ExportCancelled{}
 	}
 	mut d := raw.open(path)!
-	defer {
+	mut img := d.develop(highlight: e.highlight) or {
 		d.close()
+		return err
 	}
-	mut img := d.develop(highlight: e.highlight)!
+	// LibRaw больше не нужен: его внутренние буферы (сырьё и 4-канальный
+	// кадр, ~240 МБ на 24 Мп) - отпустить сразу, не держать весь экспорт.
+	// Готовое изображение img - отдельный блок, живёт до img.free()
+	meta := d.meta()
+	d.close()
+	// Промежуточные результаты - вне сборщика (bigbuf) и освобождаются, как
+	// только не нужны (пик памяти); defer - страховка ранних выходов
+	// (отмена, ошибка): повторный free безвреден
+	mut den := []u16{}
+	mut mask0 := []u16{}
+	mut dc := []u16{}
+	mut glin := []u16{}
+	mut gmask := []u16{}
+	mut haze := pipeline.HazeMap{}
 	defer {
 		img.free()
+		bigbuf.free(mut den)
+		bigbuf.free(mut mask0)
+		bigbuf.free(mut dc)
+		bigbuf.free(mut glin)
+		bigbuf.free(mut gmask)
+		haze.free()
 	}
 	w := img.width
 	h := img.height
 	buf := img.data_u16()
 	if e.lens_corr {
-		if !progress(.lens, 0, 0) {
+		if !progress.stage(.lens, 0, 0) {
 			return ExportCancelled{}
 		}
-		correct_lens(buf, w, h, d.meta(), db, e.vign)
+		correct_lens(buf, w, h, meta, db, e.vign)
 	}
 	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
 	if e.ai > 0 {
 		if isnil(o.ai_cache) {
 			return error('AI-шумодав недоступен')
 		}
-		if !progress(.ai, 0, 0) {
+		if !progress.stage(.ai, 0, 0) {
 			return ExportCancelled{}
 		}
 		mut cache := unsafe { o.ai_cache }
 		model := cache.get()!
-		den := ai.denoise(model, buf, w, h, fn [progress] (done int, total int) bool {
-			return progress(.ai, done, total)
-		}) or {
+		mut ap := AiStage{
+			p: progress
+		}
+		den = bigbuf.new_u16(w * h * 3)
+		ai.denoise_into(model, buf, w, h, mut den, mut ap) or {
 			if err is ai.Cancelled {
 				return ExportCancelled{}
 			}
 			return err
 		}
 		ai.blend(buf, den, e.ai / 100)
+		bigbuf.free(mut den)
 	}
 	if e.nr[0] > 0 {
-		if !progress(.impulse, 0, 0) {
+		if !progress.stage(.impulse, 0, 0) {
 			return ExportCancelled{}
 		}
 		pipeline.impulse(buf, w, h, e.nr[0])
 	}
 	if e.nr[1] > 0 || e.nr[2] > 0 {
-		if !progress(.denoise, 0, 0) {
+		if !progress.stage(.denoise, 0, 0) {
 			return ExportCancelled{}
 		}
 		pipeline.denoise(buf, w, h, e.nr[1], e.nr[2])
 	}
 	if e.nr[3] > 0 {
-		if !progress(.defringe, 0, 0) {
+		if !progress.stage(.defringe, 0, 0) {
 			return ExportCancelled{}
 		}
 		pipeline.defringe(buf, w, h, e.nr[3])
 	}
-	// Capture-резкость - как в превью: после шумодава; маска «Тени/Света» -
-	// по сырью до неё
-	mut dc := []u16{}
+	// Маска «Тени/Света» - как в превью: по сырью после шумодава, до
+	// Capture-резкости
+	mask0 = bigbuf.new_u16(w * h)
+	pipeline.blur_luma_into(buf, w, h, mut mask0)
+	mut src := unsafe { &u16(buf) }
 	if e.params.sharp.dc_amount > 0 {
-		if !progress(.capture, 0, 0) {
+		if !progress.stage(.capture, 0, 0) {
 			return ExportCancelled{}
 		}
-		dc = pipeline.deconvolve(buf, w, h, e.params.sharp, 1.0)
+		dc = bigbuf.new_u16(w * h * 3)
+		pipeline.deconvolve_into(buf, w, h, e.params.sharp, 1.0, mut dc)
+		src = unsafe { &u16(dc.data) }
+		img.free() // сырьё дальше не нужно
 	}
-	if !progress(.tone, 0, 0) {
+	if !progress.stage(.tone, 0, 0) {
 		return ExportCancelled{}
 	}
-	mask0 := pipeline.blur_luma(buf, w, h)
-	mut src := if dc.len > 0 { unsafe { &u16(dc.data) } } else { buf }
 	// Кадрирование и поворот - как в превью: после подготовки сырья, сырьё
 	// и маска «Тени/Света» одной геометрией
 	mut gw := w
 	mut gh := h
-	mut glin := []u16{}
-	mask := if e.geom.is_identity() {
-		mask0
-	} else {
-		m, _, _ := pipeline.geom_apply(unsafe { &u16(mask0.data) }, w, h, 1, out_geom(&e), true)
-		m
-	}
+	mut mask := unsafe { &u16(mask0.data) }
 	if !e.geom.is_identity() {
-		glin, gw, gh = pipeline.geom_apply(src, w, h, 3, out_geom(&e), true)
+		g := out_geom(&e)
+		ow, oh := g.out_size(w, h, true)
+		glin = bigbuf.new_u16(ow * oh * 3)
+		gw, gh = pipeline.geom_apply_into(src, w, h, 3, g, true, mut glin)
 		src = unsafe { &u16(glin.data) }
+		bigbuf.free(mut dc)
+		img.free()
+		gmask = bigbuf.new_u16(ow * oh)
+		pipeline.geom_apply_into(unsafe { &u16(mask0.data) }, w, h, 1, g, true, mut gmask)
+		mask = unsafe { &u16(gmask.data) }
+		bigbuf.free(mut mask0)
 	}
 	// Карта дымки - по кадру после кадрирования (рабочая копия та же
 	// ~1024 px, что у превью, - карты совпадают)
-	haze := if e.params.haze != 0 { pipeline.haze_map(src, gw, gh) } else { pipeline.HazeMap{} }
-	mut rgb := []u8{len: gw * gh * 3}
-	pipeline.apply_image(src, unsafe { &u16(mask.data) }, &haze, gw, gh, e.params, 1.0, mut
-		rgb, 3)
+	if e.params.haze != 0 {
+		haze = pipeline.haze_map_big(src, gw, gh)
+	}
+	mut rgb := bigbuf.new_u8(gw * gh * 3)
+	pipeline.apply_image(src, mask, &haze, gw, gh, e.params, 1.0, mut rgb, 3)
 	// Размер на выход (окно «Экспорт»): только уменьшение, с резкостью на
 	// выход (она - только при уменьшении)
 	fw, fh := export_dims(o.size, gw, gh)
 	if fw != gw || fh != gh {
-		rgb = pipeline.resize_rgb_sharp(rgb, gw, gh, fw, fh, o.size.sharp)
+		small := pipeline.resize_rgb_sharp(rgb, gw, gh, fw, fh, o.size.sharp)
+		bigbuf.free(mut rgb)
+		return Image{
+			width:  fw
+			height: fh
+			rgb:    small
+			meta:   meta
+		}
 	}
 	return Image{
 		width:  fw
 		height: fh
 		rgb:    rgb
-		meta:   d.meta()
+		meta:   meta
 	}
 }

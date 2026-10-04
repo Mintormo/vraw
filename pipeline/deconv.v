@@ -15,19 +15,37 @@ module pipeline
 // Зависит только от сырья и трёх ползунков: GUI держит результат в кэше
 // и пересчитывает лишь при их смене; экспорт - один раз на полный кадр.
 import math
+import bigbuf
 
 pub const dc_iters = 20
 
 // deconvolve - Capture-резкость линейного буфера w x h (RGB u16) в новый
 // буфер; при dc_amount <= 0 - копия
 pub fn deconvolve(src &u16, w int, h int, s Sharpen, scale f32) []u16 {
+	mut out := []u16{len: w * h * 3}
+	deconvolve_into(src, w, h, s, scale, mut out)
+	return out
+}
+
+// deconvolve_into - то же в готовый буфер out (w * h * 3; экспорт даёт
+// буфер вне сборщика - bigbuf)
+pub fn deconvolve_into(src &u16, w int, h int, s Sharpen, scale f32, mut out []u16) {
 	npix := w * h
-	mut out := []u16{len: npix * 3}
 	unsafe { vmemcpy(out.data, src, npix * 6) }
 	if s.dc_amount <= 0 || w < 3 || h < 3 {
-		return out
+		return
 	}
-	mut y := []f32{len: npix}
+	// Рабочие плоскости - вне сборщика (bigbuf): на полном кадре 4 x 96 МБ
+	mut y := bigbuf.new_f32(npix)
+	mut est := bigbuf.new_f32(npix)
+	mut conv := bigbuf.new_f32(npix)
+	mut tmp := bigbuf.new_f32(npix)
+	defer {
+		bigbuf.free(mut y)
+		bigbuf.free(mut est)
+		bigbuf.free(mut conv)
+		bigbuf.free(mut tmp)
+	}
 	unsafe {
 		for i in 0 .. npix {
 			y[i] = 0.2126 * f32(src[3 * i]) + 0.7152 * f32(src[3 * i + 1]) +
@@ -39,9 +57,7 @@ pub fn deconvolve(src &u16, w int, h int, s Sharpen, scale f32) []u16 {
 		sigma = 0.2
 	}
 	k := gauss_kernel(sigma)
-	mut est := y.clone()
-	mut conv := []f32{len: npix}
-	mut tmp := []f32{len: npix}
+	unsafe { vmemcpy(est.data, y.data, npix * int(sizeof(f32))) }
 	py := unsafe { &f32(y.data) }
 	pe := unsafe { &f32(est.data) }
 	pc := unsafe { &f32(conv.data) }
@@ -76,7 +92,10 @@ pub fn deconvolve(src &u16, w int, h int, s Sharpen, scale f32) []u16 {
 		ts.wait()
 		ts.clear()
 	}
-	m := contrast_mask(y, w, h, s.dc_contrast, scale)
+	mut m := contrast_mask(y, w, h, s.dc_contrast, scale)
+	defer {
+		bigbuf.free(mut m)
+	}
 	a := s.dc_amount / 100
 	unsafe {
 		for i in 0 .. npix {
@@ -97,17 +116,20 @@ pub fn deconvolve(src &u16, w int, h int, s Sharpen, scale f32) []u16 {
 			}
 		}
 	}
-	return out
 }
 
 // contrast_mask - вес деконволюции 0..1 по локальному контрасту: градиент
 // сглаженной гамма-люмы на пиксель ПОЛНОГО кадра (превью half-size -
-// scale 0.5: соседние пиксели вдвое дальше), мягкий порог t
+// scale 0.5: соседние пиксели вдвое дальше), мягкий порог t. Результат -
+// вне сборщика (bigbuf): освобождает вызывающий.
 fn contrast_mask(y []f32, w int, h int, contrast f32, scale f32) []f32 {
 	npix := w * h
-	mut m := []f32{len: npix, init: 1}
+	mut m := bigbuf.new_f32(npix)
 	t := contrast * 0.0005
 	if t <= 0 {
+		for i in 0 .. npix {
+			m[i] = 1
+		}
 		return m
 	}
 	t2 := t * t
@@ -116,7 +138,7 @@ fn contrast_mask(y []f32, w int, h int, contrast f32, scale f32) []f32 {
 	for i in 0 .. 65536 {
 		g[i] = math.powf(f32(i) / 65535.0, inv_gamma)
 	}
-	mut v := []f32{len: npix}
+	mut v := bigbuf.new_f32(npix)
 	for i in 0 .. npix {
 		yy := y[i]
 		v[i] = if yy <= 0 {
@@ -127,7 +149,11 @@ fn contrast_mask(y []f32, w int, h int, contrast f32, scale f32) []f32 {
 			g[int(yy)]
 		}
 	}
-	vs := gauss_blur(v, w, h, 0.7)
+	mut vs := gauss_blur(v, w, h, 0.7)
+	bigbuf.free(mut v)
+	defer {
+		bigbuf.free(mut vs)
+	}
 	f := scale / 2 // центральная разность - два шага по scale пикселя
 	for yy in 0 .. h {
 		row := yy * w

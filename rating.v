@@ -113,11 +113,33 @@ fn mark_targets(st &State) []int {
 	return if st.frame_idx >= 0 && st.frame_idx < st.frames.len { [st.frame_idx] } else { []int{} }
 }
 
+// MarkEdit - что меняет пометка: звёзды или флажок (значение, а не
+// замыкание - post.v)
+struct MarkEdit {
+	rating   int
+	flag     int
+	set_flag bool // false - меняются звёзды, true - флажок
+}
+
+fn (e MarkEdit) apply(m Mark) Mark {
+	return if e.set_flag {
+		Mark{
+			rating: m.rating
+			flag:   e.flag
+		}
+	} else {
+		Mark{
+			rating: e.rating
+			flag:   m.flag
+		}
+	}
+}
+
 // set_mark - пометка кадров mark_targets: change даёт новую пометку из
 // старой. Открытый кадр - в st.mark и сайдкар (sync_sidecar), прочие -
 // write_mark. Затем фильтр ленты, подпись и (флажок «Переходить к
 // следующему») следующий кадр фильтра, если помечали открытый.
-fn set_mark(mut st State, change fn (Mark) Mark) {
+fn set_mark(mut st State, change MarkEdit) {
 	targets := mark_targets(st)
 	if targets.len == 0 {
 		if !isnil(st.nm) {
@@ -128,7 +150,7 @@ fn set_mark(mut st State, change fn (Mark) Mark) {
 	}
 	mut failed := []string{}
 	for i in targets {
-		m := change(st.frames[i].mark)
+		m := change.apply(st.frames[i].mark)
 		if i == st.frame_idx && st.history.len > 0 {
 			st.mark = m
 			sync_sidecar(mut st)
@@ -163,20 +185,15 @@ fn set_mark(mut st State, change fn (Mark) Mark) {
 }
 
 fn set_rating(mut st State, r int) {
-	set_mark(mut st, fn [r] (m Mark) Mark {
-		return Mark{
-			rating: r
-			flag:   m.flag
-		}
+	set_mark(mut st, MarkEdit{
+		rating: r
 	})
 }
 
 fn set_flag(mut st State, f int) {
-	set_mark(mut st, fn [f] (m Mark) Mark {
-		return Mark{
-			rating: m.rating
-			flag:   f
-		}
+	set_mark(mut st, MarkEdit{
+		flag:     f
+		set_flag: true
 	})
 }
 

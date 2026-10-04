@@ -254,9 +254,7 @@ fn thumb_worker(paths []string, order []int, gen int, seq int, stop &StopFlag, m
 			pix:  pix
 			geom: g
 		}
-		app.post(fn [on_done, res] () {
-			on_done(res)
-		})
+		post_result(mut app, on_done, res)
 	}
 }
 
@@ -270,9 +268,7 @@ fn thumb_one(path string, g pipeline.Geom, gen int, seq int, idx int, mut app vg
 		pix:  pix
 		geom: g
 	}
-	app.post(fn [on_done, res] () {
-		on_done(res)
-	})
+	post_result(mut app, on_done, res)
 }
 
 // stop_thumbs останавливает воркер миниатюр (смена папки, выход);

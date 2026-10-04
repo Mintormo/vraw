@@ -2,6 +2,7 @@ module lens
 
 import math
 import runtime
+import bigbuf
 import pipeline { Region }
 
 // Обёртка над lensfun: поиск профиля объектива по метаданным кадра и
@@ -221,7 +222,14 @@ pub fn (c &Corrector) vign_lut(w int, h int, focal f32, aperture f32, strength f
 		return none
 	}
 	// Карта усиления: коррекция единичного буфера = 1/затемнение
-	mut gain := []f32{len: w * h, init: 1.0}
+	// (вне сборщика - bigbuf: на полном кадре 96 МБ)
+	mut gain := bigbuf.new_f32(w * h)
+	defer {
+		bigbuf.free(mut gain)
+	}
+	for i in 0 .. gain.len {
+		gain[i] = 1.0
+	}
 	ok := C.lf_modifier_apply_color_modification(m, gain.data, 0.0, 0.0, w, h,
 		lf_cr_intensity, w * int(sizeof(f32)))
 	C.lf_modifier_destroy(m)
@@ -397,8 +405,12 @@ pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
 	defer {
 		p.free()
 	}
-	// Ремап читает произвольные точки источника - нужна его копия.
-	mut src := []u16{len: w * h * 3}
+	// Ремап читает произвольные точки источника - нужна его копия (вне
+	// сборщика - bigbuf: на полном кадре 144 МБ)
+	mut src := bigbuf.new_u16(w * h * 3)
+	defer {
+		bigbuf.free(mut src)
+	}
 	unsafe { vmemcpy(src.data, buf, u64(w) * u64(h) * 3 * 2) }
 	full := Region{0, 0, w, h}
 	p.remap(unsafe { &u16(src.data) }, full, full, buf)

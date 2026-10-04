@@ -16,6 +16,7 @@ module pipeline
 // Перцептивное пространство - как в RawTherapee (USM по L*): одинаковый
 // ореол у светлого и тёмного края. Половинное превью - радиус × scale.
 import math
+import bigbuf
 import runtime
 
 // SharpView - показ работы резкости вместо снимка (с Alt при
@@ -44,7 +45,10 @@ pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Para
 		render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil })
 		return
 	}
-	mut tone := []u16{len: npix * 3}
+	mut tone := bigbuf.new_u16(npix * 3)
+	defer {
+		bigbuf.free(mut tone)
+	}
 	render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) })
 	sharpen_tone(tone, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
 }
@@ -54,7 +58,7 @@ pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Para
 // (по люме) или своя у каждого канала (s.rgb).
 fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
-	mut l := []f32{len: npix}
+	mut l := bigbuf.new_f32(npix)
 	for i in 0 .. npix {
 		l[i] = (0.2126 * f32(tone[3 * i]) + 0.7152 * f32(tone[3 * i + 1]) +
 			0.0722 * f32(tone[3 * i + 2])) * f32(1.0 / 256.0)
@@ -63,16 +67,24 @@ fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, vie
 	if sigma < 0.25 {
 		sigma = 0.25
 	}
-	b := gauss_blur(l, w, h, sigma)
+	mut b := gauss_blur(l, w, h, sigma)
 	// По каналам: размытые плоскости R, G, B (детали - от своего канала)
 	mut cb := [][]f32{}
 	if s.rgb {
+		mut pl := bigbuf.new_f32(npix)
 		for c in 0 .. 3 {
-			mut pl := []f32{len: npix}
 			for i in 0 .. npix {
 				pl[i] = f32(tone[3 * i + c]) * f32(1.0 / 256.0)
 			}
 			cb << gauss_blur(pl, w, h, sigma)
+		}
+		bigbuf.free(mut pl)
+	}
+	defer {
+		bigbuf.free(mut l)
+		bigbuf.free(mut b)
+		for c in 0 .. cb.len {
+			bigbuf.free(mut cb[c])
 		}
 	}
 	amount := s.amount / 100
@@ -152,11 +164,15 @@ pub fn out_sharpen(mut f []f32, w int, h int, amount f32) {
 	if amount <= 0 || w < 3 || h < 3 || f.len < npix * 3 {
 		return
 	}
-	mut l := []f32{len: npix}
+	mut l := bigbuf.new_f32(npix)
 	for i in 0 .. npix {
 		l[i] = 0.2126 * f[3 * i] + 0.7152 * f[3 * i + 1] + 0.0722 * f[3 * i + 2]
 	}
-	b := gauss_blur(l, w, h, out_sharp_sigma)
+	mut b := gauss_blur(l, w, h, out_sharp_sigma)
+	defer {
+		bigbuf.free(mut l)
+		bigbuf.free(mut b)
+	}
 	for i in 0 .. npix {
 		add := amount * soft_threshold(l[i] - b[i], out_sharp_t2)
 		f[3 * i] += add
@@ -187,12 +203,14 @@ fn clamp255(v f32) f32 {
 }
 
 // gauss_blur - гауссово размытие плоскости w x h (разделимое: строки,
-// затем столбцы; у краёв - повтор крайнего пикселя)
+// затем столбцы; у краёв - повтор крайнего пикселя). Результат - вне
+// сборщика (bigbuf): освобождает вызывающий.
 fn gauss_blur(src []f32, w int, h int, sigma f32) []f32 {
 	k := gauss_kernel(sigma)
-	mut tmp := []f32{len: w * h}
-	mut out := []f32{len: w * h}
+	mut tmp := bigbuf.new_f32(w * h)
+	mut out := bigbuf.new_f32(w * h)
 	gauss_into(src, mut out, mut tmp, w, h, k)
+	bigbuf.free(mut tmp)
 	return out
 }
 

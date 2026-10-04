@@ -16,6 +16,7 @@ module pipeline
 // выборка из S (без поворота - ближайший пиксель, с поворотом -
 // билинейная).
 import math
+import bigbuf
 
 // Geom - геометрия кадра (в EditState; по умолчанию - без изменений)
 pub struct Geom {
@@ -172,15 +173,30 @@ fn geom_affine(g Geom, w int, h int, crop bool, ow int, oh int) Affine {
 	}
 }
 
+// is_noop - геометрия не меняет буфер: тождественная или (весь кадр,
+// crop = false) только рамка обрезки - результат равен исходному
+pub fn (g Geom) is_noop(crop bool) bool {
+	return g.is_identity() || (!crop && g.rot90 % 4 == 0 && !g.flip_h && !g.flip_v && g.angle == 0)
+}
+
 // geom_apply - геометрия буфера w x h с ch каналами u16 (3 - сырьё, 1 -
 // маска «Тени/Света»): новый буфер и его размер. crop = false - весь R
 // (режим кадрирования). Без изменений - копия.
 pub fn geom_apply(src &u16, w int, h int, ch int, g Geom, crop bool) ([]u16, int, int) {
 	ow, oh := g.out_size(w, h, crop)
 	mut out := []u16{len: ow * oh * ch}
-	if g.is_identity() || (!crop && g.rot90 % 4 == 0 && !g.flip_h && !g.flip_v && g.angle == 0) {
+	rw, rh := geom_apply_into(src, w, h, ch, g, crop, mut out)
+	return out, rw, rh
+}
+
+// geom_apply_into - то же в готовый буфер out длиной ow * oh * ch, где
+// ow, oh = g.out_size(w, h, crop) (экспорт даёт буфер вне сборщика -
+// bigbuf); возвращает размер результата
+pub fn geom_apply_into(src &u16, w int, h int, ch int, g Geom, crop bool, mut out []u16) (int, int) {
+	ow, oh := g.out_size(w, h, crop)
+	if g.is_noop(crop) {
 		unsafe { vmemcpy(out.data, src, w * h * ch * 2) }
-		return out, w, h
+		return w, h
 	}
 	m := geom_affine(g, w, h, crop, ow, oh)
 	unsafe {
@@ -200,7 +216,7 @@ pub fn geom_apply(src &u16, w int, h int, ch int, g Geom, crop bool) ([]u16, int
 					d += ch
 				}
 			}
-			return out, ow, oh
+			return ow, oh
 		}
 		// С поворотом - билинейно; за краем кадра - чёрное
 		for j in 0 .. oh {
@@ -239,7 +255,7 @@ pub fn geom_apply(src &u16, w int, h int, ch int, g Geom, crop bool) ([]u16, int
 			}
 		}
 	}
-	return out, ow, oh
+	return ow, oh
 }
 
 // geom_rgba - геометрия 8-битного RGBA (быстрое превью камеры) в выход
@@ -409,7 +425,11 @@ pub fn resize_rgb(src []u8, w int, h int, nw int, nh int) []u8 {
 	if nw == w && nh == h {
 		return src.clone()
 	}
-	return quantize_rgb(resize_rgb_f32(src, w, h, nw, nh))
+	mut f := resize_rgb_f32(src, w, h, nw, nh)
+	defer {
+		bigbuf.free(mut f)
+	}
+	return quantize_rgb(f)
 }
 
 // resize_rgb_sharp - resize_rgb и резкость на выход силы amount (окно
@@ -419,15 +439,22 @@ pub fn resize_rgb_sharp(src []u8, w int, h int, nw int, nh int, amount f32) []u8
 		return resize_rgb(src, w, h, nw, nh)
 	}
 	mut f := resize_rgb_f32(src, w, h, nw, nh)
+	defer {
+		bigbuf.free(mut f)
+	}
 	out_sharpen(mut f, nw, nh, amount)
 	return quantize_rgb(f)
 }
 
 // resize_rgb_f32 - пересчёт размера (см. resize_rgb) без округления:
-// RGB nw x nh во f32, 0..255
+// RGB nw x nh во f32, 0..255; результат - вне сборщика (bigbuf):
+// освобождает вызывающий
 fn resize_rgb_f32(src []u8, w int, h int, nw int, nh int) []f32 {
 	// По x: w -> nw, строки h
-	mut tmp := []f32{len: nw * h * 3}
+	mut tmp := bigbuf.new_f32(nw * h * 3)
+	defer {
+		bigbuf.free(mut tmp)
+	}
 	wx := resample_weights(w, nw)
 	for y in 0 .. h {
 		for x in 0 .. nw {
@@ -441,7 +468,7 @@ fn resize_rgb_f32(src []u8, w int, h int, nw int, nh int) []f32 {
 		}
 	}
 	// По y: h -> nh
-	mut out := []f32{len: nw * nh * 3}
+	mut out := bigbuf.new_f32(nw * nh * 3)
 	wy := resample_weights(h, nh)
 	for y in 0 .. nh {
 		for x in 0 .. nw {

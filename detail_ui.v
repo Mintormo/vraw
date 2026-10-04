@@ -158,9 +158,7 @@ fn detail_watch(mut st State) {
 	}
 	dt.seen = seen
 	mut app := st.app
-	app.post(fn [mut st] () {
-		detail_check(mut st)
-	})
+	app.post(st.dt_check)
 }
 
 // detail_check - показать готовый фрагмент, запросить новый или снять слой
@@ -221,9 +219,7 @@ fn detail_start(mut st State) {
 	}
 	dt.running = true
 	mut app := st.app
-	dt.threads << spawn detail_worker(req, mut app, fn [mut st] (res DetailRes) {
-		detail_done(mut st, res)
-	})
+	dt.threads << spawn detail_worker(req, mut app, st.dt_done)
 }
 
 fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
@@ -235,9 +231,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 	if isnil(res.src) {
 		res.src = load_detail_src(req.path, req.highlight) or {
 			res.err = err.msg()
-			app.post(fn [on_done, res] () {
-				on_done(res)
-			})
+			post_result(mut app, on_done, res)
 			return
 		}
 	}
@@ -258,9 +252,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 	res.r = r
 	res.ow = ow
 	res.oh = oh
-	app.post(fn [on_done, res] () {
-		on_done(res)
-	})
+	post_result(mut app, on_done, res)
 }
 
 // detail_done - результат воркера (главный поток)

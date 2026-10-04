@@ -223,7 +223,7 @@ fn ai_check(mut st State, mut app vgui.App) {
 		gen:     st.file_gen
 		raw_gen: st.raw_gen
 		model:   id
-		src:     st.raw_linear.clone()
+		src:     st.raw_linear // только чтение: модель пишет в свой буфер
 		w:       st.pw
 		h:       st.ph
 		cache:   cache
@@ -248,24 +248,47 @@ fn ai_tell_stale(mut st State) {
 	nm.show_info('AI-шумодав: превью пока без него - «Пересчитать AI» в секции «Шумодав и ореолы» (экспорт посчитает сам)')
 }
 
-// ai_progress_fn - обратный вызов для ai.denoise (в потоке воркера):
-// прогресс - в главный поток через app.post, возврат false - отмена
-fn ai_progress_fn(mut app vgui.App, ctl &AiCtl, on_progress fn (&AiCtl, int, int, f64)) fn (int, int) bool {
-	return fn [mut app, ctl, on_progress] (done int, total int) bool {
-		mut c := unsafe { ctl }
-		now := time.now().unix_milli()
-		mut eta := f64(-1)
-		if c.t1 == 0 {
-			c.t1 = now
-			c.n1 = done
-		} else if done > c.n1 {
-			eta = f64(now - c.t1) / 1000 / f64(done - c.n1) * f64(total - done)
-		}
-		app.post(fn [on_progress, ctl, done, total, eta] () {
-			on_progress(ctl, done, total, eta)
-		})
-		return !c.cancel
+// AiPoster - прогресс ai.denoise (в потоке воркера): в главный поток
+// через post_result (без замыканий - post.v), false - отмена
+struct AiPoster {
+mut:
+	app         &vgui.App = unsafe { nil }
+	ctl         &AiCtl    = unsafe { nil }
+	on_progress fn (&AiCtl, int, int, f64) = unsafe { nil }
+}
+
+// AiTick - одно сообщение о прогрессе прогона превью
+struct AiTick {
+	on_progress fn (&AiCtl, int, int, f64) = unsafe { nil }
+	ctl         &AiCtl = unsafe { nil }
+	done        int
+	total       int
+	eta         f64
+}
+
+fn deliver_ai_tick(t AiTick) {
+	t.on_progress(t.ctl, t.done, t.total, t.eta)
+}
+
+fn (mut p AiPoster) step(done int, total int) bool {
+	mut c := p.ctl
+	now := time.now().unix_milli()
+	mut eta := f64(-1)
+	if c.t1 == 0 {
+		c.t1 = now
+		c.n1 = done
+	} else if done > c.n1 {
+		eta = f64(now - c.t1) / 1000 / f64(done - c.n1) * f64(total - done)
 	}
+	mut app := p.app
+	post_result(mut app, deliver_ai_tick, AiTick{
+		on_progress: p.on_progress
+		ctl:         p.ctl
+		done:        done
+		total:       total
+		eta:         eta
+	})
+	return !c.cancel
 }
 
 // ai_worker - прогон модели по превью в spawn; без State и vgui, кроме
@@ -280,8 +303,12 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 	}
 	mut cache := unsafe { job.cache }
 	if model := cache.get() {
-		progress := ai_progress_fn(mut app, job.ctl, on_progress)
-		if out := ai.denoise(model, unsafe { &u16(job.src.data) }, job.w, job.h, progress) {
+		mut progress := AiPoster{
+			app:         app
+			ctl:         job.ctl
+			on_progress: on_progress
+		}
+		if out := ai.denoise(model, unsafe { &u16(job.src.data) }, job.w, job.h, mut progress) {
 			res = AiResult{
 				...res
 				out: out
@@ -303,9 +330,7 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 		...res
 		secs: f64(sw.elapsed().milliseconds()) / 1000
 	}
-	app.post(fn [on_done, res] () {
-		on_done(res)
-	})
+	post_result(mut app, on_done, res)
 }
 
 // ai_take - итог прогона превью (главный поток, из app.post)

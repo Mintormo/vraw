@@ -392,24 +392,49 @@ fn paint_export(mut st State) {
 	}
 }
 
-// export_progress_fn - обратный вызов develop_full (в потоке воркера):
-// этап и плитки AI - в главный поток через app.post, false - отмена
-fn export_progress_fn(mut app vgui.App, ctl &ExportCtl, on_progress fn (&ExportCtl, ExportStage, int, int, f64)) fn (ExportStage, int, int) bool {
-	return fn [mut app, ctl, on_progress] (stage ExportStage, done int, total int) bool {
-		mut c := unsafe { ctl }
-		mut eta := f64(-1)
-		if stage == .ai && done > 0 {
-			now := time.now().unix_milli()
-			if c.t1 == 0 {
-				c.t1 = now
-				c.n1 = done
-			} else if done > c.n1 {
-				eta = f64(now - c.t1) / 1000 / f64(done - c.n1) * f64(total - done)
-			}
+// ExportPoster - прогресс develop_full (в потоке воркера): этап и плитки
+// AI - в главный поток (post_result, без замыканий - post.v)
+struct ExportPoster {
+mut:
+	app         &vgui.App = unsafe { nil }
+	ctl         &ExportCtl = unsafe { nil }
+	on_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
+}
+
+// ExportTick - одно сообщение о прогрессе экспорта
+struct ExportTick {
+	on_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
+	ctl         &ExportCtl = unsafe { nil }
+	stage       ExportStage
+	done        int
+	total       int
+	eta         f64
+}
+
+fn deliver_export_tick(t ExportTick) {
+	t.on_progress(t.ctl, t.stage, t.done, t.total, t.eta)
+}
+
+fn (mut p ExportPoster) stage(stage ExportStage, done int, total int) bool {
+	mut c := p.ctl
+	mut eta := f64(-1)
+	if stage == .ai && done > 0 {
+		now := time.now().unix_milli()
+		if c.t1 == 0 {
+			c.t1 = now
+			c.n1 = done
+		} else if done > c.n1 {
+			eta = f64(now - c.t1) / 1000 / f64(done - c.n1) * f64(total - done)
 		}
-		app.post(fn [on_progress, ctl, stage, done, total, eta] () {
-			on_progress(ctl, stage, done, total, eta)
-		})
-		return !c.cancel
 	}
+	mut app := p.app
+	post_result(mut app, deliver_export_tick, ExportTick{
+		on_progress: p.on_progress
+		ctl:         p.ctl
+		stage:       stage
+		done:        done
+		total:       total
+		eta:         eta
+	})
+	return !c.cancel
 }

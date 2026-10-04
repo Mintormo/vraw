@@ -27,6 +27,7 @@ module pipeline
 // перевод в HSV и обратно - только когда эквалайзер не нулевой).
 
 import math
+import bigbuf
 
 // Params - положение всех ползунков. Нулевые значения (и saturation = 1)
 // дают нейтральную проявку: чистая гамма 2.2 по камерному ББ.
@@ -354,146 +355,107 @@ pub fn match_curve(src &u16, npix int, ref_ &u8, ref_npix int) []f32 {
 			mapping[v] = u
 		}
 	}
-	return curve_from_mapping(mapping)
+	return fit_curve(mapping, hs)
 }
 
-// Шаг опорных точек камерной кривой, тонов: местные изгибы соответствия
-// гистограмм (меньше шага) в кривую не попадают
-const curve_step = 32
-// Во сколько раз наклон кривой может меняться от отрезка к отрезку
-const curve_slope_ratio = 2.0
+// Сила сглаживания камерной кривой (штраф за кривизну): слабая в тенях -
+// кривая повторяет камерный «носок» (почти плоско у чёрного, потом круто
+// вверх), сильная выше curve_soft_edge - неровности распределения (небо
+// на полкадра) не дают изломов и ступенек на градиентах. Переход - за
+// curve_soft_band тонов. Подобрано по IMG_0634/0817/0991 и тесту
+// test_curve_from_mapping_smooth (наклон < 3, излом < 0.8 на 8 тонах).
+const curve_lam_shadow = 300.0
+const curve_lam = 50000.0
+const curve_soft_edge = 40
+const curve_soft_band = 16.0
 
 // curve_from_mapping - гладкая кривая по соответствию тонов mapping (тон
-// нейтральной проявки -> тон JPEG, -1 - тона в кадре нет). Соответствие
-// гистограмм повторяет каждую неровность распределения: небо на полкадра
-// давало участок с наклоном x4.6 рядом с пологим и изломы на границах
-// (IMG_0817.CR3: ступенчатое небо). Поэтому: опорные точки через
-// curve_step тонов; наклон соседних отрезков различается не больше чем в
-// curve_slope_ratio раз (средняя точка тянется к хорде соседей, пока
-// ограничение не выполнится); через точки - монотонный кубический сплайн
-// (Фрич-Карлсон): гладкий, без выбросов, не убывает.
+// нейтральной проявки -> тон JPEG, -1 - тона в кадре нет), все тона
+// равноценны (см. fit_curve)
 pub fn curve_from_mapping(mapping []int) []f32 {
-	mut xs := [f64(0)]
-	mut ys := [f64(0)]
-	for x := curve_step / 2; x < 256 - curve_step / 4; x += curve_step {
-		// Значение - среднее в ±2 тонах (ступенчатость квантилей); окно
-		// шире занижало бы изогнутые участки (тени)
-		mut sum := 0.0
-		mut n := 0
-		for k in x - 2 .. x + 3 {
-			if k >= 0 && k < 256 && mapping[k] >= 0 {
-				sum += f64(mapping[k])
-				n++
-			}
-		}
-		// Пусто - ближайший тон с данными в ±curve_step/4 (тени редкие);
-		// нет и его (край гистограммы) - точку не ставить
-		if n == 0 {
-			for dk in 3 .. curve_step / 4 + 1 {
-				for k in [x - dk, x + dk] {
-					if n == 0 && k >= 0 && k < 256 && mapping[k] >= 0 {
-						sum = f64(mapping[k])
-						n = 1
-					}
-				}
-			}
-		}
-		if n > 0 {
-			xs << f64(x)
-			ys << sum / f64(n)
-		}
-	}
-	xs << 255
-	ys << 255
-	// Монотонность точек
-	for i in 1 .. ys.len {
-		if ys[i] < ys[i - 1] {
-			ys[i] = ys[i - 1]
-		}
-	}
-	limit_slopes(xs, mut ys)
-	return monotone_spline(xs, ys)
+	return fit_curve(mapping, []f64{len: 256, init: 1})
 }
 
-// limit_slopes - выравнивание наклонов отрезков ломаной (xs, ys): если
-// соседние наклоны различаются больше чем в curve_slope_ratio раз,
-// средняя точка сдвигается на четверть пути к хорде соседей; повтор, пока
-// всё не уложится (или 200 проходов). Концы (0,0) и (255,255) неподвижны.
-fn limit_slopes(xs []f64, mut ys []f64) {
-	for _ in 0 .. 200 {
-		mut moved := false
-		for i in 1 .. xs.len - 1 {
-			s0 := (ys[i] - ys[i - 1]) / (xs[i] - xs[i - 1])
-			s1 := (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i])
-			lo := math.min(s0, s1)
-			hi := math.max(s0, s1)
-			if hi > curve_slope_ratio * math.max(lo, 1e-3) {
-				chord := ys[i - 1] + (xs[i] - xs[i - 1]) / (xs[i + 1] - xs[i - 1]) * (ys[i + 1] - ys[i - 1])
-				ys[i] += (chord - ys[i]) * 0.25
-				moved = true
+// fit_curve - камерная кривая по соответствию тонов: сглаживающий сплайн
+// на 256 тонах - минимум суммы w[v]·(c[v] - mapping[v])² + λ(v)·(c[v-1] -
+// 2c[v] + c[v+1])², концы (0, 0) и (255, 255) закреплены. weight - доля
+// пикселей тона (вес - корень из неё: пустые тона не мешают, густые - не
+// давят всё остальное). Соответствие гистограмм повторяет каждую
+// неровность распределения, а прежняя кривая (опорные точки через 32 тона
+// с ограничением перепада наклонов) не могла повторить камерный носок в
+// тенях и поднимала чёрный (блёклая проявка, до 13 уровней в тенях) и
+// занижала светлое небо. Затем - монотонность.
+pub fn fit_curve(mapping []int, weight []f64) []f32 {
+	n := 256
+	mut total := 0.0
+	for v in 0 .. n {
+		if mapping[v] >= 0 {
+			total += weight[v]
+		}
+	}
+	// Ленточная (пятидиагональная) система A·c = b: a[v][k] - элемент
+	// (v, v + k - 2), k = 0..4
+	mut a := [][]f64{len: n, init: []f64{len: 5}}
+	mut b := []f64{len: n}
+	for v in 0 .. n {
+		if mapping[v] >= 0 && total > 0 {
+			// Масштаб веса - как у превью 6 Мп с выборкой каждого четвёртого
+			// пикселя (на нём подобраны силы сглаживания)
+			w := math.sqrt(weight[v] / total * 1.5e6 + 1) / 30
+			a[v][2] += w
+			b[v] += w * f64(mapping[v])
+		}
+	}
+	for v in [0, n - 1] {
+		a[v][2] += 1e6
+		b[v] += 1e6 * f64(v)
+	}
+	for v in 1 .. n - 1 {
+		t := math.min(1.0, math.max(0.0, f64(v - curve_soft_edge) / curve_soft_band))
+		lam := curve_lam_shadow * (1 - t) + curve_lam * t
+		// Вклад λ·(c[v-1] - 2c[v] + c[v+1])²: строки v-1, v, v+1
+		co := [1.0, -2.0, 1.0]
+		for r in 0 .. 3 {
+			for q in 0 .. 3 {
+				row := v - 1 + r
+				col := v - 1 + q
+				a[row][col - row + 2] += lam * co[r] * co[q]
 			}
 		}
-		if !moved {
-			break
+	}
+	// Гаусс без перестановок (матрица симметрична и положительно
+	// определена), ширина ленты 2
+	for k in 0 .. n {
+		p := a[k][2]
+		for i in k + 1 .. math.min(n, k + 3) {
+			f := a[i][k - i + 2] / p
+			if f == 0 {
+				continue
+			}
+			for j in k .. math.min(n, k + 3) {
+				a[i][j - i + 2] -= f * a[k][j - k + 2]
+			}
+			b[i] -= f * b[k]
 		}
 	}
-}
-
-// monotone_spline - кривая 0..255 через точки (xs возрастают)
-// монотонным кубическим сплайном Фрича-Карлсона
-fn monotone_spline(xs []f64, ys []f64) []f32 {
-	n := xs.len
-	mut curve := []f32{len: 256}
-	if n < 2 {
-		for v in 0 .. 256 {
-			curve[v] = f32(v)
+	mut c := []f64{len: n}
+	for k := n - 1; k >= 0; k-- {
+		mut sum := b[k]
+		for j in k + 1 .. math.min(n, k + 3) {
+			sum -= a[k][j - k + 2] * c[j]
 		}
-		return curve
+		c[k] = sum / a[k][2]
 	}
-	mut d := []f64{len: n - 1} // наклоны отрезков
-	for k in 0 .. n - 1 {
-		d[k] = (ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k])
-	}
-	mut m := []f64{len: n} // касательные в точках
-	m[0] = d[0]
-	m[n - 1] = d[n - 2]
-	for k in 1 .. n - 1 {
-		m[k] = if d[k - 1] * d[k] <= 0 { 0.0 } else { (d[k - 1] + d[k]) / 2 }
-	}
-	for k in 0 .. n - 1 {
-		if d[k] == 0 {
-			m[k] = 0
-			m[k + 1] = 0
-			continue
+	mut curve := []f32{len: n}
+	for v in 0 .. n {
+		mut y := math.max(0.0, math.min(255.0, c[v]))
+		if v > 0 && y < f64(curve[v - 1]) {
+			y = f64(curve[v - 1])
 		}
-		a := m[k] / d[k]
-		b := m[k + 1] / d[k]
-		h := a * a + b * b
-		if h > 9 {
-			t := 3 / math.sqrt(h)
-			m[k] = t * a * d[k]
-			m[k + 1] = t * b * d[k]
-		}
+		curve[v] = f32(y)
 	}
-	mut k := 0
-	for v in 0 .. 256 {
-		x := f64(v)
-		for k < n - 2 && x > xs[k + 1] {
-			k++
-		}
-		hk := xs[k + 1] - xs[k]
-		t := (x - xs[k]) / hk
-		t2 := t * t
-		t3 := t2 * t
-		y := (2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * hk * m[k] +
-			(-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * hk * m[k + 1]
-		curve[v] = f32(math.max(0, math.min(255, y)))
-	}
-	for v in 1 .. 256 {
-		if curve[v] < curve[v - 1] {
-			curve[v] = curve[v - 1]
-		}
-	}
+	curve[0] = 0
+	curve[n - 1] = 255
 	return curve
 }
 
@@ -571,8 +533,15 @@ pub fn match_saturation(src &u16, npix int, curve []f32, ref_ &u8, ref_npix int)
 // большей стороны кадра). Считается один раз на кадр (зависит только от
 // сырья, не от ползунков), в apply передаётся указателем.
 pub fn blur_luma(src &u16, w int, h int) []u16 {
+	mut a := []u16{len: w * h}
+	blur_luma_into(src, w, h, mut a)
+	return a
+}
+
+// blur_luma_into - то же в готовый буфер a (w * h; экспорт даёт буфер вне
+// сборщика - bigbuf)
+pub fn blur_luma_into(src &u16, w int, h int, mut a []u16) {
 	npix := w * h
-	mut a := []u16{len: npix}
 	unsafe {
 		mut s := &u16(src)
 		d := &u16(a.data)
@@ -585,12 +554,12 @@ pub fn blur_luma(src &u16, w int, h int) []u16 {
 	if r < 2 {
 		r = 2
 	}
-	mut b := []u16{len: npix}
+	mut b := bigbuf.new_u16(npix)
 	for _ in 0 .. 3 {
 		box_blur_h(a, mut b, w, h, r)
 		box_blur_v(b, mut a, w, h, r)
 	}
-	return a
+	bigbuf.free(mut b)
 }
 
 // box_blur_h - горизонтальный box blur c бегущей суммой; окно

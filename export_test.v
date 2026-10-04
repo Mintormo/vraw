@@ -78,12 +78,17 @@ fn test_path_elide() {
 	}
 }
 
+// CancelStage - прогресс экспорта, отменяющий его сразу
+struct CancelStage {}
+
+fn (mut c CancelStage) stage(_ ExportStage, _ int, _ int) bool {
+	return false
+}
+
 // Отмена в начале экспорта - ExportCancelled, файл не открывается
 fn test_develop_cancel() {
 	res := develop_full('/нет/такого.CR3', neutral_edit(), unsafe { nil },
-		progress: fn (_ ExportStage, _ int, _ int) bool {
-			return false
-		}
+		progress: StageProgress(CancelStage{})
 	) or {
 		assert err is ExportCancelled
 		return

@@ -13,6 +13,7 @@ module ai
 // скачивает install_runtime. Нет библиотеки - vraw работает без AI.
 import math
 import sync
+import bigbuf
 
 #flag -I @VMODROOT/ai/include
 #flag -ldl
@@ -204,12 +205,36 @@ pub fn tile_count(w int, h int) int {
 	return positions(w).len * positions(h).len
 }
 
+// Progress - получатель прогресса шумодава: step зовётся после каждой
+// плитки (из потока шумодава) с числом готовых и всего; false - отмена.
+// Интерфейс, а не замыкание: V не освобождает замыкания, а его таблица
+// замыканий удерживает чужие буферы (PROJECT.md, «Замыкания и память»).
+pub interface Progress {
+mut:
+	step(done int, total int) bool
+}
+
+// NoProgress - прогресс не нужен
+pub struct NoProgress {}
+
+pub fn (mut p NoProgress) step(_ int, _ int) bool {
+	return true
+}
+
 // denoise - шумодав всего кадра: src - линейный RGB u16 (w*h*3, только
 // чтение - указатель, чтобы экспорт не копировал полный кадр), результат -
-// новый буфер того же вида. progress зовётся после каждой плитки (из этого
-// же потока) с числом готовых и всего; false - отмена (ошибка Cancelled).
+// новый буфер того же вида. progress.step - после каждой плитки; false -
+// отмена (ошибка Cancelled).
 // Память: накопитель f32 на весь кадр (12 байт на пиксель).
-pub fn denoise(m &Model, src &u16, w int, h int, progress fn (done int, total int) bool) ![]u16 {
+pub fn denoise(m &Model, src &u16, w int, h int, mut progress Progress) ![]u16 {
+	mut out := []u16{len: w * h * 3}
+	denoise_into(m, src, w, h, mut out, mut progress)!
+	return out
+}
+
+// denoise_into - то же в готовый буфер out (w * h * 3; экспорт даёт буфер
+// вне сборщика - bigbuf)
+pub fn denoise_into(m &Model, src &u16, w int, h int, mut out []u16, mut progress Progress) ! {
 	fwd, inv := srgb_luts()
 	xs := positions(w)
 	ys := positions(h)
@@ -219,7 +244,11 @@ pub fn denoise(m &Model, src &u16, w int, h int, progress fn (done int, total in
 	plane := tile * tile
 	mut input := []f32{len: 3 * plane}
 	mut output := []f32{len: 3 * plane}
-	mut acc := []f32{len: w * h * 3}
+	// Накопитель - вне сборщика (bigbuf): на полном кадре 288 МБ
+	mut acc := bigbuf.new_f32(w * h * 3)
+	defer {
+		bigbuf.free(mut acc)
+	}
 	mut done := 0
 	for j, y0 in ys {
 		for i, x0 in xs {
@@ -258,17 +287,15 @@ pub fn denoise(m &Model, src &u16, w int, h int, progress fn (done int, total in
 				}
 			}
 			done++
-			if !progress(done, total) {
+			if !progress.step(done, total) {
 				return Cancelled{}
 			}
 		}
 	}
-	mut out := []u16{len: acc.len}
 	for n, v in acc {
 		g := if v <= 0 { 0 } else if v >= 1 { 65535 } else { int(v * 65535 + 0.5) }
 		out[n] = inv[g]
 	}
-	return out
 }
 
 // blend - смешение на месте: buf = buf + (den - buf) * strength (0..1).

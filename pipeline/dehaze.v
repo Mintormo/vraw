@@ -18,6 +18,7 @@ module pipeline
 // билинейно, D = a·люма + b. Сила и глубина применяются в render на
 // пиксель: t = 1 - ω·D^γ - ползунки живые.
 import math
+import bigbuf
 
 const haze_work = 1024 // длинная сторона рабочей копии
 const haze_r = 7 // радиус окна тёмного канала (15x15, как у He) на рабочей копии
@@ -31,12 +32,29 @@ pub struct HazeMap {
 pub:
 	w int
 	h int
+pub mut:
 	d []u16
+pub:
 	a [3]f32
+}
+
+// free - освободить карту, выделенную haze_map_big (у обычной - забыть)
+pub fn (mut m HazeMap) free() {
+	bigbuf.free(mut m.d)
 }
 
 // haze_map - карта дымки линейного 16-бит RGB w x h
 pub fn haze_map(src &u16, w int, h int) HazeMap {
+	return haze_map_impl(src, w, h, false)
+}
+
+// haze_map_big - то же, карта вне сборщика (bigbuf; экспорт): освобождать
+// HazeMap.free
+pub fn haze_map_big(src &u16, w int, h int) HazeMap {
+	return haze_map_impl(src, w, h, true)
+}
+
+fn haze_map_impl(src &u16, w int, h int, big bool) HazeMap {
 	mut f := (if w > h { w } else { h } + haze_work - 1) / haze_work
 	if f < 1 {
 		f = 1
@@ -141,7 +159,7 @@ pub fn haze_map(src &u16, w int, h int) HazeMap {
 	ma := box_mean(ca, sw, sh, haze_gr)
 	mb := box_mean(cb, sw, sh, haze_gr)
 	// Полный размер: a, b - билинейно, люма - своя у каждого пикселя
-	mut d := []u16{len: w * h}
+	mut d := if big { bigbuf.new_u16(w * h) } else { []u16{len: w * h} }
 	inv := 1 / f32(f)
 	unsafe {
 		s := &u16(src)

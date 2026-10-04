@@ -120,6 +120,43 @@ fn load_level(key string) LoadLevel {
 	}
 }
 
+// Пик памяти экспорта одного кадра на пиксель полного размера (замер
+// 05.10.2026: 24 Мп со всеми инструментами - ~1.0 ГБ) и запас системе
+const export_bytes_per_px = i64(44)
+const mem_reserve = i64(512) << 20
+
+// mem_par - сколько кадров пакета держать одновременно: не больше par и
+// столько, сколько помещается в свободную память avail (байт) при npix
+// пикселей кадра; минимум один
+fn mem_par(par int, npix i64, avail i64) int {
+	if npix <= 0 || avail <= 0 {
+		return par
+	}
+	fit := int((avail - mem_reserve) / (npix * export_bytes_per_px))
+	return if fit < 1 { 1 } else if fit < par { fit } else { par }
+}
+
+// mem_available - MemAvailable из /proc/meminfo, байт (0 - неизвестно)
+fn mem_available() i64 {
+	s := os.read_file('/proc/meminfo') or { return 0 }
+	for l in s.split_into_lines() {
+		if l.starts_with('MemAvailable:') {
+			return l.all_after(':').trim_space().all_before(' ').i64() * 1024
+		}
+	}
+	return 0
+}
+
+// frame_pixels - пикселей полного кадра RAW (0 - не открылся)
+fn frame_pixels(path string) i64 {
+	mut d := raw.open(path) or { return 0 }
+	defer {
+		d.close()
+	}
+	w, h := d.full_size()
+	return i64(w) * i64(h)
+}
+
 // apply_load - приоритет и OpenMP вызывающего потока; потоки, которые он
 // создаст (деконволюция, резкость, OpenMP LibRaw), наследуют приоритет.
 // Повысить приоритет без прав нельзя - только понизить, поэтому вызывать
@@ -231,12 +268,20 @@ fn (mut t BatchTally) add(r BatchDone) {
 }
 
 // batch_worker выполняется в spawn: координатор - кадры потокам
-// (batch_frame_job), не больше level.par одновременно, AI - по одному;
+// (batch_frame_job), не больше level.par одновременно (и не больше, чем
+// помещается в свободную память - mem_par), AI - по одному;
 // итог - report
 fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
-	level := load_level(job.settings.export_load)
+	mut level := load_level(job.settings.export_load)
 	apply_load(level)
+	// Кадров одновременно - не больше, чем помещается в свободную память
+	if level.par > 1 && job.items.len > 1 {
+		level = LoadLevel{
+			...level
+			par: mem_par(level.par, frame_pixels(job.items[0].src), mem_available())
+		}
+	}
 	c := job.ctl
 	n := job.items.len
 	ch := chan BatchDone{cap: n}
@@ -294,12 +339,44 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 	report(mut app, on_done, res, msg)
 }
 
+// BatchPost - событие пакета для главного потока (post_result)
+struct BatchPost {
+	on_event fn (&ExportCtl, BatchEvent) = unsafe { nil }
+	ctl      &ExportCtl = unsafe { nil }
+	ev       BatchEvent
+}
+
+fn deliver_batch(p BatchPost) {
+	p.on_event(p.ctl, p.ev)
+}
+
 fn post_batch(mut app vgui.App, job BatchJob, ev BatchEvent) {
-	on_event := job.on_event
-	ctl := job.ctl
-	app.post(fn [on_event, ctl, ev] () {
-		on_event(ctl, ev)
+	post_result(mut app, deliver_batch, BatchPost{
+		on_event: job.on_event
+		ctl:      job.ctl
+		ev:       ev
 	})
+}
+
+// BatchPoster - прогресс develop_full кадра пакета (в его потоке):
+// события «этап» в главный поток, false - отмена
+struct BatchPoster {
+mut:
+	app &vgui.App = unsafe { nil }
+	job BatchJob
+	i   int
+}
+
+fn (mut p BatchPoster) stage(stage ExportStage, done int, total int) bool {
+	mut app := p.app
+	post_batch(mut app, p.job, BatchEvent{
+		kind:  .stage
+		idx:   p.i
+		stage: stage
+		done:  done
+		total: total
+	})
+	return !p.job.ctl.cancel
 }
 
 // batch_frame_job выполняется в spawn: один кадр пакета - производные
@@ -309,18 +386,12 @@ fn batch_frame_job(job BatchJob, i int, dst string, cache &ai.Cache, level LoadL
 	apply_load(level)
 	it := job.items[i]
 	name := os.file_name(it.src)
-	ctl := job.ctl
-	progress := fn [mut app, job, i, ctl] (stage ExportStage, done int, total int) bool {
-		post_batch(mut app, job, BatchEvent{
-			kind:  .stage
-			idx:   i
-			stage: stage
-			done:  done
-			total: total
-		})
-		return !ctl.cancel
+	mut progress := BatchPoster{
+		app: app
+		job: job
+		i:   i
 	}
-	r := batch_frame_run(it, dst, job, cache, progress) or {
+	r := batch_frame_run(it, dst, job, cache, mut progress) or {
 		if err is ExportCancelled {
 			BatchDone{
 				idx:       i
@@ -341,17 +412,20 @@ fn batch_frame_job(job BatchJob, i int, dst string, cache &ai.Cache, level LoadL
 }
 
 // batch_frame_run - проявка и запись кадра; ExportCancelled - отмена
-fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, progress fn (ExportStage, int, int) bool) !BatchDone {
-	if !progress(.decode, 0, 0) {
+fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, mut progress BatchPoster) !BatchDone {
+	if !progress.stage(.decode, 0, 0) {
 		return ExportCancelled{}
 	}
 	e := if it.derived { it.edit } else { batch_derive(it.src, it.edit, job.db)! }
-	img := develop_full(it.src, e, job.db,
+	mut img := develop_full(it.src, e, job.db,
 		ai_cache: cache
-		progress: progress
+		progress: StageProgress(progress)
 		size:     job.settings.export_size_opts()
 	)!
-	if !progress(.write, 0, 0) {
+	defer {
+		img.free()
+	}
+	if !progress.stage(.write, 0, 0) {
 		return ExportCancelled{}
 	}
 	write_image(dst, job.format, img, job.settings.jpeg_quality, &job.settings) or {

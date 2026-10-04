@@ -84,9 +84,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 	}
 	// 1. Быстрое превью
 	if pv := quick_preview(mut d, job) {
-		app.post(fn [on_preview, pv] () {
-			on_preview(pv)
-		})
+		post_result(mut app, on_preview, pv)
 	}
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
@@ -126,7 +124,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 	vign := vign_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
 	prep := prep_compute(PrepJob{
 		gen:       job.gen
-		src:       dev_linear.clone()
+		src:       dev_linear
 		w:         w
 		h:         h
 		redo_lens: true
@@ -153,9 +151,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 }
 
 fn post_load(mut app vgui.App, on_done fn (LoadResult), res LoadResult) {
-	app.post(fn [on_done, res] () {
-		on_done(res)
-	})
+	post_result(mut app, on_done, res)
 }
 
 // quick_preview - встроенное превью камеры в ориентации кадра, RGBA;

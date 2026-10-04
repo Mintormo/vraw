@@ -119,8 +119,11 @@ mut:
 	// Приложение - для фоновых потоков, запускаемых из обработчиков
 	// (refresh_thumb); vgui трогают только через app.post
 	app &vgui.App = unsafe { nil }
-	// Пересчёт по ходу перетаскивания уже поставлен (defer_fx)
+	// Пересчёт по ходу перетаскивания уже поставлен (defer_fx): какой и
+	// приёмник app.post (создан один раз - post.v)
 	fx_pending bool
+	fx_next    fn () = unsafe { nil }
+	fx_post    fn () = unsafe { nil }
 	// Фоновая загрузка кадра (loader.v): идёт ли, флаг отмены, потоки,
 	// предупреждение о сайдкаре для показа по окончании
 	loading      bool
@@ -201,7 +204,9 @@ mut:
 	wb_pick     bool
 	cv          &vgui.Canvas = unsafe { nil }
 	// Настоящий 1:1 - фрагмент полного кадра поверх превью (detail_ui.v)
-	dt &DetailCtl = unsafe { nil }
+	dt       &DetailCtl = unsafe { nil }
+	dt_check fn ()          = unsafe { nil } // detail_check через app.post
+	dt_done  fn (DetailRes) = unsafe { nil } // итог detail_worker
 	tone_fx     fn () = unsafe { nil }
 	// Удаление дымки: карта кадра по st.linear (считается при первой
 	// надобности, сбрасывается с каждым новым linear), показ карты вместо
@@ -307,6 +312,20 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 		valid:   true
 	}
 	if key != st.geom_key || st.glin.len == 0 {
+		if key.geom.is_noop(key.crop) {
+			// Геометрия ничего не меняет - те же массивы, без копии (-48 МБ
+			// на превью 24 Мп): glin/gmask, как и linear/mask, только читаются
+			st.glin = unsafe { st.linear }
+			st.gmask = unsafe { st.mask }
+			st.gw = st.pw
+			st.gh = st.ph
+			st.haze = pipeline.HazeMap{}
+			st.geom_key = key
+			if cv.width != st.gw || cv.height != st.gh {
+				set_canvas_size(mut cv, st.gw, st.gh)
+			}
+			return
+		}
 		st.glin, st.gw, st.gh = pipeline.geom_apply(unsafe { &u16(st.linear.data) }, st.pw,
 			st.ph, 3, key.geom, key.crop)
 		st.gmask = if st.mask.len == st.pw * st.ph {
@@ -329,8 +348,8 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 // одиночное изменение (колесо, клавиши, сброс), поэтому никаких
 // уведомлений отсюда - только картинка.
 // defer_fx - пересчёт по ходу перетаскивания (живой ползунок, поворот
-// мышью): не на каждое движение, а один на пачку событий - замыкание
-// app.post выполняется после всех накопившихся событий. Пересчёт с
+// мышью): не на каждое движение, а один на пачку событий - app.post
+// выполняется после всех накопившихся событий. Пересчёт с
 // поворотом ~0.25 с: прямой вызов на каждое движение копил очередь
 // (десятки секунд догонять после отпускания). Окончательный пересчёт
 // (отпускание) - прямой, он и снимает отложенный.
@@ -343,13 +362,19 @@ fn defer_fx(mut st State, fx fn ()) {
 		return
 	}
 	st.fx_pending = true
+	st.fx_next = fx
 	mut app := st.app
-	app.post(fn [mut st, fx] () {
-		if st.fx_pending {
-			st.fx_pending = false
-			fx()
-		}
-	})
+	app.post(st.fx_post)
+}
+
+// run_deferred_fx - отложенный пересчёт (приёмник app.post из defer_fx)
+fn run_deferred_fx(mut st State) {
+	if st.fx_pending {
+		st.fx_pending = false
+		fx := st.fx_next
+		st.fx_next = unsafe { nil }
+		fx()
+	}
 }
 
 fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
@@ -462,7 +487,7 @@ struct PrepJob {
 	aperture  f32
 	vign      f32    // сила коррекции виньетирования (CamLook.vign)
 	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
-	ai_src    []u16  // результат модели по тому же сырью (копия) или пусто
+	ai_src    []u16  // результат модели по тому же сырью (только чтение) или пусто
 	ai_s      f32    // сила AI 0..100 (0 - без AI)
 	dc        pipeline.Sharpen // Capture-резкость (поля dc_*)
 }
@@ -489,7 +514,7 @@ fn make_prep_job(mut st State) PrepJob {
 	ai_s := if redo { f32(0) } else { ai_effective(st) }
 	return PrepJob{
 		gen:       st.file_gen
-		src:       if redo { st.dev_linear.clone() } else { st.raw_linear.clone() }
+		src:       if redo { st.dev_linear } else { st.raw_linear }
 		w:         st.pw
 		h:         st.ph
 		redo_lens: redo
@@ -498,7 +523,7 @@ fn make_prep_job(mut st State) PrepJob {
 		aperture:  st.meta.aperture
 		vign:      st.look.vign
 		nr:        st.edit.nr
-		ai_src:    if ai_s > 0 { st.ai_linear.clone() } else { []u16{} }
+		ai_src:    if ai_s > 0 { st.ai_linear } else { []u16{} }
 		ai_s:      ai_s
 		dc:        st.edit.params.sharp
 	}
@@ -518,17 +543,32 @@ fn dc_key(s pipeline.Sharpen) [3]f32 {
 // Коррекция объектива ~0.6 с, импульсы ~1 с, шумодав ~1 с, ореолы ~0.5 с,
 // Capture-резкость ~0.6 с,
 // маска ~0.35 с на превью.
+// Входы (job.src, job.ai_src) только читаются - это буферы State. Шаг,
+// который ничего не меняет, копии не делает: без коррекции объектива
+// raw_linear - тот же массив, что dev_linear, без AI, шумодава и
+// Capture-резкости linear - тот же, что raw_linear (-36 МБ на каждый
+// совпадающий слой превью 24 Мп). Править буферы State на месте нельзя.
 fn prep_compute(job PrepJob) PrepResult {
-	buf := unsafe { &u16(job.src.data) }
+	// Сырьё после объектива (точка возврата для следующего пересчёта
+	// шумодава): коррекция - на своей копии
+	mut lensed := unsafe { job.src }
 	if job.redo_lens && !isnil(job.corr) {
-		job.corr.vignetting(buf, job.w, job.h, job.focal, job.aperture, job.vign)
+		lensed = job.src.clone()
+		rb := unsafe { &u16(lensed.data) }
+		job.corr.vignetting(rb, job.w, job.h, job.focal, job.aperture, job.vign)
 		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
-		job.corr.geometry(buf, job.w, job.h, job.focal)
+		job.corr.geometry(rb, job.w, job.h, job.focal)
 	}
-	// raw_linear - точка возврата для следующего пересчёта шумодава
-	raw_linear := if job.redo_lens { job.src.clone() } else { []u16{} }
+	// AI и шумодав - на своей копии сырья
+	use_ai := job.ai_s > 0 && job.ai_src.len == lensed.len
+	use_nr := job.nr[0] > 0 || job.nr[1] > 0 || job.nr[2] > 0 || job.nr[3] > 0
+	mut cur := unsafe { lensed }
+	if use_ai || use_nr {
+		cur = lensed.clone()
+	}
+	buf := unsafe { &u16(cur.data) }
 	// AI-шумодав: смешение с готовым результатом модели по силе (ai_nr.v)
-	if job.ai_s > 0 && job.ai_src.len == job.src.len {
+	if use_ai {
 		ai.blend(buf, job.ai_src, job.ai_s / 100)
 	}
 	// Импульсы - до шумодава: вейвлет размазал бы выброс по уровням
@@ -545,14 +585,14 @@ fn prep_compute(job PrepJob) PrepResult {
 	lin := if job.dc.dc_amount > 0 {
 		pipeline.deconvolve(buf, job.w, job.h, job.dc, preview_scale)
 	} else {
-		job.src
+		unsafe { cur }
 	}
 	// Маска «Тени/Света» зависит только от сырья (после коррекции
 	// объектива и шумодава!), поэтому считается здесь, а не на каждый ползунок.
 	mask := pipeline.blur_luma(buf, job.w, job.h)
 	return PrepResult{
 		gen:        job.gen
-		raw_linear: raw_linear
+		raw_linear: if job.redo_lens { lensed } else { []u16{} }
 		linear:     lin
 		mask:       mask
 		nr:         job.nr
@@ -582,9 +622,7 @@ fn take_prep(mut st State, res PrepResult) {
 // через app.post() (единственный потокобезопасный вход vgui).
 fn prep_worker(job PrepJob, mut app vgui.App, on_done fn (PrepResult)) {
 	res := prep_compute(job)
-	app.post(fn [on_done, res] () {
-		on_done(res)
-	})
+	post_result(mut app, on_done, res)
 }
 
 // request_prep запускает подготовку сырья в фоне (коррекция объектива,
@@ -639,33 +677,20 @@ struct SaveJob {
 	on_stage  fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil } // прогресс - в главный поток
 }
 
-// SaveOutcome - итог сохранения: вид уведомления
-enum SaveOutcome {
-	saved
-	failed
-	cancelled
-}
-
-// report доставляет результат из фонового потока в главный:
-// app.post() - единственный потокобезопасный вход vgui, замыкание
-// выполнится в потоке App между событиями и рендером. ok выбирает
-// вид уведомления (успех/ошибка) на принимающей стороне.
-fn report(mut app vgui.App, on_done fn (SaveOutcome, string), res SaveOutcome, msg string) {
-	app.post(fn [on_done, res, msg] () {
-		on_done(res, msg)
-	})
-}
-
 // save_worker выполняется в spawn: полная проявка и запись файла без единого
 // обращения к vgui или общему состоянию - кроме app.post() (потокобезопасен
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
 	apply_load(job.load)
-	progress := export_progress_fn(mut app, job.ctl, job.on_stage)
-	img := develop_full(job.src, job.edit, job.db,
+	mut progress := ExportPoster{
+		app:         app
+		ctl:         job.ctl
+		on_progress: job.on_stage
+	}
+	mut img := develop_full(job.src, job.edit, job.db,
 		ai_cache: job.ai_cache
-		progress: progress
+		progress: StageProgress(progress)
 		size:     job.size
 	) or {
 		if err is ExportCancelled {
@@ -675,7 +700,10 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		}
 		return
 	}
-	if !progress(.write, 0, 0) {
+	defer {
+		img.free()
+	}
+	if !progress.stage(.write, 0, 0) {
 		report(mut app, on_done, .cancelled, 'Экспорт отменён')
 		return
 	}
@@ -1326,6 +1354,18 @@ fn main() {
 	mut st := &State{}
 	st.settings = settings
 	st.dt = &DetailCtl{}
+	// Приёмники повторяющихся app.post и воркера 1:1 - один раз за запуск:
+	// замыкание, созданное по ходу работы, может навсегда удержать чужой
+	// буфер (post.v)
+	st.fx_post = fn [mut st] () {
+		run_deferred_fx(mut st)
+	}
+	st.dt_check = fn [mut st] () {
+		detail_check(mut st)
+	}
+	st.dt_done = fn [mut st] (res DetailRes) {
+		detail_done(mut st, res)
+	}
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = lens.load_db() or { unsafe { nil } }

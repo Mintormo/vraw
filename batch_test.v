@@ -139,3 +139,17 @@ fn test_batch_fraction() {
 	}
 	assert one.fraction() == 0.25
 }
+
+// Параллельность пакета по памяти: 24 Мп ~ 1 ГБ на кадр
+fn test_mem_par() {
+	npix := i64(6000 * 4000)
+	gb := i64(1) << 30
+	assert mem_par(3, npix, 16 * gb) == 3
+	assert mem_par(3, npix, 3 * gb) == 2
+	assert mem_par(3, npix, 2 * gb) == 1
+	assert mem_par(3, npix, gb / 2) == 1 // мало памяти - всё равно один
+	assert mem_par(2, 0, 16 * gb) == 2 // размер неизвестен - как задано
+	assert mem_par(2, npix, 0) == 2 // память неизвестна - как задано
+	assert mem_available() > 0
+	assert frame_pixels('/нет/такого.CR3') == 0
+}
