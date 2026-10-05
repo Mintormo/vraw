@@ -17,6 +17,11 @@ mut:
 	strip_open bool   = true
 	theme      string = 'dark' // ключ из theme_keys (themes.v)
 	ai_model   string = ai.default_model // модель для новых прогонов AI
+	// Кэш кадров в памяти (framecache.v): отрицание - в старом
+	// settings.json поля нет, кэш по умолчанию включён; предел, МБ (0 -
+	// frame_cache_mb_default)
+	no_frame_cache bool
+	frame_cache_mb int
 	// формат экспорта (ключ imgio.Format.key) - последний выбранный
 	export_format string = 'jpeg'
 	// качество JPEG при экспорте (jpeg_q_min..100)

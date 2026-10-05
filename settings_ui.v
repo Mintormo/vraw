@@ -1,7 +1,8 @@
 module main
 
 // Окно «Настройки» (меню «Правка - Настройки...»): оформление (тема, фон
-// вокруг снимка - те же, что в меню «Вид»), AI-шумодав: скачивание ONNX
+// вокруг снимка - те же, что в меню «Вид»), память (кэш кадров,
+// framecache.v), AI-шумодав: скачивание ONNX
 // Runtime и моделей в папки рядом с программой, выбор модели для новых
 // прогонов. Настройки экспорта - в окне «Экспорт» (export_setup.v). Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
@@ -45,6 +46,8 @@ mut:
 	dlg      &vgui.Dialog      = unsafe { nil }
 	theme_cb &vgui.ComboBox    = unsafe { nil }
 	bg_cb    &vgui.ComboBox    = unsafe { nil }
+	cache_ck &vgui.CheckBox    = unsafe { nil }
+	cache_cb &vgui.ComboBox    = unsafe { nil }
 	rt_state &vgui.Label       = unsafe { nil }
 	rt_btn   &vgui.Button      = unsafe { nil }
 	rows     []ModelRow
@@ -226,6 +229,26 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.bg_cb = bg_cb
 
+	// ── Память: кэш кадров ──
+	mut cache_ck := vgui.checkbox('Держать недавние кадры в памяти')
+	cache_ck.on_change = fn [mut st] (v bool) {
+		st.settings.no_frame_cache = !v
+		frame_trim(mut st)
+		save_settings(st.settings)
+		sync_settings_ui(mut st)
+	}
+	u.cache_ck = cache_ck
+	mut cache_cb := vgui.combo_box()
+	cache_cb.set_items(frame_cache_mbs.map(fmt_cache_mb(it)))
+	cache_cb.on_change = fn [mut st] (i int, _ string) {
+		if i >= 0 && i < frame_cache_mbs.len {
+			st.settings.frame_cache_mb = frame_cache_mbs[i]
+			frame_trim(mut st)
+			save_settings(st.settings)
+		}
+	}
+	u.cache_cb = cache_cb
+
 	// ── AI-шумодав: движок ──
 	// Колонки состояния и кнопок у строк ORT и моделей - по самым длинным
 	// их текстам (шрифтом окна): кнопки стоят ровной колонкой
@@ -234,7 +257,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		'нет в папке моделей'], 8)
 	btn_col := column_width(mut dw, ['Скачать', 'Удалить', 'Точно?', 'Готов'], 0) +
 		2 * vgui.measure_pad_x
-	look_col := column_width(mut dw, ['Тема', 'Фон вокруг снимка'], 8)
+	look_col := column_width(mut dw, ['Тема', 'Фон вокруг снимка', 'Не больше'], 8)
 	// Списки оформления - одной ширины, по самому длинному пункту обоих
 	// (24 - стрелка ComboBox, как в его measure)
 	mut look_items := theme_names.clone()
@@ -260,6 +283,11 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(caption('Оформление'))
 	body.add(labeled('Тема', theme_cb, look_col, look_w))
 	body.add(labeled('Фон вокруг снимка', bg_cb, look_col, look_w))
+
+	body.add(caption('Память'))
+	body.add(cache_ck)
+	body.add(labeled('Не больше', cache_cb, look_col, look_w))
+	body.add(note(mut u, 'Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)'))
 
 	body.add(caption('AI-шумодав'))
 	body.add(rt_row)
@@ -377,6 +405,13 @@ fn sync_settings_ui(mut st State) {
 	tcb.set_selected(theme_index(st.settings.theme))
 	mut bcb := u.bg_cb
 	bcb.set_selected(bg_index(st.settings.viewer_bg))
+	mut ck := u.cache_ck
+	ck.checked = !st.settings.no_frame_cache
+	mut ccb := u.cache_cb
+	mb := if st.settings.frame_cache_mb > 0 { st.settings.frame_cache_mb } else { frame_cache_mb_default }
+	ci := frame_cache_mbs.index(mb)
+	ccb.set_selected(if ci >= 0 { ci } else { frame_cache_mbs.index(frame_cache_mb_default) })
+	ccb.enabled = ck.checked
 	busy := !isnil(st.dl)
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''
@@ -566,4 +601,9 @@ fn dl_take(mut st State, res DlResult) {
 	}
 	sync_settings_ui(mut st)
 	sync_ai_ui(mut st)
+}
+
+// fmt_cache_mb - предел кэша кадров в списке настроек
+fn fmt_cache_mb(mb int) string {
+	return if mb < 1024 { '${mb} МБ' } else if mb % 1024 == 0 { '${mb / 1024} ГБ' } else { '${f64(mb) / 1024:.1f} ГБ' }
 }

@@ -61,6 +61,13 @@ struct LoadResult {
 	// JPEG камеры для показа («Вид - JPEG камеры»): RGBA w x h в
 	// ориентации кадра, как превью до геометрии; пусто - JPEG нет
 	cam_view []u8
+	// Из кэша кадров (framecache.v): что уже сделано с linear и результат
+	// модели AI; у обычной загрузки - нули и пусто
+	nr_applied [4]f32
+	dc_applied [3]f32
+	ai_applied f32
+	ai_linear  []u16
+	ai_model   string
 }
 
 // load_worker выполняется в spawn; результат - через app.post

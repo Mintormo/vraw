@@ -271,7 +271,7 @@ mut:
 	jpeg_show bool
 	cam_view  []u8
 	m_jpeg    &vgui.MenuItem = unsafe { nil }
-	vcache    []ViewCache // кэш проявленных кадров (viewcache.v)
+	fcache    []FrameCache // кэш сырья кадров (framecache.v)
 	click_down bool
 	click_x    f32
 	click_y    f32
@@ -2095,9 +2095,9 @@ fn main() {
 			nm.show_error('Ошибка: ${err.msg()}')
 			return
 		}
-		// Картинка уходящего кадра - в кэш (viewcache.v): вернутся к нему -
-		// сразу на экране
-		cache_store(mut st)
+		// Сырьё уходящего кадра - в кэш (framecache.v): вернутся к нему -
+		// без загрузки
+		frame_store(mut st)
 		// Незаконченная загрузка прежнего кадра отменяется; её dev/corr
 		// освободит on_load_done, увидев старый file_gen
 		if !isnil(st.load_stop) {
@@ -2157,9 +2157,12 @@ fn main() {
 		show_frame(mut st, path, mut app)
 		stop := &StopFlag{}
 		st.load_stop = stop
-		if !cache_show(mut st, path) {
-			show_loading(mut st, true)
+		// Кадр в кэше - сразу итог загрузки, без воркера
+		if res := frame_take(mut st, path, nd) {
+			st.on_load_done(res)
+			return
 		}
+		show_loading(mut st, true)
 		job := LoadJob{
 			gen:       st.file_gen
 			dev:       nd
@@ -2201,9 +2204,16 @@ fn main() {
 		st.mask = res.mask
 		st.lin_gen++
 		st.haze = pipeline.HazeMap{}
-		st.nr_applied = [f32(0), 0, 0, 0]!
-		st.dc_applied = dc_key(pipeline.Sharpen{})
-		st.ai_applied = 0
+		// Что уже сделано с linear: у загрузки - ничего (dc_key пустой
+		// резкости - нули), у кадра из кэша - как было
+		st.nr_applied = res.nr_applied
+		st.dc_applied = res.dc_applied
+		st.ai_applied = res.ai_applied
+		if res.ai_linear.len > 0 {
+			st.ai_linear = res.ai_linear
+			st.ai_lin_model = res.ai_model
+			st.ai_raw_gen = st.raw_gen
+		}
 		st.lens_dirty = false
 		st.raw_pending = false
 		st.look = res.look
@@ -2340,7 +2350,7 @@ fn main() {
 	// (правки некуда писать - record без истории молчит), вместо снимка -
 	// заглушка. Результаты фоновых воркеров отбросятся по file_gen.
 	close_file := fn [mut st, mut cv, mut hist, mut lens_cb, mut lens_lb, mut placeholder] () {
-		cache_store(mut st)
+		frame_store(mut st)
 		if !isnil(st.load_stop) {
 			mut ls := st.load_stop
 			ls.stop = true
