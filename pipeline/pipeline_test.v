@@ -482,10 +482,15 @@ fn test_match_hues() {
 		}
 	}
 	dh, sk := match_hues(unsafe { &u8(ours.data) }, 3, unsafe { &u8(ref_.data) }, 3, w, h)
-	assert dh.len == cam_hue_n && sk.len == cam_hue_n
-	assert cam_table(sk, 3.4) > 1.15, '${cam_table(sk, 3.4)}'
-	assert cam_table(dh, 2.0) > 0.1, '${cam_table(dh, 2.0)}'
-	assert math.abs(cam_table(dh, 0.5)) < 0.05 && math.abs(cam_table(sk, 0.5) - 1) < 0.1
+	assert dh.len == cam_tab_n && sk.len == cam_tab_n
+	pd := unsafe { &f32(dh.data) }
+	ps := unsafe { &f32(sk.data) }
+	_, k_cyan := cam_lookup(pd, ps, 3.4, 0.4, 180)
+	d_green, _ := cam_lookup(pd, ps, 2.0, 0.4, 180)
+	d_red, k_red := cam_lookup(pd, ps, 0.5, 0.4, 180)
+	assert k_cyan > 1.15, '${k_cyan}'
+	assert d_green > 0.1, '${d_green}'
+	assert math.abs(d_red) < 0.05 && math.abs(k_red - 1) < 0.1
 	// Эталон совпадает с нашим - подгонка не нужна
 	dh0, _ := match_hues(unsafe { &u8(ours.data) }, 3, unsafe { &u8(ours.data) }, 3, w, h)
 	assert dh0.len == 0
@@ -534,8 +539,8 @@ fn test_render_threads_match() {
 		saturation:  1.2
 		sh_shadows:  30
 		dither:      false
-		cam_hue:     []f32{len: cam_hue_n, init: 0.1}
-		cam_hsat:    []f32{len: cam_hue_n, init: 1.2}
+		cam_hue:     []f32{len: cam_tab_n, init: 0.1}
+		cam_hsat:    []f32{len: cam_tab_n, init: 1.2}
 	}
 	p.hsl_sat[3] = 40
 	mut full := []u8{len: npix * 4}

@@ -44,8 +44,9 @@ pub mut:
 	// поле, множитель к saturation; 1 - нет
 	cam_sat f32 = 1.0
 	// Цвет «как JPEG камеры» (camhue.v, match_hues) - производные поля:
-	// сдвиг оттенка (секстанты HSV) и множитель насыщенности на cam_hue_n
-	// секторов; пусто - нет. Применяются в HSL-эквалайзере.
+	// сдвиг оттенка (секстанты HSV) и множитель насыщенности на cam_tab_n
+	// ячеек оттенок × яркость × насыщенность; пусто - нет. Применяются в
+	// HSL-эквалайзере.
 	cam_hue  []f32
 	cam_hsat []f32
 	// Сочность (vibrance) -100..100: бережная насыщенность - блёклые цвета
@@ -328,8 +329,15 @@ struct HslLut {
 	act []u8 // 1 - корзину эквалайзер меняет; 0 - пиксель выходит сразу
 }
 
+// cam_hue_on - есть таблица цвета «как JPEG» (camhue.v): она - в
+// hsl_pixel, не в таблице эквалайзера (зависит ещё от яркости и
+// насыщенности пикселя)
+fn cam_hue_on(p &Params) bool {
+	return p.cam_hue.len == cam_tab_n && p.cam_hsat.len == cam_tab_n
+}
+
 fn hsl_active(p &Params) bool {
-	if p.cam_hue.len == cam_hue_n && p.cam_hsat.len == cam_hue_n {
+	if cam_hue_on(p) {
 		return true
 	}
 	for i in 0 .. 8 {
@@ -369,12 +377,6 @@ fn build_hsl(p &Params) HslLut {
 		}
 		sm[b] = sv
 		lm[b] = math.powf(2.0, hsl_interp(p.hsl_lum, deg) * f32(1.0 / 100.0)) - 1.0
-		// Цвет «как JPEG» (camhue.v) - вместе с ползунками пользователя
-		if p.cam_hue.len == cam_hue_n && p.cam_hsat.len == cam_hue_n {
-			h := deg / 60
-			dh[b] += cam_table(p.cam_hue, h)
-			sm[b] *= cam_table(p.cam_hsat, h)
-		}
 		if dh[b] != 0 || sm[b] != 1 || lm[b] != 0 {
 			act[b] = 1
 		}
@@ -737,9 +739,11 @@ fn box_blur_v(src []u16, mut dst []u16, w int, h int, r int) {
 // (0..255): RGB -> HSV, по корзине оттенка - сдвиг оттенка, множитель
 // насыщенности и яркости, обратно в RGB. Сдвиг оттенка и яркость
 // взвешены насыщенностью s: почти серые пиксели (оттенок неустойчив)
-// почти не меняются, совсем серые (размах < 0.5) - пропускаются.
+// почти не меняются, совсем серые (размах < 0.5) - пропускаются. cdh,
+// csk - таблица цвета «как JPEG» (camhue.v, cam_lookup) или nil: её сдвиг
+// и множитель - вместе с эквалайзером.
 @[inline]
-fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8) (f32, f32, f32) {
+fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8, cdh &f32, csk &f32) (f32, f32, f32) {
 	mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
 	mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
 	c := mx - mn
@@ -762,18 +766,32 @@ fn hsl_pixel(r f32, g f32, b f32, hdh &f32, hsm &f32, hlm &f32, hact &u8) (f32, 
 		bin = hsl_bins - 1
 	}
 	unsafe {
-		// Корзину эквалайзер не трогает (обычно правят 1-2 цвета) - выход
-		if hact[bin] == 0 {
+		// Корзину эквалайзер не трогает (обычно правят 1-2 цвета) и
+		// таблицы цвета нет - выход
+		user := hact[bin] != 0
+		cam := !isnil(cdh)
+		if !user && !cam {
 			return r, g, b
 		}
 		inv_mx := 1 / mx
 		s := c * inv_mx
-		v := mx * (1 + hlm[bin] * s)
-		mut k := hsm[bin]
+		mut udh := f32(0)
+		mut k := f32(1)
+		mut v := mx
+		if user {
+			udh = hdh[bin]
+			k = hsm[bin]
+			v = mx * (1 + hlm[bin] * s)
+		}
+		if cam {
+			cd, ck := cam_lookup(cdh, csk, h, s, mx)
+			udh += cd
+			k *= ck
+		}
 		if s * k > 1 {
 			k = 1 / s // насыщенность HSV не больше 1
 		}
-		dh := hdh[bin] * s
+		dh := udh * s
 		if dh == 0 {
 			// Только насыщенность и яркость: канал в HSV - mx·(1 - s·f),
 			// f = (mx - ch)/c, поэтому при s -> s·k, mx -> v он становится
@@ -941,6 +959,8 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 		hsm:        unsafe { &f32(hsl.sm.data) }
 		hlm:        unsafe { &f32(hsl.lm.data) }
 		hact:       unsafe { &u8(hsl.act.data) }
+		cdh:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hue.data) } } else { unsafe { nil } }
+		csk:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hsat.data) } } else { unsafe { nil } }
 		use_sh:     use_sh
 		sl:         unsafe { &f32(slut.data) }
 		sat:        sat
@@ -998,6 +1018,8 @@ struct RenderCtx {
 	hsm        &f32 = unsafe { nil }
 	hlm        &f32 = unsafe { nil }
 	hact       &u8  = unsafe { nil }
+	cdh        &f32 = unsafe { nil } // таблица цвета «как JPEG» или nil
+	csk        &f32 = unsafe { nil }
 	use_sh     bool
 	sl         &f32 = unsafe { nil }
 	sat        f32
@@ -1049,6 +1071,8 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 		hsm := rc.hsm
 		hlm := rc.hlm
 		hact := rc.hact
+		cdh := rc.cdh
+		csk := rc.csk
 		sl := rc.sl
 		mk := rc.mask
 		for i in i0 .. i1 {
@@ -1182,7 +1206,7 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 				vr, vg, vb = vibrance_pixel(vr, vg, vb, vib)
 			}
 			if use_hsl {
-				vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact)
+				vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact, cdh, csk)
 			}
 			if vr < 0 {
 				vr = 0
