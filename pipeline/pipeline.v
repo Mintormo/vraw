@@ -18,7 +18,10 @@ module pipeline
 //         подъём теней не сдвигал цвет;
 //   flut: линейное значение канала u16 -> тоновое значение 0..255
 //         (гамма + камерная кривая + контраст + тональные кривые); при
-//         кривых по каналам таблиц три - своя на R, G, B;
+//         кривых по каналам таблиц три - своя на R, G, B. С камерной
+//         кривой она смешанная (по каналам и по люме, см. CamTone), и
+//         flut делится на две части: гамма и гамма + кривая (CamTone) и
+//         тон -> тон (контраст и тональные кривые, build_post);
 //   slut: размытая люма u16 -> множитель «Тени/Света» (см. build_slut) -
 //         маска по окрестности сохраняет локальный контраст.
 //   HSL: оттенок -> сдвиг оттенка / множители насыщенности и яркости
@@ -54,7 +57,8 @@ pub mut:
 	sh_highlights f32 // «Тени/Света»: приглушение светов 0..100 (по размытой маске)
 	// Тональная кривая «как камерный JPEG» (match_curve): 256 значений,
 	// тон 0..255 -> тон 0..255. Пустой массив - кривой нет (тождественная).
-	// Применяется после гаммы, до контраста.
+	// Применяется после гаммы, до контраста, смесью по каналам и по люме
+	// (CamTone).
 	curve []f32
 	// Тональные кривые (редактор кривых): по 256 значений, тон 0..255 ->
 	// тон 0..255, пустой массив - тождественная. Сначала общая (tc_rgb),
@@ -141,23 +145,13 @@ fn build_mlut(p &Params) []f32 {
 
 // build_flut - таблица: линейное значение канала (u16) -> тон 0..255 (f32).
 // Гамма 1/2.2, затем контраст кривой v^a / (v^a + (1-v)^a), a = 2^contrast:
-// гладкая S-кривая без клиппинга, a = 1 - тождественная.
+// гладкая S-кривая без клиппинга, a = 1 - тождественная. Только без
+// камерной кривой (она смешанная, см. CamTone и build_post).
 fn build_flut(p &Params) []f32 {
 	a := math.powf(2.0, p.contrast)
-	has_curve := p.curve.len == 256
 	mut f := []f32{len: 65536}
 	for x in 0 .. 65536 {
-		mut v := math.powf(f32(x) * (1.0 / 65535.0), inv_gamma)
-		if has_curve {
-			// Камерная кривая (линейная интерполяция между узлами)
-			pos := v * 255.0
-			mut i := int(pos)
-			if i > 254 {
-				i = 254
-			}
-			frac := pos - f32(i)
-			v = (p.curve[i] * (1.0 - frac) + p.curve[i + 1] * frac) * f32(1.0 / 255.0)
-		}
+		v := math.powf(f32(x) * (1.0 / 65535.0), inv_gamma)
 		mut g := v
 		if p.contrast != 0 {
 			va := math.powf(v, a)
@@ -188,6 +182,7 @@ fn curve_at(c []f32, v f32) f32 {
 
 // channel_luts - таблицы канал -> тон с тональными кривыми. Без кривых по
 // каналам все три указывают на одну таблицу (общая кривая вшита в неё),
+// любой длины (flut или build_post);
 // с ними - три своих: tc_c(tc_rgb(flut)).
 fn channel_luts(p &Params, base []f32) ([]f32, []f32, []f32) {
 	has_rgb := p.tc_rgb.len == 256
@@ -197,7 +192,7 @@ fn channel_luts(p &Params, base []f32) ([]f32, []f32, []f32) {
 	}
 	mut common := base.clone()
 	if has_rgb {
-		for x in 0 .. 65536 {
+		for x in 0 .. base.len {
 			common[x] = curve_at(p.tc_rgb, common[x])
 		}
 	}
@@ -211,13 +206,109 @@ fn channel_luts(p &Params, base []f32) ([]f32, []f32, []f32) {
 			out[c] = common
 			continue
 		}
-		mut t := []f32{len: 65536}
-		for x in 0 .. 65536 {
+		mut t := []f32{len: base.len}
+		for x in 0 .. base.len {
 			t[x] = curve_at(curves[c], common[x])
 		}
 		out[c] = t
 	}
 	return out[0], out[1], out[2]
+}
+
+// Камерная кривая - смесь двух способов (доля по люме cam_curve_lum):
+// по каналам (каждый канал через кривую) и по люме (кривая к люме тонов,
+// каналы - одним множителем). Кривая по каналам сжимает каждый канал
+// отдельно и в светах, где у камерной кривой «плечо», выбеливает цвет:
+// на передержанных кадрах света у JPEG камеры насыщеннее нашего (ΔC Lab
+// +4.5). По люме цвет держится, но обычные кадры уходят от JPEG (тени и
+// света пересыщены). Половина на половину - ближе к JPEG на обоих: по 46
+// кадрам (ΔE Lab, размытие 1.5 px - без краёв и шума) передержанные 3.30
+// -> 2.47, обычные 2.10 -> 1.79, лучше у 44 кадров, хуже - ни у одного
+// заметно (IMG_0375 +0.04). Доля одна на все кадры - не подгонка.
+const cam_curve_lum = f32(0.5)
+
+// CamTone - таблица смешанной камерной кривой: линейный канал u16 x ->
+// тон 0..255 одной гаммой (gc[2x]) и гаммой с кривой (gc[2x + 1]) -
+// рядом, в одной строке кэша
+// и множитель люмы kl: доля по люме cam_curve_lum × кривая(l) / l по
+// люме тонов l × post_scale
+struct CamTone {
+	gc []f32
+	kl []f32
+}
+
+// Линейный канал u16 -> тон 0..255 чистой гаммой: от параметров не
+// зависит - считается один раз при запуске
+const gamma_lut = build_gamma_lut()
+
+fn build_gamma_lut() []f32 {
+	mut gl := []f32{len: 65536}
+	for x in 0 .. 65536 {
+		gl[x] = math.powf(f32(x) * (1.0 / 65535.0), inv_gamma) * 255.0
+	}
+	return gl
+}
+
+fn build_cam_tone(curve []f32) CamTone {
+	mut gc := []f32{len: 2 * 65536}
+	for x in 0 .. 65536 {
+		gc[2 * x] = gamma_lut[x]
+		gc[2 * x + 1] = curve_at(curve, gamma_lut[x])
+	}
+	mut kl := []f32{len: post_n}
+	for i in 0 .. post_n {
+		// У самого чёрного (< 0.5) - как у 0.5: отношение там неустойчиво
+		mut l := f32(i) / post_scale
+		if l < 0.5 {
+			l = 0.5
+		}
+		kl[i] = curve_at(curve, l) / l * cam_curve_lum
+	}
+	return CamTone{gc, kl}
+}
+
+// cam_tone_px - смешанная камерная кривая одного пикселя: тоны каналов
+// по гамме (r, g, b) и по гамме с кривой (cr, cg, cb) -> тоны 0..255;
+// kl - CamTone.kl
+@[inline]
+fn cam_tone_px(r f32, g f32, b f32, cr f32, cg f32, cb f32, kl &f32) (f32, f32, f32) {
+	l := 0.2126 * r + 0.7152 * g + 0.0722 * b
+	k := unsafe { kl[int(l * post_scale + 0.5)] }
+	c := 1 - cam_curve_lum
+	return clamp_tone(r * k + cr * c), clamp_tone(g * k + cg * c), clamp_tone(b * k + cb * c)
+}
+
+@[inline]
+fn clamp_tone(v f32) f32 {
+	return if v < 0 { f32(0) } else if v > 255 { f32(255) } else { v }
+}
+
+// Шаг таблицы build_post: тон × post_scale - индекс (1/16 тона: ошибка
+// крутой S-кривой контраста < 0.1 тона, а таблица 16 КБ - в кэше)
+const post_scale = f32(16)
+const post_n = 255 * 16 + 1
+
+// build_post - таблица тон -> тон после смешанной камерной кривой
+// (контраст, как в build_flut), индекс - тон × post_scale: тональные
+// кривые на неё накладывает channel_luts. Без контраста и кривых - пусто
+// (тон как есть).
+fn build_post(p &Params) []f32 {
+	if p.contrast == 0 && p.tc_rgb.len != 256 && p.tc_r.len != 256 && p.tc_g.len != 256
+		&& p.tc_b.len != 256 {
+		return []f32{}
+	}
+	a := math.powf(2.0, p.contrast)
+	mut f := []f32{len: post_n}
+	for x in 0 .. post_n {
+		mut g := f32(x) / f32(post_n - 1)
+		if p.contrast != 0 {
+			va := math.powf(g, a)
+			ia := math.powf(1.0 - g, a)
+			g = if va + ia > 0 { va / (va + ia) } else { f32(0) }
+		}
+		f[x] = g * 255.0
+	}
+	return f
 }
 
 // Центры восьми цветовых диапазонов HSL, градусы оттенка: красный,
@@ -494,19 +585,25 @@ const cam_sat_hi = 230
 // яркости её не даёт. Ограничен cam_sat_min..cam_sat_max; не
 // посчитать - 1.
 pub fn match_saturation(src &u16, npix int, curve []f32, ref_ &u8, ref_npix int) f32 {
-	p := Params{
-		curve: curve
-	}
-	tone := build_flut(&p)
+	// Тоны нашей проявки - с той же смешанной камерной кривой, что в render
+	has_curve := curve.len == 256
+	ct := if has_curve { build_cam_tone(curve) } else { CamTone{} }
+	tone := build_flut(&Params{})
 	mut cs := 0.0
 	mut ns := 0
 	unsafe {
 		mut s := &u16(src)
 		tl := &f32(tone.data)
+		gc := &f32(ct.gc.data)
+		kl := &f32(ct.kl.data)
 		for _ in 0 .. npix / 4 {
-			r := tl[s[0]]
-			g := tl[s[1]]
-			b := tl[s[2]]
+			mut r := tl[s[0]]
+			mut g := tl[s[1]]
+			mut b := tl[s[2]]
+			if has_curve {
+				r, g, b = cam_tone_px(r, g, b, gc[2 * s[0] + 1], gc[2 * s[1] + 1], gc[2 * s[2] + 1],
+					kl)
+			}
 			s += 12
 			l := 0.2126 * r + 0.7152 * g + 0.0722 * b
 			mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
@@ -792,7 +889,16 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	ha2 := ha[2] * 65535.0
 	hd := if haze_on { unsafe { &u16(haze.d.data) } } else { unsafe { &u16(nil) } }
 	hl := unsafe { &f32(hlut.data) }
-	flut_r, flut_g, flut_b := channel_luts(&p, build_flut(&p))
+	// Камерная кривая - смешанная (CamTone): тогда flut_* - таблицы тон ->
+	// тон после неё (build_post), пустые - без контраста и кривых
+	cam_curve := p.curve.len == 256
+	ct := if cam_curve { build_cam_tone(p.curve) } else { CamTone{} }
+	post := if cam_curve { build_post(&p) } else { []f32{} }
+	flut_r, flut_g, flut_b := if cam_curve {
+		if post.len > 0 { channel_luts(&p, post) } else { post, post, post }
+	} else {
+		channel_luts(&p, build_flut(&p))
+	}
 	use_hsl := hsl_active(&p)
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
@@ -826,6 +932,10 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 		flr:        unsafe { &f32(flut_r.data) }
 		flg:        unsafe { &f32(flut_g.data) }
 		flb:        unsafe { &f32(flut_b.data) }
+		cam_curve:  cam_curve
+		cgc:        unsafe { &f32(ct.gc.data) }
+		ckl:        unsafe { &f32(ct.kl.data) }
+		use_post:   post.len > 0
 		use_hsl:    use_hsl
 		hdh:        unsafe { &f32(hsl.dh.data) }
 		hsm:        unsafe { &f32(hsl.sm.data) }
@@ -879,6 +989,10 @@ struct RenderCtx {
 	flr        &f32 = unsafe { nil }
 	flg        &f32 = unsafe { nil }
 	flb        &f32 = unsafe { nil }
+	cam_curve  bool // камерная кривая смешанная: cgc/ckl, затем flr.. - тон -> тон
+	cgc        &f32 = unsafe { nil }
+	ckl        &f32 = unsafe { nil }
+	use_post   bool
 	use_hsl    bool
 	hdh        &f32 = unsafe { nil }
 	hsm        &f32 = unsafe { nil }
@@ -927,6 +1041,10 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 		flr := rc.flr
 		flg := rc.flg
 		flb := rc.flb
+		cam_curve := rc.cam_curve
+		cgc := rc.cgc
+		ckl := rc.ckl
+		use_post := rc.use_post
 		hdh := rc.hdh
 		hsm := rc.hsm
 		hlm := rc.hlm
@@ -1035,9 +1153,25 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			if fb > 65535.0 {
 				fb = 65535.0
 			}
-			mut vr := flr[int(fr)]
-			mut vg := flg[int(fg)]
-			mut vb := flb[int(fb)]
+			mut vr := f32(0)
+			mut vg := f32(0)
+			mut vb := f32(0)
+			if cam_curve {
+				ir := 2 * int(fr)
+				ig := 2 * int(fg)
+				ib := 2 * int(fb)
+				vr, vg, vb = cam_tone_px(cgc[ir], cgc[ig], cgc[ib], cgc[ir + 1], cgc[ig + 1],
+					cgc[ib + 1], ckl)
+				if use_post {
+					vr = flr[int(vr * post_scale + 0.5)]
+					vg = flg[int(vg * post_scale + 0.5)]
+					vb = flb[int(vb * post_scale + 0.5)]
+				}
+			} else {
+				vr = flr[int(fr)]
+				vg = flg[int(fg)]
+				vb = flb[int(fb)]
+			}
 			if sat != 1.0 {
 				l := 0.2126 * vr + 0.7152 * vg + 0.0722 * vb
 				vr = l + sat * (vr - l)

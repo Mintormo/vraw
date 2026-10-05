@@ -232,6 +232,36 @@ fn test_dither() {
 	assert diff < 1.0, 'среднее сместилось: без дизера ${mean_nod:.3f}, с дизером ${mean_d:.3f}'
 }
 
+// Смешанная камерная кривая (CamTone): серое - ровно кривая по тону
+// (оба способа на сером совпадают); у светлого цветного пикселя при
+// кривой с «плечом» цвет держится лучше, чем кривой по каналам; контраст
+// и тональные кривые действуют после неё, как раньше
+fn test_camera_curve_blend() {
+	mut sh := []f32{len: 256}
+	for i in 0 .. 256 {
+		t := 1 - f32(i) / 255
+		sh[i] = 255 * (1 - t * t)
+	}
+	tone := fn (x u16) f32 {
+		return math.powf(f32(x) / 65535, 1 / 2.2) * 255
+	}
+	g := px1(15000, 15000, 15000, Params{ curve: sh, dither: false })
+	want := curve_at(sh, tone(15000))
+	assert g[0] == g[1] && g[1] == g[2]
+	assert math.abs(f32(g[0]) - want) <= 1, '${g[0]} ~ ${want}'
+	// Светлый тёплый пиксель: размах каналов по каналам - разность кривых
+	r0, g0, b0 := u16(40000), u16(30000), u16(22000)
+	c := px1(r0, g0, b0, Params{ curve: sh, dither: false })
+	per_ch := curve_at(sh, tone(r0)) - curve_at(sh, tone(b0))
+	assert f32(c[0]) - f32(c[2]) > per_ch + 5, '${c[0] - c[2]} > ${per_ch}'
+	assert c[0] > c[1] && c[1] > c[2] // оттенок тот же
+	// Контраст и общая кривая - после камерной кривой
+	ct := px1(15000, 15000, 15000, Params{ curve: sh, contrast: 0.5, dither: false })
+	assert ct[0] != g[0]
+	lt := px1(15000, 15000, 15000, Params{ curve: sh, tc_rgb: lift_curve(20), dither: false })
+	assert math.abs(int(lt[0]) - int(g[0]) - 20) <= 1
+}
+
 // px1 - один пиксель через пайплайн (RGB 8 бит, без дизера)
 fn px1(r u16, g u16, b u16, p Params) []u8 {
 	src := [r, g, b]
