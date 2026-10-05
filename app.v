@@ -130,8 +130,9 @@ mut:
 	load_stop    &StopFlag = unsafe { nil }
 	load_threads []thread
 	load_msg     string
-	on_load_pv   fn (LoadPreview) = unsafe { nil }
-	on_load_done fn (LoadResult)  = unsafe { nil }
+	on_load_prog fn (LoadProgress) = unsafe { nil }
+	on_load_done fn (LoadResult)   = unsafe { nil }
+	load_ov      &LoadOverlay      = unsafe { nil } // оверлей «Обработка» (loading.v)
 	// Настройки между запусками (settings.v) и меню, которое их отражает
 	settings Settings
 	m_strip  &vgui.MenuItem = unsafe { nil }
@@ -266,6 +267,11 @@ mut:
 	ba_before  []u8
 	ba_after   []u8
 	m_split    &vgui.MenuItem = unsafe { nil }
+	// «Вид - JPEG камеры» (camjpeg.v): показ, JPEG кадра (RGBA pw x ph
+	// до геометрии; пусто - нет), пункт меню
+	jpeg_show bool
+	cam_view  []u8
+	m_jpeg    &vgui.MenuItem = unsafe { nil }
 	click_down bool
 	click_x    f32
 	click_y    f32
@@ -407,6 +413,16 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	// Показ работы резкости - вид поверх снимка: гистограмма остаётся
 	// снимка (последняя посчитанная), подсветки клипа нет
 	if st.sharp_show || st.sharp_drag != .off {
+		cv.mark_dirty()
+		detail_refresh(mut st)
+		return
+	}
+	// JPEG камеры (camjpeg.v) - вместо проявки, гистограмма - по нему
+	if jpeg_active(st) {
+		cv.pixels = jpeg_pixels(st)
+		st.hist_r, st.hist_g, st.hist_b = render_histogram(mut st, mut hist, cv.pixels)
+		update_curve_histogram(mut st)
+		show_clip_marks(mut st, mut hist)
 		cv.mark_dirty()
 		detail_refresh(mut st)
 		return
@@ -1488,6 +1504,7 @@ fn main() {
 	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
 		crop_overlay(mut st, mut ctx)
 		ba_overlay(mut st, mut ctx) // шторка до/после
+		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
 		detail_watch(mut st) // настоящий 1:1: изменился вид - фрагмент
 	}
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
@@ -2068,7 +2085,7 @@ fn main() {
 	// ── Открытие файла (кнопка, аргумент, лента) ──
 	// Быстрая часть - здесь, в главном потоке: файл, настройки и история
 	// из сайдкара, лента. Проявка, коррекция и камерная кривая - в фоне
-	// (load_worker), кадр сразу виден по встроенному превью камеры.
+	// (load_worker), на месте снимка - оверлей «Обработка» (loading.v).
 	open_file := fn [mut st, mut nm, mut app, mut lens_cb, mut lens_lb] (path_arg string) {
 		// Полный путь: по нему лента ищет кадр и узнаёт смену папки
 		path := os.real_path(path_arg)
@@ -2104,6 +2121,7 @@ fn main() {
 		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
+		st.cam_view = []u8{}
 		st.lens_dirty = false
 		lens_lb.text = 'поиск профиля объектива...'
 		lens_cb.enabled = false
@@ -2134,39 +2152,21 @@ fn main() {
 		show_frame(mut st, path, mut app)
 		stop := &StopFlag{}
 		st.load_stop = stop
-		// Быстрое превью - сразу размером будущего превью с геометрией кадра
-		// (полный кадр / 2 после кадрирования): тот же размер холста - зум
-		// сохранится
-		full_w, full_h := nd.full_size()
-		tw, th := st.edit.geom.out_size(full_w / 2, full_h / 2, true)
+		show_loading(mut st, true)
 		job := LoadJob{
 			gen:       st.file_gen
 			dev:       nd
 			db:        st.lens_db
 			highlight: st.edit.highlight
 			lens_corr: st.edit.lens_corr
-			geom:      st.edit.geom
-			tw:        if full_w > 0 { tw } else { 0 }
-			th:        if full_h > 0 { th } else { 0 }
 			stop:      stop
 		}
-		st.load_threads << spawn load_worker(job, mut app, st.on_load_pv, st.on_load_done)
+		st.load_threads << spawn load_worker(job, mut app, st.on_load_prog, st.on_load_done)
 	}
 
-	// Быстрое превью загрузки: на холст (и гистограмму), пока кадр
-	// проявляется
-	st.on_load_pv = fn [mut st, mut cv, mut hist, mut placeholder] (pv LoadPreview) {
-		if pv.gen != st.file_gen || !st.loading {
-			return
-		}
-		if pv.w != cv.width || pv.h != cv.height {
-			set_canvas_size(mut cv, pv.w, pv.h)
-		}
-		cv.pixels = pv.pix
-		cv.mark_dirty()
-		render_histogram(mut st, mut hist, cv.pixels)
-		show_viewer(mut cv, mut placeholder)
-		sync_view_bg(mut st)
+	// Прогресс загрузки - на кольцо оверлея
+	st.on_load_prog = fn [mut st] (p LoadProgress) {
+		set_load_progress(mut st, p)
 	}
 
 	// Итог загрузки: хендлы и буферы - в State, затем досчитать то, что
@@ -2177,8 +2177,11 @@ fn main() {
 			return
 		}
 		st.loading = false
+		show_loading(mut st, false)
 		if res.err.len > 0 {
 			free_load(res)
+			show_placeholder(mut cv, mut placeholder)
+			sync_view_bg(mut st)
 			nm.show_error(res.err)
 			return
 		}
@@ -2202,6 +2205,7 @@ fn main() {
 		st.lens_dirty = false
 		st.raw_pending = false
 		st.look = res.look
+		st.cam_view = res.cam_view
 		crv_cb.enabled = st.look.curve.len > 0
 		// Производные поля снимков - по камерной кривой этого кадра
 		st.edit = with_derived(st.edit, st.look, st.cam)
@@ -2358,6 +2362,7 @@ fn main() {
 		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
+		st.cam_view = []u8{}
 		st.side_path = ''
 		st.raw_path = ''
 		st.mark = Mark{}
@@ -2371,6 +2376,7 @@ fn main() {
 		lens_lb.text = ''
 		lens_cb.enabled = false
 		clear_histogram(mut st, mut hist)
+		show_loading(mut st, false)
 		show_placeholder(mut cv, mut placeholder)
 		sync_view_bg(mut st)
 	}
@@ -2771,6 +2777,13 @@ fn main() {
 		set_ba_split(mut st, v)
 	}
 	st.m_split = m_split
+	// JPEG камеры вместо проявки (camjpeg.v)
+	mut m_jpeg := vgui.menu_checkbox('JPEG камеры', false)
+	m_jpeg.shortcut = 'K'
+	m_jpeg.on_toggle = fn [mut st] (v bool) {
+		set_jpeg_show(mut st, v)
+	}
+	st.m_jpeg = m_jpeg
 	mut m_strip := vgui.menu_checkbox('Лента кадров', st.strip_open)
 	m_strip.on_toggle = fn [mut st] (v bool) {
 		set_strip_open(mut st, v)
@@ -2805,7 +2818,7 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_clipwarn, m_strip, m_bg, m_themes])
+		m_jpeg, m_clipwarn, m_strip, m_bg, m_themes])
 
 	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
@@ -2965,6 +2978,9 @@ fn main() {
 	mut view_stack := &vgui.Stack{}
 	view_stack.add(cv)
 	view_stack.add(placeholder)
+	mut load_ov := make_load_overlay()
+	st.load_ov = load_ov
+	view_stack.add(load_ov.stack)
 	mut view_area := vgui.create_vbox_fill()
 	view_area.set_padding(16)
 	view_area.set_bg(ph.edge) // выбранный фон - когда виден снимок (sync_view_bg)

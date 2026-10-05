@@ -110,7 +110,7 @@ fn detail_wanted(st &State) bool {
 	}
 	// Режим кадрирования - весь повёрнутый кадр; дымка показывается картой;
 	// до/после и AI на фрагменте - позже (ROADMAP)
-	if st.crop_mode || st.haze_show || ba_active(st) || st.ai_applied > 0 {
+	if st.crop_mode || st.haze_show || ba_active(st) || jpeg_active(st) || st.ai_applied > 0 {
 		return false
 	}
 	cv := st.cv

@@ -4,13 +4,16 @@ module main
 //
 // Главный поток (open_file) делает только быстрое: raw.open (~1-6 мс),
 // настройки и история из сайдкара, выделение в ленте - и запускает
-// load_worker. Воркер:
-//   1. встроенное превью камеры (thumb_min, у CR3 1620x1080, ~30 мс) ->
-//      сразу на экран (on_preview): кадр виден мгновенно;
-//   2. профиль объектива (в общей базе lensfun), проявка превью
-//      LibRaw, сила коррекции виньетирования по полному JPEG камеры,
-//      коррекция объектива и маска (prep_compute, без шумодава),
-//      камерная кривая по тому же JPEG -> on_done.
+// load_worker; на месте снимка - оверлей «Обработка» с кольцом прогресса
+// (loading.v). Встроенный JPEG камеры при открытии не показывается: он
+// обработан иначе, и смена картинки на проявку RAW бросалась в глаза; его
+// можно посмотреть отдельно («Вид - JPEG камеры», camjpeg.v). Воркер
+// (кадр 24 Мп, -prod, всего ~0.75 с; после этапа - прогресс on_prog):
+//   профиль объектива (в общей базе lensfun), проявка превью LibRaw
+//   (~160 мс), полный JPEG камеры (~160 мс), сила виньетирования и кадр
+//   «как у камеры» по нему (~70 мс), коррекция объектива и маска
+//   (prep_compute без шумодава, ~265 мс), камерная кривая и цвет по тому
+//   же JPEG (~80 мс) и JPEG для показа -> on_done.
 // Шумодав из сайдкара досчитывает обычный фоновый request_prep уже после
 // загрузки. Быстрое перелистывание: предыдущая загрузка отменяется
 // флагом между этапами, её результат отбрасывается по file_gen (dev и
@@ -34,23 +37,20 @@ struct LoadJob {
 	db        &lens.Database = unsafe { nil } // общая база lensfun (nil - без коррекции)
 	highlight int
 	lens_corr bool
-	// Быстрое превью - сразу с геометрией кадра (кадрирование, поворот)
-	// и размером итогового превью tw x th (0 - по размеру превью камеры):
-	// если холст того же размера, зум и панорама не сбрасываются
-	// (сравнение соседних кадров), картинка не прыгает после проявки
-	geom pipeline.Geom
-	tw   int
-	th   int
 	stop &StopFlag = unsafe { nil }
 }
 
-// LoadPreview - быстрое превью камеры (RGBA w x h) для показа до проявки
-struct LoadPreview {
+// LoadProgress - доля выполненной загрузки 0..1 (оверлей «Обработка»)
+struct LoadProgress {
 	gen int
-	w   int
-	h   int
-	pix []u8
+	v   f32
 }
+
+// Доли загрузки после этапов (по времени этапов на кадре 24 Мп)
+const load_p_develop = f32(0.22)
+const load_p_jpeg = f32(0.44)
+const load_p_match = f32(0.53)
+const load_p_prep = f32(0.88)
 
 // LoadResult - итог загрузки. dev всегда внутри (даже при ошибке или
 // отмене): закрывает или забирает его главный поток.
@@ -69,10 +69,13 @@ struct LoadResult {
 	linear     []u16
 	mask       []u16
 	look       CamLook // камерная кривая, насыщенность и виньетка; кривая пуста - JPEG нет
+	// JPEG камеры для показа («Вид - JPEG камеры»): RGBA w x h в
+	// ориентации кадра, как превью до геометрии; пусто - JPEG нет
+	cam_view []u8
 }
 
 // load_worker выполняется в spawn; результат - через app.post
-fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_done fn (LoadResult)) {
+fn load_worker(job LoadJob, mut app vgui.App, on_prog fn (LoadProgress), on_done fn (LoadResult)) {
 	mut d := job.dev
 	meta := d.meta()
 	mut res := LoadResult{
@@ -82,15 +85,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		highlight: job.highlight
 		lens_corr: job.lens_corr
 	}
-	// 1. Быстрое превью
-	if pv := quick_preview(mut d, job) {
-		post_result(mut app, on_preview, pv)
-	}
-	if job.stop.stop {
-		post_load(mut app, on_done, res)
-		return
-	}
-	// 2. Профиль объектива, проявка, подготовка, камерная кривая
+	// Профиль объектива, проявка, подготовка, камерная кривая
 	res = LoadResult{
 		...res
 		corr: job.db.find(meta.cam_make, meta.cam_model, meta.lens) or { unsafe { nil } }
@@ -108,6 +103,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 	mut dev_linear := []u16{len: w * h * 3}
 	unsafe { vmemcpy(dev_linear.data, img.data_u16(), w * h * 6) }
 	img.free()
+	load_progress(mut app, on_prog, job, load_p_develop)
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
 		return
@@ -121,8 +117,10 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 			t.free()
 		}
 	}
+	load_progress(mut app, on_prog, job, load_p_jpeg)
 	lm := lens_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
 	vign := lm.vign
+	load_progress(mut app, on_prog, job, load_p_match)
 	prep := prep_compute(PrepJob{
 		gen:       job.gen
 		src:       dev_linear
@@ -135,6 +133,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		vign:      vign
 		zoom:      lm.zoom
 	})
+	load_progress(mut app, on_prog, job, load_p_prep)
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
 		return
@@ -151,41 +150,32 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 			...camera_look(cj, d.flip(), prep.linear, w, h, vign)
 			zoom: lm.zoom
 		}
+		cam_view:   cam_view(cj, d.flip(), w, h)
 	}
 	post_load(mut app, on_done, res)
 }
 
-fn post_load(mut app vgui.App, on_done fn (LoadResult), res LoadResult) {
-	post_result(mut app, on_done, res)
+// load_progress - доля загрузки v в главный поток (кольцо оверлея)
+fn load_progress(mut app vgui.App, on_prog fn (LoadProgress), job LoadJob, v f32) {
+	if isnil(on_prog) || job.stop.stop {
+		return
+	}
+	post_result(mut app, on_prog, LoadProgress{
+		gen: job.gen
+		v:   v
+	})
 }
 
-// quick_preview - встроенное превью камеры в ориентации кадра, RGBA;
-// вписано в холст job.tw x job.th, если он задан
-fn quick_preview(mut d raw.Developer, job LoadJob) ?LoadPreview {
-	j := d.thumb_min(1000) or { return none }
-	mut img := stbi.load_from_memory(j.data, j.len, desired_channels: 3) or { return none }
-	defer {
-		img.free()
-	}
-	fl := d.flip()
-	ow := if fl & 4 != 0 { img.height } else { img.width }
-	oh := if fl & 4 != 0 { img.width } else { img.height }
-	src := unsafe { img.data.vbytes(img.width * img.height * 3) }
-	pix := fit_thumb(src, img.width, img.height, fl, ow, oh)
-	if job.tw <= 0 || job.th <= 0 || (job.geom.is_identity() && job.tw == ow && job.th == oh) {
-		return LoadPreview{
-			gen: job.gen
-			w:   ow
-			h:   oh
-			pix: pix
-		}
-	}
-	return LoadPreview{
-		gen: job.gen
-		w:   job.tw
-		h:   job.th
-		pix: pipeline.geom_rgba(pix, ow, oh, job.geom, true, job.tw, job.th)
-	}
+// cam_view - JPEG камеры для показа: вписан в размер превью w x h в
+// ориентации кадра (RGBA); без JPEG - пусто
+fn cam_view(cj ?stbi.Image, flip int, w int, h int) []u8 {
+	t := cj or { return []u8{} }
+	return fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height, flip,
+		w, h)
+}
+
+fn post_load(mut app vgui.App, on_done fn (LoadResult), res LoadResult) {
+	post_result(mut app, on_done, res)
 }
 
 // CamLook - «как JPEG камеры» для кадра: тоновая кривая (match_curve),
