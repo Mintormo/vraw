@@ -90,6 +90,7 @@ mut:
 	// лента и полоса над ней, фоновый воркер миниатюр
 	folder        string
 	frames        []Frame
+	cells         []&StripCell // запас ячеек ленты (browser.v, strip_cell)
 	frame_idx     int = -1
 	viewer        &vgui.VBox     = unsafe { nil } // область просмотра (пересобирается)
 	view_area     &vgui.VBox     = unsafe { nil } // снимок на выбранном фоне

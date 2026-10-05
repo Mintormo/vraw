@@ -295,6 +295,56 @@ fn wait_thumbs(mut st State) {
 	st.thumb_threads.clear()
 }
 
+// StripCell - ячейка ленты: холст миниатюры, подпись, контейнер и
+// замыкание отметок поверх холста
+@[heap]
+struct StripCell {
+mut:
+	cv   &vgui.Canvas = unsafe { nil }
+	name &vgui.Label  = unsafe { nil }
+	cell &vgui.VBox   = unsafe { nil }
+}
+
+// strip_cell - ячейка ленты номер idx из запаса st.cells, при нехватке -
+// новая. Ячейки переиспользуются при смене папки: у каждой своё замыкание
+// on_overlay (рисует отметки кадра idx), а замыкания V не освобождает
+// никогда - вместе с захваченным холстом. Новые ячейки на каждую папку
+// держали бы все прежние ленты до выхода (~19 МБ на папку из 94 кадров
+// плюс текстуры); с запасом память ленты - по самой большой папке.
+fn strip_cell(mut st State, idx int) &StripCell {
+	if idx < st.cells.len {
+		return st.cells[idx]
+	}
+	mut cv := vgui.canvas(thumb_w, thumb_h)
+	// Вписывание с сохранением пропорций (auto_fit): любая высота ленты
+	cv.stretch = false
+	cv.enabled = false // пассивный: щелчок уходит в список
+	cv.set_wheel_zoom(false)
+	cv.set_pan_buttons(0)
+	// Звёзды и флажок - поверх миниатюры, без правки её пикселей
+	// (пометка меняется - достаточно перерисовать)
+	cv.on_overlay = fn [mut st, idx, cv] (mut ctx vgui.RenderContext) {
+		if idx < st.frames.len {
+			draw_thumb_marks(mut ctx, cv, st.frames[idx].mark)
+		}
+	}
+	mut name := vgui.label('')
+	name.align = .center
+	name.font_size = 12
+	name.color = st.pal.secondary
+	mut cell := vgui.create_vbox_fill()
+	cell.set_spacing(4)
+	cell.add(cv, flex: 1)
+	cell.add(name)
+	c := &StripCell{
+		cv:   cv
+		name: name
+		cell: cell
+	}
+	st.cells << c
+	return c
+}
+
 // load_folder - новая папка в ленте: список кадров, ячейки с пустыми
 // миниатюрами, отметки изменённых и пометки отбора (начало сайдкара,
 // read_side_head), строки по фильтру, фоновый расчёт миниатюр.
@@ -305,28 +355,15 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	paths := scan_folder(dir)
 	st.frames = []Frame{}
 	for p in paths {
-		mut cv := vgui.canvas(thumb_w, thumb_h)
-		// Вписывание с сохранением пропорций (auto_fit): любая высота ленты
-		cv.stretch = false
-		cv.enabled = false // пассивный: щелчок уходит в список
-		cv.set_wheel_zoom(false)
-		cv.set_pan_buttons(0)
-		idx := st.frames.len
-		// Звёзды и флажок - поверх миниатюры, без правки её пикселей
-		// (пометка меняется - достаточно перерисовать)
-		cv.on_overlay = fn [mut st, idx, cv] (mut ctx vgui.RenderContext) {
-			if idx < st.frames.len {
-				draw_thumb_marks(mut ctx, cv, st.frames[idx].mark)
-			}
-		}
-		mut name := vgui.label(os.file_name(p))
-		name.align = .center
-		name.font_size = 12
+		// Ячейка ленты - из запаса (strip_cell): при смене папки не
+		// создаётся заново
+		sc := strip_cell(mut st, st.frames.len)
+		mut cv := sc.cv
+		mut name := sc.name
+		cell := sc.cell
+		name.text = os.file_name(p)
+		name.font_style = .regular
 		name.color = st.pal.secondary
-		mut cell := vgui.create_vbox_fill()
-		cell.set_spacing(4)
-		cell.add(cv, flex: 1)
-		cell.add(name)
 		cv.fill(thumb_bg)
 		head := read_side_head(p)
 		st.frames << Frame{
