@@ -130,9 +130,8 @@ mut:
 	load_stop    &StopFlag = unsafe { nil }
 	load_threads []thread
 	load_msg     string
-	on_load_prog fn (LoadProgress) = unsafe { nil }
-	on_load_done fn (LoadResult)   = unsafe { nil }
-	load_ov      &LoadOverlay      = unsafe { nil } // оверлей «Обработка» (loading.v)
+	on_load_done fn (LoadResult) = unsafe { nil }
+	load_ov      &LoadOverlay    = unsafe { nil } // оверлей «Обработка» (loading.v)
 	// Настройки между запусками (settings.v) и меню, которое их отражает
 	settings Settings
 	m_strip  &vgui.MenuItem = unsafe { nil }
@@ -272,6 +271,7 @@ mut:
 	jpeg_show bool
 	cam_view  []u8
 	m_jpeg    &vgui.MenuItem = unsafe { nil }
+	vcache    []ViewCache // кэш проявленных кадров (viewcache.v)
 	click_down bool
 	click_x    f32
 	click_y    f32
@@ -1210,7 +1210,9 @@ fn sync_view_bg(mut st State) {
 		return
 	}
 	mut va := st.view_area
-	shown := !isnil(st.holder) && !st.holder.stack.visible
+	// Поле вокруг снимка - выбранный фон; вокруг заглушки и оверлея
+	// загрузки - фон темы (край их градиента)
+	shown := !isnil(st.holder) && !st.holder.stack.visible && !load_shown(st)
 	va.set_bg(if shown {
 		bg_colors[bg_index(st.settings.viewer_bg)]
 	} else if !isnil(st.holder) {
@@ -2093,6 +2095,9 @@ fn main() {
 			nm.show_error('Ошибка: ${err.msg()}')
 			return
 		}
+		// Картинка уходящего кадра - в кэш (viewcache.v): вернутся к нему -
+		// сразу на экране
+		cache_store(mut st)
 		// Незаконченная загрузка прежнего кадра отменяется; её dev/corr
 		// освободит on_load_done, увидев старый file_gen
 		if !isnil(st.load_stop) {
@@ -2152,7 +2157,9 @@ fn main() {
 		show_frame(mut st, path, mut app)
 		stop := &StopFlag{}
 		st.load_stop = stop
-		show_loading(mut st, true)
+		if !cache_show(mut st, path) {
+			show_loading(mut st, true)
+		}
 		job := LoadJob{
 			gen:       st.file_gen
 			dev:       nd
@@ -2161,12 +2168,7 @@ fn main() {
 			lens_corr: st.edit.lens_corr
 			stop:      stop
 		}
-		st.load_threads << spawn load_worker(job, mut app, st.on_load_prog, st.on_load_done)
-	}
-
-	// Прогресс загрузки - на кольцо оверлея
-	st.on_load_prog = fn [mut st] (p LoadProgress) {
-		set_load_progress(mut st, p)
+		st.load_threads << spawn load_worker(job, mut app, st.on_load_done)
 	}
 
 	// Итог загрузки: хендлы и буферы - в State, затем досчитать то, что
@@ -2338,6 +2340,7 @@ fn main() {
 	// (правки некуда писать - record без истории молчит), вместо снимка -
 	// заглушка. Результаты фоновых воркеров отбросятся по file_gen.
 	close_file := fn [mut st, mut cv, mut hist, mut lens_cb, mut lens_lb, mut placeholder] () {
+		cache_store(mut st)
 		if !isnil(st.load_stop) {
 			mut ls := st.load_stop
 			ls.stop = true
@@ -2978,7 +2981,7 @@ fn main() {
 	mut view_stack := &vgui.Stack{}
 	view_stack.add(cv)
 	view_stack.add(placeholder)
-	mut load_ov := make_load_overlay()
+	mut load_ov := make_load_overlay(theme)
 	st.load_ov = load_ov
 	view_stack.add(load_ov.stack)
 	mut view_area := vgui.create_vbox_fill()

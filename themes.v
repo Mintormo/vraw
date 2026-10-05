@@ -183,6 +183,10 @@ fn paint_ui(mut st State, th vgui.Theme) {
 		mut ph := st.holder
 		paint_placeholder(mut ph, th)
 	}
+	if !isnil(st.load_ov) {
+		mut ov := st.load_ov
+		paint_load_overlay(mut ov, th)
+	}
 	sync_view_bg(mut st)
 	sync_strip(mut st)
 	refresh_history(mut st)

@@ -4,11 +4,11 @@ module main
 //
 // Главный поток (open_file) делает только быстрое: raw.open (~1-6 мс),
 // настройки и история из сайдкара, выделение в ленте - и запускает
-// load_worker; на месте снимка - оверлей «Обработка» с кольцом прогресса
-// (loading.v). Встроенный JPEG камеры при открытии не показывается: он
+// load_worker; на месте снимка - оверлей «Обработка» с вращающимся
+// кольцом (loading.v). Встроенный JPEG камеры при открытии не показывается: он
 // обработан иначе, и смена картинки на проявку RAW бросалась в глаза; его
 // можно посмотреть отдельно («Вид - JPEG камеры», camjpeg.v). Воркер
-// (кадр 24 Мп, -prod, всего ~0.75 с; после этапа - прогресс on_prog):
+// (кадр 24 Мп, -prod, всего ~0.75 с):
 //   профиль объектива (в общей базе lensfun), проявка превью LibRaw
 //   (~160 мс), полный JPEG камеры (~160 мс), сила виньетирования и кадр
 //   «как у камеры» по нему (~70 мс), коррекция объектива и маска
@@ -40,17 +40,6 @@ struct LoadJob {
 	stop &StopFlag = unsafe { nil }
 }
 
-// LoadProgress - доля выполненной загрузки 0..1 (оверлей «Обработка»)
-struct LoadProgress {
-	gen int
-	v   f32
-}
-
-// Доли загрузки после этапов (по времени этапов на кадре 24 Мп)
-const load_p_develop = f32(0.22)
-const load_p_jpeg = f32(0.44)
-const load_p_match = f32(0.53)
-const load_p_prep = f32(0.88)
 
 // LoadResult - итог загрузки. dev всегда внутри (даже при ошибке или
 // отмене): закрывает или забирает его главный поток.
@@ -75,7 +64,7 @@ struct LoadResult {
 }
 
 // load_worker выполняется в spawn; результат - через app.post
-fn load_worker(job LoadJob, mut app vgui.App, on_prog fn (LoadProgress), on_done fn (LoadResult)) {
+fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 	mut d := job.dev
 	meta := d.meta()
 	mut res := LoadResult{
@@ -103,7 +92,6 @@ fn load_worker(job LoadJob, mut app vgui.App, on_prog fn (LoadProgress), on_done
 	mut dev_linear := []u16{len: w * h * 3}
 	unsafe { vmemcpy(dev_linear.data, img.data_u16(), w * h * 6) }
 	img.free()
-	load_progress(mut app, on_prog, job, load_p_develop)
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
 		return
@@ -117,10 +105,8 @@ fn load_worker(job LoadJob, mut app vgui.App, on_prog fn (LoadProgress), on_done
 			t.free()
 		}
 	}
-	load_progress(mut app, on_prog, job, load_p_jpeg)
 	lm := lens_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
 	vign := lm.vign
-	load_progress(mut app, on_prog, job, load_p_match)
 	prep := prep_compute(PrepJob{
 		gen:       job.gen
 		src:       dev_linear
@@ -133,7 +119,6 @@ fn load_worker(job LoadJob, mut app vgui.App, on_prog fn (LoadProgress), on_done
 		vign:      vign
 		zoom:      lm.zoom
 	})
-	load_progress(mut app, on_prog, job, load_p_prep)
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
 		return
@@ -153,17 +138,6 @@ fn load_worker(job LoadJob, mut app vgui.App, on_prog fn (LoadProgress), on_done
 		cam_view:   cam_view(cj, d.flip(), w, h)
 	}
 	post_load(mut app, on_done, res)
-}
-
-// load_progress - доля загрузки v в главный поток (кольцо оверлея)
-fn load_progress(mut app vgui.App, on_prog fn (LoadProgress), job LoadJob, v f32) {
-	if isnil(on_prog) || job.stop.stop {
-		return
-	}
-	post_result(mut app, on_prog, LoadProgress{
-		gen: job.gen
-		v:   v
-	})
 }
 
 // cam_view - JPEG камеры для показа: вписан в размер превью w x h в
