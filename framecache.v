@@ -9,8 +9,10 @@ module main
 // обычно: что изменилось с тех пор (пересветы, объектив, шумодав),
 // on_load_done досчитает так же, как после обычной загрузки.
 //
-// Буферы не копируются: кэш держит те же массивы, что были в State (они
-// только читаются - подготовка сырья пишет в свои копии). Предел - по
+// Буферы не копируются: кэш - ещё один держатель тех же массивов
+// (bufown.v: share при записи, drop при вытеснении), они только читаются -
+// подготовка сырья пишет в свои копии. Вытесненный кадр сразу отдаёт
+// память системе (если его не держит и State). Предел - по
 // памяти (настройка, по умолчанию 1.5 ГБ) и числу кадров (frame_cache_max), вытесняется
 // давний; на диск не пишется. Кадр 24 Мп ~110-150 МБ.
 import lens
@@ -34,7 +36,9 @@ fn frame_cache_limit(st &State) i64 {
 // frame_trim - кэш в пределах настроек (выключен - пуст)
 fn frame_trim(mut st State) {
 	if st.settings.no_frame_cache {
-		st.fcache.clear()
+		for st.fcache.len > 0 {
+			frame_evict(mut st, 0)
+		}
 		return
 	}
 	limit := frame_cache_limit(st)
@@ -44,11 +48,16 @@ fn frame_trim(mut st State) {
 	}
 	for st.fcache.len > 0 && (st.fcache.len > frame_cache_max || total > limit) {
 		total -= st.fcache[0].bytes
-		st.fcache.delete(0)
+		frame_evict(mut st, 0)
 	}
 }
 
+// Запись - в куче, кэш хранит указатели: `<<` структуры с mut-полями-
+// массивами V копирует сами массивы (в кучу сборщика) - кэш держал бы
+// копии, а настоящие буферы остались бы без держателя навсегда.
+@[heap]
 struct FrameCache {
+mut:
 	path       string
 	highlight  int  // режим пересветов, которым проявлен dev_linear
 	lens_corr  bool // raw_linear - с коррекцией объектива
@@ -79,36 +88,33 @@ fn frame_store(mut st State) {
 	}
 	frame_drop(mut st, st.raw_path)
 	ai_ok := st.ai_linear.len > 0 && st.ai_raw_gen == st.raw_gen
-	mut fc := FrameCache{
+	mut fc := &FrameCache{
 		path:       st.raw_path
 		highlight:  st.hl_developed
 		lens_corr:  st.edit.lens_corr
 		corr:       st.corr
 		w:          st.pw
 		h:          st.ph
-		dev_linear: st.dev_linear
-		raw_linear: st.raw_linear
-		linear:     st.linear
-		mask:       st.mask
+		dev_linear: share(st.dev_linear)
+		raw_linear: share(st.raw_linear)
+		linear:     share(st.linear)
+		mask:       share(st.mask)
 		look:       st.look
-		cam_view:   st.cam_view
+		cam_view:   share(st.cam_view)
 		nr:         st.nr_applied
 		dc:         st.dc_applied
 		ai_applied: st.ai_applied
-		ai_linear:  if ai_ok { st.ai_linear } else { []u16{} }
+		ai_linear:  if ai_ok { share(st.ai_linear) } else { []u16{} }
 		ai_model:   if ai_ok { st.ai_lin_model } else { '' }
 	}
-	fc = FrameCache{
-		...fc
-		bytes: frame_bytes(fc)
-	}
+	fc.bytes = frame_bytes(fc)
 	st.fcache << fc
 	frame_trim(mut st)
 }
 
 // frame_bytes - память кадра в кэше: разные массивы (raw_linear бывает тем
 // же массивом, что dev_linear или linear)
-fn frame_bytes(fc FrameCache) i64 {
+fn frame_bytes(fc &FrameCache) i64 {
 	mut seen := []voidptr{}
 	mut n := i64(0)
 	for a in [fc.dev_linear, fc.raw_linear, fc.linear, fc.mask, fc.ai_linear] {
@@ -120,19 +126,32 @@ fn frame_bytes(fc FrameCache) i64 {
 	return n + fc.cam_view.len
 }
 
+// frame_evict - убрать запись i, отпустив её буферы
+fn frame_evict(mut st State, i int) {
+	mut c := st.fcache[i]
+	drop(mut c.dev_linear)
+	drop(mut c.raw_linear)
+	drop(mut c.linear)
+	drop(mut c.mask)
+	drop(mut c.cam_view)
+	drop(mut c.ai_linear)
+	st.fcache.delete(i)
+}
+
 // frame_drop - забыть кадр path
 fn frame_drop(mut st State, path string) {
 	for i := 0; i < st.fcache.len; i++ {
 		if st.fcache[i].path == path {
-			st.fcache.delete(i)
+			frame_evict(mut st, i)
 			return
 		}
 	}
 }
 
 // frame_take - сырьё кадра path из кэша как итог загрузки (dev - только что
-// открытый хендл LibRaw); запись из кэша уходит - при уходе с кадра она
-// запишется заново, уже с тем, что изменилось
+// открытый хендл LibRaw); запись из кэша уходит (её ссылки переходят в
+// итог) - при уходе с кадра она запишется заново, уже с тем, что
+// изменилось
 fn frame_take(mut st State, path string, dev &raw.Developer) ?LoadResult {
 	for i, c in st.fcache {
 		if c.path != path {

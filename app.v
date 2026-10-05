@@ -271,7 +271,7 @@ mut:
 	jpeg_show bool
 	cam_view  []u8
 	m_jpeg    &vgui.MenuItem = unsafe { nil }
-	fcache    []FrameCache // кэш сырья кадров (framecache.v)
+	fcache    []&FrameCache // кэш сырья кадров (framecache.v)
 	click_down bool
 	click_x    f32
 	click_y    f32
@@ -321,8 +321,10 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 		if key.geom.is_noop(key.crop) {
 			// Геометрия ничего не меняет - те же массивы, без копии (-48 МБ
 			// на превью 24 Мп): glin/gmask, как и linear/mask, только читаются
-			st.glin = unsafe { st.linear }
-			st.gmask = unsafe { st.mask }
+			drop(mut st.glin)
+			drop(mut st.gmask)
+			st.glin = share(st.linear)
+			st.gmask = share(st.mask)
 			st.gw = st.pw
 			st.gh = st.ph
 			st.haze = pipeline.HazeMap{}
@@ -332,14 +334,17 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 			}
 			return
 		}
-		st.glin, st.gw, st.gh = pipeline.geom_apply(unsafe { &u16(st.linear.data) }, st.pw,
-			st.ph, 3, key.geom, key.crop)
-		st.gmask = if st.mask.len == st.pw * st.ph {
-			m, _, _ := pipeline.geom_apply(unsafe { &u16(st.mask.data) }, st.pw, st.ph,
-				1, key.geom, key.crop)
-			m
-		} else {
-			[]u16{}
+		// Свои буферы вне сборщика (bufown.v), прежние отпускаются
+		drop(mut st.glin)
+		drop(mut st.gmask)
+		ow, oh := key.geom.out_size(st.pw, st.ph, key.crop)
+		st.glin = own_new[u16](ow * oh * 3)
+		st.gw, st.gh = pipeline.geom_apply_into(unsafe { &u16(st.linear.data) }, st.pw,
+			st.ph, 3, key.geom, key.crop, mut st.glin)
+		if st.mask.len == st.pw * st.ph {
+			st.gmask = own_new[u16](ow * oh)
+			pipeline.geom_apply_into(unsafe { &u16(st.mask.data) }, st.pw, st.ph, 1,
+				key.geom, key.crop, mut st.gmask)
 		}
 		st.haze = pipeline.HazeMap{}
 		st.geom_key = key
@@ -470,7 +475,8 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 	st.pw = img.width
 	st.ph = img.height
 	n := img.width * img.height * 3
-	st.dev_linear = []u16{len: n}
+	drop(mut st.dev_linear)
+	st.dev_linear = own_new[u16](n)
 	unsafe { vmemcpy(st.dev_linear.data, img.data_u16(), n * 2) }
 	img.free()
 	st.lens_dirty = true
@@ -489,7 +495,8 @@ fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm v
 
 // PrepJob - снимок для подготовки сырья: коррекция объектива (только при
 // redo_lens - src это выход LibRaw), импульсы, шумодав, ореолы, маска
-// «Тени/Света». src - собственная копия буфера. corr - профиль из общей
+// «Тени/Света». src и ai_src - со своими ссылками (bufown.v: share при
+// создании задания), prep_compute их отпускает. corr - профиль из общей
 // базы lensfun (st.lens_db живёт до выхода, после wait_prep), только
 // чтение; воркер одновременно работает только один.
 struct PrepJob {
@@ -510,6 +517,7 @@ struct PrepJob {
 }
 
 struct PrepResult {
+mut:
 	gen        int
 	raw_linear []u16 // после коррекции объектива; пусто, если коррекция не пересчитывалась
 	linear     []u16
@@ -531,7 +539,7 @@ fn make_prep_job(mut st State) PrepJob {
 	ai_s := if redo { f32(0) } else { ai_effective(st) }
 	return PrepJob{
 		gen:       st.file_gen
-		src:       if redo { st.dev_linear } else { st.raw_linear }
+		src:       share(if redo { st.dev_linear } else { st.raw_linear })
 		w:         st.pw
 		h:         st.ph
 		redo_lens: redo
@@ -541,7 +549,7 @@ fn make_prep_job(mut st State) PrepJob {
 		vign:      st.look.vign
 		zoom:      st.look.zoom
 		nr:        st.edit.nr
-		ai_src:    if ai_s > 0 { st.ai_linear } else { []u16{} }
+		ai_src:    if ai_s > 0 { share(st.ai_linear) } else { []u16{} }
 		ai_s:      ai_s
 		dc:        st.edit.params.sharp
 	}
@@ -566,12 +574,23 @@ fn dc_key(s pipeline.Sharpen) [3]f32 {
 // raw_linear - тот же массив, что dev_linear, без AI, шумодава и
 // Capture-резкости linear - тот же, что raw_linear (-36 МБ на каждый
 // совпадающий слой превью 24 Мп). Править буферы State на месте нельзя.
+//
+// Владение (bufown.v): задание держит src и ai_src - здесь они
+// отпускаются; у итога на каждое поле своя ссылка (совпадающие слои -
+// share), промежуточное, не попавшее в итог, отпускается.
 fn prep_compute(job PrepJob) PrepResult {
+	mut jsrc := unsafe { job.src }
+	mut jai := unsafe { job.ai_src }
+	defer {
+		drop(mut jsrc)
+		drop(mut jai)
+	}
 	// Сырьё после объектива (точка возврата для следующего пересчёта
 	// шумодава): коррекция - на своей копии
-	mut lensed := unsafe { job.src }
+	mut lensed := share(job.src)
 	if job.redo_lens && !isnil(job.corr) {
-		lensed = job.src.clone()
+		drop(mut lensed)
+		lensed = own_clone(job.src)
 		rb := unsafe { &u16(lensed.data) }
 		job.corr.vignetting(rb, job.w, job.h, job.focal, job.aperture, job.vign)
 		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
@@ -580,10 +599,7 @@ fn prep_compute(job PrepJob) PrepResult {
 	// AI и шумодав - на своей копии сырья
 	use_ai := job.ai_s > 0 && job.ai_src.len == lensed.len
 	use_nr := job.nr[0] > 0 || job.nr[1] > 0 || job.nr[2] > 0 || job.nr[3] > 0
-	mut cur := unsafe { lensed }
-	if use_ai || use_nr {
-		cur = lensed.clone()
-	}
+	mut cur := if use_ai || use_nr { own_clone(lensed) } else { share(lensed) }
 	buf := unsafe { &u16(cur.data) }
 	// AI-шумодав: смешение с готовым результатом модели по силе (ai_nr.v)
 	if use_ai {
@@ -600,17 +616,24 @@ fn prep_compute(job PrepJob) PrepResult {
 		pipeline.defringe(buf, job.w, job.h, job.nr[3])
 	}
 	// Capture-резкость - после шумодава (не усиливать шум), в свой буфер
-	lin := if job.dc.dc_amount > 0 {
-		pipeline.deconvolve(buf, job.w, job.h, job.dc, preview_scale)
+	mut lin := []u16{}
+	if job.dc.dc_amount > 0 {
+		lin = own_new[u16](cur.len)
+		pipeline.deconvolve_into(buf, job.w, job.h, job.dc, preview_scale, mut lin)
 	} else {
-		unsafe { cur }
+		lin = share(cur)
 	}
 	// Маска «Тени/Света» зависит только от сырья (после коррекции
 	// объектива и шумодава!), поэтому считается здесь, а не на каждый ползунок.
-	mask := pipeline.blur_luma(buf, job.w, job.h)
+	mut mask := own_new[u16](job.w * job.h)
+	pipeline.blur_luma_into(buf, job.w, job.h, mut mask)
+	drop(mut cur)
+	if !job.redo_lens {
+		drop(mut lensed)
+	}
 	return PrepResult{
 		gen:        job.gen
-		raw_linear: if job.redo_lens { lensed } else { []u16{} }
+		raw_linear: lensed
 		linear:     lin
 		mask:       mask
 		nr:         job.nr
@@ -622,11 +645,15 @@ fn prep_compute(job PrepJob) PrepResult {
 // take_prep принимает результат подготовки в State (главный поток).
 // Буферы передаются без копирования: воркер их больше не трогает.
 fn take_prep(mut st State, res PrepResult) {
+	// Ссылки итога переходят в State, прежние буферы отпускаются
 	if res.raw_linear.len > 0 {
+		drop(mut st.raw_linear)
 		st.raw_linear = res.raw_linear
 		st.raw_pending = false
 		raw_changed(mut st) // результат модели устарел (ai_check перезапустит)
 	}
+	drop(mut st.linear)
+	drop(mut st.mask)
 	st.linear = res.linear
 	st.mask = res.mask
 	st.lin_gen++
@@ -634,6 +661,14 @@ fn take_prep(mut st State, res PrepResult) {
 	st.nr_applied = res.nr
 	st.dc_applied = dc_key(res.dc)
 	st.ai_applied = res.ai_s
+}
+
+// drop_prep - итог подготовки не нужен: отпустить его буферы
+fn drop_prep(res PrepResult) {
+	mut r := res
+	drop(mut r.raw_linear)
+	drop(mut r.linear)
+	drop(mut r.mask)
 }
 
 // prep_worker выполняется в spawn; результат уходит в главный поток
@@ -1444,12 +1479,15 @@ fn main() {
 	// прежнего кадра теперь можно освободить.
 	st.prep_done = fn [mut st, mut cv, mut hist, mut app] (res PrepResult) {
 		if !st.prep_running {
+			drop_prep(res)
 			return
 		}
 		wait_prep(mut st) // воркер уже отдал результат - join мгновенный
 		if res.gen == st.file_gen {
 			take_prep(mut st, res)
 			apply_pipeline(mut st, mut cv, mut hist)
+		} else {
+			drop_prep(res) // подготовка прежнего кадра
 		}
 		if st.dev_linear.len > 0 && (st.lens_dirty || prep_stale(st)) {
 			// Пока воркер считал, настройки снова поменялись (или это
@@ -2116,17 +2154,17 @@ fn main() {
 		st.loading = true
 		ai_forget(mut st)
 		st.raw_pending = false
-		st.dev_linear = []u16{}
-		st.raw_linear = []u16{}
-		st.linear = []u16{}
-		st.mask = []u16{}
+		drop(mut st.dev_linear)
+		drop(mut st.raw_linear)
+		drop(mut st.linear)
+		drop(mut st.mask)
 		st.lin_gen++
-		st.glin = []u16{}
-		st.gmask = []u16{}
+		drop(mut st.glin)
+		drop(mut st.gmask)
 		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
-		st.cam_view = []u8{}
+		drop(mut st.cam_view)
 		st.lens_dirty = false
 		lens_lb.text = 'поиск профиля объектива...'
 		lens_cb.enabled = false
@@ -2198,6 +2236,11 @@ fn main() {
 		// Холст - под размер кадра после геометрии (ensure_geom в apply)
 		st.pw = res.w
 		st.ph = res.h
+		// Ссылки итога переходят в State (bufown.v)
+		drop(mut st.dev_linear)
+		drop(mut st.raw_linear)
+		drop(mut st.linear)
+		drop(mut st.mask)
 		st.dev_linear = res.dev_linear
 		st.raw_linear = res.raw_linear
 		st.linear = res.linear
@@ -2210,6 +2253,7 @@ fn main() {
 		st.dc_applied = res.dc_applied
 		st.ai_applied = res.ai_applied
 		if res.ai_linear.len > 0 {
+			drop(mut st.ai_linear)
 			st.ai_linear = res.ai_linear
 			st.ai_lin_model = res.ai_model
 			st.ai_raw_gen = st.raw_gen
@@ -2217,6 +2261,7 @@ fn main() {
 		st.lens_dirty = false
 		st.raw_pending = false
 		st.look = res.look
+		drop(mut st.cam_view)
 		st.cam_view = res.cam_view
 		crv_cb.enabled = st.look.curve.len > 0
 		// Производные поля снимков - по камерной кривой этого кадра
@@ -2365,17 +2410,17 @@ fn main() {
 		detail_reset(mut st)
 		ai_forget(mut st)
 		st.raw_pending = false
-		st.dev_linear = []u16{}
-		st.raw_linear = []u16{}
-		st.linear = []u16{}
-		st.mask = []u16{}
+		drop(mut st.dev_linear)
+		drop(mut st.raw_linear)
+		drop(mut st.linear)
+		drop(mut st.mask)
 		st.lin_gen++
-		st.glin = []u16{}
-		st.gmask = []u16{}
+		drop(mut st.glin)
+		drop(mut st.gmask)
 		crop_leave(mut st)
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
-		st.cam_view = []u8{}
+		drop(mut st.cam_view)
 		st.side_path = ''
 		st.raw_path = ''
 		st.mark = Mark{}

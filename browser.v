@@ -132,6 +132,13 @@ fn thumb_order(n int, cur int) []int {
 // 6 - 90° по часовой) и уменьшением усреднением по блоку источника.
 fn fit_thumb(src []u8, w int, h int, flip int, bw int, bh int) []u8 {
 	mut out := []u8{len: bw * bh * 4}
+	fit_thumb_into(mut out, src, w, h, flip, bw, bh)
+	return out
+}
+
+// fit_thumb_into - то же в готовый буфер out (bw * bh * 4; JPEG камеры
+// кадра - буфер вне сборщика, bufown.v)
+fn fit_thumb_into(mut out []u8, src []u8, w int, h int, flip int, bw int, bh int) {
 	for i in 0 .. bw * bh {
 		out[i * 4] = thumb_bg.r
 		out[i * 4 + 1] = thumb_bg.g
@@ -139,7 +146,7 @@ fn fit_thumb(src []u8, w int, h int, flip int, bw int, bh int) []u8 {
 		out[i * 4 + 3] = 255
 	}
 	if w <= 0 || h <= 0 || src.len < w * h * 3 {
-		return out
+		return
 	}
 	rot := flip & 4 != 0
 	ow := if rot { h } else { w } // размеры в ориентации показа
@@ -190,7 +197,7 @@ fn fit_thumb(src []u8, w int, h int, flip int, bw int, bh int) []u8 {
 			out[d + 2] = u8(b / n)
 		}
 	}
-	return out
+	return
 }
 
 // thumb_geom - геометрия кадра из его сайдкара (как на выходе:

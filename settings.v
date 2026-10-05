@@ -101,6 +101,13 @@ fn settings_path() string {
 fn load_settings() Settings {
 	text := os.read_file(settings_path()) or { return Settings{} }
 	s := json2.decode[Settings](text) or { return Settings{} }
+	return settings_from(s)
+}
+
+// settings_from - прочитанные настройки с проверкой значений (чужое или
+// устаревшее - по умолчанию). Новое поле Settings - добавлять и сюда,
+// иначе оно не переживёт перезапуск (тест test_settings_roundtrip).
+fn settings_from(s Settings) Settings {
 	return Settings{
 		viewer_bg:  bg_keys[bg_index(s.viewer_bg)]
 		strip_open: s.strip_open
@@ -129,6 +136,8 @@ fn load_settings() Settings {
 		crop_aspect: if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
 		crop_grid:   if s.crop_grid in crop_grids { s.crop_grid } else { 'thirds' }
 		auto_advance: s.auto_advance
+		no_frame_cache: s.no_frame_cache
+		frame_cache_mb: if s.frame_cache_mb in frame_cache_mbs { s.frame_cache_mb } else { 0 }
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {
 			s.jpeg_quality

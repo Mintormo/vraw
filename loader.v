@@ -44,6 +44,7 @@ struct LoadJob {
 // LoadResult - итог загрузки. dev всегда внутри (даже при ошибке или
 // отмене): закрывает или забирает его главный поток.
 struct LoadResult {
+mut:
 	gen        int
 	err        string // не пусто - кадр не проявился
 	dev        &raw.Developer  = unsafe { nil }
@@ -96,10 +97,13 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 	}
 	w := img.width
 	h := img.height
-	mut dev_linear := []u16{len: w * h * 3}
+	// Буферы кадра - вне сборщика, с владельцем (bufown.v): ссылка у
+	// воркера, с итогом переходит в главный поток
+	mut dev_linear := own_new[u16](w * h * 3)
 	unsafe { vmemcpy(dev_linear.data, img.data_u16(), w * h * 6) }
 	img.free()
 	if job.stop.stop {
+		drop(mut dev_linear)
 		post_load(mut app, on_done, res)
 		return
 	}
@@ -114,9 +118,10 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 	}
 	lm := lens_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
 	vign := lm.vign
-	prep := prep_compute(PrepJob{
+	// Задание забирает свою ссылку на dev_linear (prep_compute отпустит)
+	mut prep := prep_compute(PrepJob{
 		gen:       job.gen
-		src:       dev_linear
+		src:       share(dev_linear)
 		w:         w
 		h:         h
 		redo_lens: true
@@ -127,6 +132,10 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 		zoom:      lm.zoom
 	})
 	if job.stop.stop {
+		drop(mut dev_linear)
+		drop(mut prep.raw_linear)
+		drop(mut prep.linear)
+		drop(mut prep.mask)
 		post_load(mut app, on_done, res)
 		return
 	}
@@ -148,11 +157,13 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 }
 
 // cam_view - JPEG камеры для показа: вписан в размер превью w x h в
-// ориентации кадра (RGBA); без JPEG - пусто
+// ориентации кадра (RGBA, вне сборщика - одна ссылка); без JPEG - пусто
 fn cam_view(cj ?stbi.Image, flip int, w int, h int) []u8 {
 	t := cj or { return []u8{} }
-	return fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height, flip,
-		w, h)
+	mut out := own_new[u8](w * h * 4)
+	fit_thumb_into(mut out, unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width,
+		t.height, flip, w, h)
+	return out
 }
 
 fn post_load(mut app vgui.App, on_done fn (LoadResult), res LoadResult) {
@@ -536,11 +547,20 @@ fn (r &VignRef) fit(mf &lens.MatchFrame) ?f32 {
 
 // free_load - закрыть LibRaw отброшенного результата загрузки (профиль
 // объектива - из общей базы, освобождать нечего)
+// free_load - итог загрузки не нужен (отменена, ошибка, чужой кадр):
+// закрыть LibRaw и отпустить буферы
 fn free_load(res LoadResult) {
 	if !isnil(res.dev) {
 		mut d := res.dev
 		d.close()
 	}
+	mut r := res
+	drop(mut r.dev_linear)
+	drop(mut r.raw_linear)
+	drop(mut r.linear)
+	drop(mut r.mask)
+	drop(mut r.cam_view)
+	drop(mut r.ai_linear)
 }
 
 fn wait_loads(mut st State) {

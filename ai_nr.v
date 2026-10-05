@@ -49,7 +49,7 @@ struct AiJob {
 	gen     int // file_gen кадра
 	raw_gen int
 	model   string // id модели
-	src     []u16
+	src     []u16 // своя ссылка (bufown.v), ai_worker отпускает
 	w       int
 	h       int
 	cache   &ai.Cache = unsafe { nil }
@@ -57,6 +57,7 @@ struct AiJob {
 }
 
 struct AiResult {
+mut:
 	ctl       &AiCtl = unsafe { nil } // чей это прогон
 	gen       int
 	raw_gen   int
@@ -170,7 +171,7 @@ fn prep_stale(st &State) bool {
 // кадр): результат модели больше не годится, идущий прогон превью - тоже
 fn raw_changed(mut st State) {
 	st.raw_gen++
-	st.ai_linear = []u16{}
+	drop(mut st.ai_linear)
 	if !isnil(st.ai_prev) {
 		mut c := st.ai_prev
 		c.cancel = true
@@ -223,7 +224,7 @@ fn ai_check(mut st State, mut app vgui.App) {
 		gen:     st.file_gen
 		raw_gen: st.raw_gen
 		model:   id
-		src:     st.raw_linear // только чтение: модель пишет в свой буфер
+		src:     share(st.raw_linear) // только чтение: модель пишет в свой буфер
 		w:       st.pw
 		h:       st.ph
 		cache:   cache
@@ -295,6 +296,10 @@ fn (mut p AiPoster) step(done int, total int) bool {
 // app.post (потокобезопасен по контракту vgui)
 fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64), on_done fn (AiResult)) {
 	sw := time.new_stopwatch()
+	mut jsrc := unsafe { job.src }
+	defer {
+		drop(mut jsrc)
+	}
 	mut res := AiResult{
 		ctl:     job.ctl
 		gen:     job.gen
@@ -308,12 +313,16 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 			ctl:         job.ctl
 			on_progress: on_progress
 		}
-		if out := ai.denoise(model, unsafe { &u16(job.src.data) }, job.w, job.h, mut progress) {
+		mut out := own_new[u16](job.w * job.h * 3)
+		if _ := ai.denoise_into(model, unsafe { &u16(job.src.data) }, job.w, job.h, mut out, mut
+			progress)
+		{
 			res = AiResult{
 				...res
 				out: out
 			}
 		} else {
+			drop(mut out)
 			res = AiResult{
 				...res
 				err:       err.msg()
@@ -335,7 +344,10 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 
 // ai_take - итог прогона превью (главный поток, из app.post)
 fn ai_take(mut st State, mut app vgui.App, res AiResult) {
+	// Результат модели (bufown.v) - в State или отпускается
+	mut r := res
 	if st.ai_prev != res.ctl {
+		drop(mut r.out)
 		// Прогон, отменённый сменой сырья или кадра: если нужен - уже
 		// перезапускается (или будет запущен ai_check)
 		if st.ai_restart && res.gen == st.file_gen {
@@ -344,6 +356,9 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		return
 	}
 	st.ai_prev = unsafe { nil }
+	if res.cancelled || res.err.len > 0 {
+		drop(mut r.out)
+	}
 	if res.cancelled {
 		// Отменил пользователь: AI кадра (если был включён) не трогаем -
 		// сам он больше не запустится, блок покажет «Пересчитать AI»
@@ -361,9 +376,11 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		return
 	}
 	if res.gen != st.file_gen || res.raw_gen != st.raw_gen || res.model != ai_run_model(st) {
+		drop(mut r.out)
 		ai_check(mut st, mut app)
 		return
 	}
+	drop(mut st.ai_linear)
 	st.ai_linear = res.out
 	st.ai_raw_gen = res.raw_gen
 	st.ai_lin_model = res.model
@@ -409,7 +426,7 @@ fn ai_turn_on(mut st State, mut app vgui.App) {
 fn ai_turn_off(mut st State, mut app vgui.App) {
 	st.edit.ai = 0
 	st.edit.ai_model = ''
-	st.ai_linear = []u16{}
+	drop(mut st.ai_linear)
 	request_prep(mut st, mut app, false)
 	record(mut st, 'ai', 'AI-шумодав: выкл', false)
 	sync_ai_ui(mut st)
@@ -425,7 +442,7 @@ fn ai_forget(mut st State) {
 	}
 	st.ai_wanted = false
 	st.ai_restart = false
-	st.ai_linear = []u16{}
+	drop(mut st.ai_linear)
 	st.ai_applied = 0
 	st.raw_gen++
 	sync_ai_ui(mut st)
