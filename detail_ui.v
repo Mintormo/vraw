@@ -75,6 +75,7 @@ struct DetailReq {
 	use_lens  bool
 	corr      &lens.Corrector = unsafe { nil }
 	vign      f32
+	zoom      f32 = 1
 	src       &DetailSrc  = unsafe { nil } // готовый (тот же src_key) или nil
 	lens      &DetailLens = unsafe { nil } // готовый (тот же lens_key) или nil
 	frac      DetailFrac
@@ -99,7 +100,7 @@ mut:
 // detail_prep_key - настройки, от которых зависит сырьё фрагмента
 fn detail_prep_key(st &State) string {
 	g := out_geom(&st.edit)
-	return '${st.file_gen}|${st.edit.highlight}|${st.edit.lens_corr}|${st.look.vign}|${st.edit.nr}|${dc_key(st.edit.params.sharp)}|${g}'
+	return '${st.file_gen}|${st.edit.highlight}|${st.edit.lens_corr}|${st.look.vign}|${st.look.zoom}|${st.edit.nr}|${dc_key(st.edit.params.sharp)}|${g}'
 }
 
 // detail_wanted - нужен ли слой детализации сейчас
@@ -199,7 +200,7 @@ fn detail_start(mut st State) {
 	}
 	src_key := '${st.raw_path}|${st.edit.highlight}'
 	use_lens := st.edit.lens_corr && !isnil(st.corr)
-	lens_key := '${src_key}|${use_lens}|${st.look.vign}'
+	lens_key := '${src_key}|${use_lens}|${st.look.vign}|${st.look.zoom}'
 	req := DetailReq{
 		gen:       st.file_gen
 		path:      st.raw_path
@@ -209,6 +210,7 @@ fn detail_start(mut st State) {
 		use_lens:  use_lens
 		corr:      st.corr
 		vign:      st.look.vign
+		zoom:      st.look.zoom
 		src:       if dt.src_key == src_key { dt.src } else { unsafe { nil } }
 		lens:      if dt.lens_key == lens_key { dt.lens } else { unsafe { nil } }
 		frac:      detail_frac(st)
@@ -236,7 +238,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 		}
 	}
 	if req.use_lens && isnil(res.lens) {
-		res.lens = make_detail_lens(req.corr, res.src, req.vign)
+		res.lens = make_detail_lens(req.corr, res.src, req.vign, req.zoom)
 	}
 	ow, oh := req.geom.out_size(res.src.w, res.src.h, true)
 	r := frac_region(req.frac, ow, oh, detail_pad)

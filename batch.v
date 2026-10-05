@@ -193,18 +193,22 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 				t.free()
 			}
 		}
-		mut vign := lens.vign_default
+		mut lm := LensMatch{}
 		if e.lens_corr {
 			m := d.meta()
 			corr := db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
-			vign = vign_match(cj, d.flip(), corr, lin, w, h, m)
-			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, vign)
+			lm = lens_match(cj, d.flip(), corr, lin, w, h, m)
+			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, lm.vign, lm.zoom)
 		}
 		if e.use_curve {
-			look = camera_look(cj, lin, w * h, vign)
+			look = CamLook{
+				...camera_look(cj, d.flip(), lin, w, h, lm.vign)
+				zoom: lm.zoom
+			}
 		} else {
 			look = CamLook{
-				vign: vign
+				vign: lm.vign
+				zoom: lm.zoom
 			}
 		}
 	}

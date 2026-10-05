@@ -121,7 +121,8 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 			t.free()
 		}
 	}
-	vign := vign_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
+	lm := lens_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
+	vign := lm.vign
 	prep := prep_compute(PrepJob{
 		gen:       job.gen
 		src:       dev_linear
@@ -132,6 +133,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		focal:     meta.focal
 		aperture:  meta.aperture
 		vign:      vign
+		zoom:      lm.zoom
 	})
 	if job.stop.stop {
 		post_load(mut app, on_done, res)
@@ -145,7 +147,10 @@ fn load_worker(job LoadJob, mut app vgui.App, on_preview fn (LoadPreview), on_do
 		raw_linear: prep.raw_linear
 		linear:     prep.linear
 		mask:       prep.mask
-		look:       camera_look(cj, prep.linear, w * h, vign)
+		look:       CamLook{
+			...camera_look(cj, d.flip(), prep.linear, w, h, vign)
+			zoom: lm.zoom
+		}
 	}
 	post_load(mut app, on_done, res)
 }
@@ -195,7 +200,12 @@ const cam_look_min_px = 60000
 struct CamLook {
 	curve []f32 // пусто - встроенного JPEG нет
 	sat   f32 = 1
+	// Цвет «как JPEG» (pipeline.match_hues): сдвиг оттенка и множитель
+	// насыщенности по секторам; пусто - нет (или подгонка не помогла)
+	hue  []f32
+	hsat []f32
 	vign  f32 = lens.vign_default
+	zoom  f32 = 1 // кадр «как у камеры»: увеличение сверх автомасштаба lensfun
 }
 
 // cam_jpeg - встроенный полный JPEG камеры, декодированный в RGB (в
@@ -218,49 +228,98 @@ fn cam_jpeg(mut d raw.Developer) ?stbi.Image {
 // проявки превью linear (npix пикселей, после коррекции объектива с силой
 // vign): кривая - сопоставлением гистограмм, насыщенность - по средней
 // цветности с этой кривой
-fn camera_look(cj ?stbi.Image, linear []u16, npix int, vign f32) CamLook {
+fn camera_look(cj ?stbi.Image, flip int, linear []u16, w int, h int, vign f32) CamLook {
 	t := cj or {
 		return CamLook{
 			vign: vign
 		}
 	}
+	npix := w * h
 	src := unsafe { &u16(linear.data) }
 	ref_ := unsafe { &u8(t.data) }
 	curve := pipeline.match_curve(src, npix, ref_, t.width * t.height)
+	sat := pipeline.match_saturation(src, npix, curve, ref_, t.width * t.height)
+	hue, hsat := camera_hues(t, flip, linear, w, h, curve, sat)
 	return CamLook{
 		curve: curve
-		sat:   pipeline.match_saturation(src, npix, curve, ref_, t.width * t.height)
+		sat:   sat
+		hue:   hue
+		hsat:  hsat
 		vign:  vign
 	}
 }
 
-// vign_match - сила коррекции виньетирования кадра «как JPEG камеры»:
-// спад яркости к краю после коррекции - как у камеры. Рабочая копия кадра
-// после geometry (lens.match_frame), JPEG совмещается с ней по масштабу
-// (VignRef), сила - регрессией по точкам (VignRef.fit). src - линейная
-// проявка w x h без коррекции объектива, flip - ориентация кадра (JPEG
-// лежит в ориентации сенсора). Без профиля, JPEG, при обрезанном под
-// другую пропорцию JPEG или без надёжной оценки - lens.vign_default.
-// Порядок: сначала сила, потом камерная кривая (виньетка меняет
-// гистограмму).
-fn vign_match(cj ?stbi.Image, flip int, corr &lens.Corrector, src []u16, w int, h int, m raw.Meta) f32 {
-	t := cj or { return lens.vign_default }
+// camera_hues - цвет «как JPEG» (pipeline.match_hues): рабочая копия
+// кадра (длинная сторона lens.match_side) с камерной кривой и
+// насыщенностью против JPEG, вписанного в тот же размер. Кадр уже совмещён
+// с JPEG (коррекция объектива с увеличением «как у камеры»); JPEG другой
+// пропорции - без цвета.
+fn camera_hues(t stbi.Image, flip int, linear []u16, w int, h int, curve []f32, sat f32) ([]f32, []f32) {
+	ow := if flip & 4 != 0 { t.height } else { t.width }
+	oh := if flip & 4 != 0 { t.width } else { t.height }
+	if math.abs(f64(ow) * h / (f64(oh) * w) - 1) > 0.01 {
+		return []f32{}, []f32{}
+	}
+	sw, sh := lens.match_dims(w, h)
+	small := lens.downscale(unsafe { &u16(linear.data) }, w, h, sw, sh)
+	mut ours := []u8{len: sw * sh * 4}
+	pipeline.apply(unsafe { &u16(small.data) }, unsafe { nil }, sw * sh, pipeline.Params{
+		curve:   curve
+		cam_sat: sat
+		dither:  false
+	}, mut ours, 4)
+	ref_ := fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height,
+		flip, sw, sh)
+	return pipeline.match_hues(unsafe { &u8(ours.data) }, 4, unsafe { &u8(ref_.data) }, 4,
+		sw, sh)
+}
+
+// LensMatch - коррекция объектива «как у камеры» по JPEG кадра: сила
+// виньетирования и увеличение кадра сверх автомасштаба lensfun (камера
+// после исправления дисторсии обрезает сильнее)
+struct LensMatch {
+	vign f32 = lens.vign_default
+	zoom f32 = 1
+}
+
+// Наибольшее увеличение кадра «как у камеры»: больше - скорее ошибка
+// совмещения, чем обрезка камеры (RF 24-50 на 24 мм - 1.085)
+const frame_zoom_max = f32(1.2)
+
+// lens_match - коррекция объектива «как JPEG камеры». Сила
+// виньетирования: спад яркости к краю после коррекции - как у камеры.
+// Рабочая копия кадра после geometry (lens.match_frame), JPEG совмещается
+// с ней по масштабу (VignRef), сила - регрессией по точкам (VignRef.fit).
+// Увеличение кадра - тот же масштаб совмещения (align_zoom): камерный кадр
+// уже нашего (автомасштаб lensfun) на столько же; меньше 1 не бывает
+// (иначе пустые углы), совсем мало - 1. src - линейная проявка w x h без
+// коррекции объектива, flip - ориентация кадра (JPEG лежит в ориентации
+// сенсора). Без профиля, JPEG, при обрезанном под другую пропорцию JPEG
+// или без надёжной оценки - LensMatch{} (lens.vign_default, без
+// увеличения). Порядок: сначала это, потом камерная кривая (виньетка
+// меняет гистограмму).
+fn lens_match(cj ?stbi.Image, flip int, corr &lens.Corrector, src []u16, w int, h int, m raw.Meta) LensMatch {
+	t := cj or { return LensMatch{} }
 	if isnil(corr) {
-		return lens.vign_default
+		return LensMatch{}
 	}
 	ow := if flip & 4 != 0 { t.height } else { t.width }
 	oh := if flip & 4 != 0 { t.width } else { t.height }
 	// JPEG обрезан под другую пропорцию - точки не совпадут
 	if math.abs(f64(ow) * h / (f64(oh) * w) - 1) > 0.01 {
-		return lens.vign_default
+		return LensMatch{}
 	}
 	mf := corr.match_frame(unsafe { &u16(src.data) }, w, h, m.focal, m.aperture) or {
-		return lens.vign_default
+		return LensMatch{}
 	}
 	rgba := fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height,
 		flip, mf.w, mf.h)
-	vr := VignRef.new(rgba, mf) or { return lens.vign_default }
-	return vr.fit(mf) or { lens.vign_default }
+	vr := VignRef.new(rgba, mf) or { return LensMatch{} }
+	z := vr.zoom
+	return LensMatch{
+		vign: vr.fit(mf) or { lens.vign_default }
+		zoom: if z < 1.002 { f32(1) } else if z > frame_zoom_max { frame_zoom_max } else { z }
+	}
 }
 
 // VignRef - JPEG камеры для vign_match, совмещённый с рабочей копией
@@ -273,6 +332,7 @@ fn vign_match(cj ?stbi.Image, flip int, corr &lens.Corrector, src []u16, w int, 
 struct VignRef {
 	ref_ []u8   // RGB, совмещённый с рабочей копией
 	use  []bool // точка сравнивается
+	zoom f32    // масштаб совмещения (align_zoom): камерный кадр уже нашего в zoom раз
 }
 
 // Полоса у края JPEG, которая не сравнивается (fit_thumb может оставить
@@ -338,6 +398,7 @@ fn VignRef.new(rgba []u8, mf &lens.MatchFrame) ?VignRef {
 	return VignRef{
 		ref_: ref_
 		use:  use
+		zoom: z
 	}
 }
 

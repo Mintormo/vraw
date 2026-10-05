@@ -66,14 +66,14 @@ mut:
 	plan &lens.GeomPlan = unsafe { nil } // nil - без дисторсии
 }
 
-fn make_detail_lens(c &lens.Corrector, src &DetailSrc, vign f32) &DetailLens {
+fn make_detail_lens(c &lens.Corrector, src &DetailSrc, vign f32, zoom f32) &DetailLens {
 	if isnil(c) {
 		return &DetailLens{
 			vign: vign
 		}
 	}
 	lut := c.vign_lut(src.w, src.h, src.meta.focal, src.meta.aperture, vign) or { []f32{} }
-	plan := c.geometry_plan(src.w, src.h, src.meta.focal) or { unsafe { nil } }
+	plan := c.geometry_plan_zoom(src.w, src.h, src.meta.focal, zoom) or { unsafe { nil } }
 	return &DetailLens{
 		vign: vign
 		lut:  lut

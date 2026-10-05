@@ -98,7 +98,8 @@ fn test_align_zoom() {
 	assert math.abs(same - 1) < 0.002 && c1 > 0.99
 }
 
-// IMG_0817.CR3 (RF 24-50 на 24 мм, f/6.3): по JPEG камеры сила ~0.5
+// IMG_0817.CR3 (RF 24-50 на 24 мм, f/6.3): по JPEG камеры сила ~0.5 и
+// увеличение кадра ~1.085
 // (было 0.3 на все объективы - углы неба темнее, чем у камеры)
 fn test_vign_match_file() {
 	path := os.join_path(@VMODROOT, 'IMG_0817.CR3')
@@ -131,8 +132,11 @@ fn test_vign_match_file() {
 			t.free()
 		}
 	}
-	s := vign_match(cj, d.flip(), corr, lin, w, h, m)
+	lm := lens_match(cj, d.flip(), corr, lin, w, h, m)
+	s := lm.vign
 	assert s > 0.4 && s < 0.6, '${s}'
+	// Кадр «как у камеры»: камера обрезает RF 24-50 на 24 мм на ~8.5%
+	assert lm.zoom > 1.06 && lm.zoom < 1.11, '${lm.zoom}'
 	// Без JPEG - сила по умолчанию
-	assert vign_match(none, d.flip(), corr, lin, w, h, m) == lens.vign_default
+	assert lens_match(none, d.flip(), corr, lin, w, h, m) == LensMatch{}
 }

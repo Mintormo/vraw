@@ -18,14 +18,15 @@ import bigbuf
 import imgio
 
 // correct_lens - коррекция объектива на месте (виньетирование с силой vign
-// строго до дисторсии: ремап двигает пиксели); false - профиля нет
-fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, vign f32) bool {
+// строго до дисторсии: ремап двигает пиксели; кадр увеличен в zoom раз -
+// «как у камеры»); false - профиля нет
+fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, vign f32, zoom f32) bool {
 	if isnil(db) {
 		return false
 	}
 	c := db.find(m.cam_make, m.cam_model, m.lens) or { return false }
 	c.vignetting(buf, w, h, m.focal, m.aperture, vign)
-	c.geometry(buf, w, h, m.focal)
+	c.geometry_zoom(buf, w, h, m.focal, zoom)
 	return true
 }
 
@@ -266,7 +267,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		if !progress.stage(.lens, 0, 0) {
 			return ExportCancelled{}
 		}
-		correct_lens(buf, w, h, meta, db, e.vign)
+		correct_lens(buf, w, h, meta, db, e.vign, e.lens_zoom)
 	}
 	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
 	if e.ai > 0 {

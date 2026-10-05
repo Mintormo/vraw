@@ -77,6 +77,12 @@ pub fn (m &MatchFrame) with_strength(s f32) []u16 {
 	return out
 }
 
+// downscale - уменьшение линейного RGB u16 w x h до dw x dh (среднее по
+// прямоугольнику источника)
+pub fn downscale(src &u16, w int, h int, dw int, dh int) []u16 {
+	return box_down(src, w, h, dw, dh)
+}
+
 // box_down - уменьшение линейного RGB u16 w x h до dw x dh средним по
 // прямоугольнику источника
 fn box_down(src &u16, w int, h int, dw int, dh int) []u16 {

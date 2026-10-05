@@ -316,3 +316,38 @@ fn test_region_cost() {
 	p.free()
 	c.free()
 }
+
+// Настоящий автомасштаб lensfun (lf_modifier_get_auto_scale у 0.3.4
+// возвращает 1): явный масштаб effective_scale даёт то же, что авторежим;
+// geometry_plan_zoom с zoom увеличивает кадр ровно в zoom раз
+fn test_effective_scale() {
+	mut c := find('Canon', 'Canon EOS R8', 'RF24-105mm F4-7.1 IS STM') or {
+		eprintln('ПРОПУСК: профиль RF 24-105 не найден в базе lensfun')
+		return
+	}
+	defer {
+		c.free()
+	}
+	w, h := 2999, 1999
+	m0 := c.geometry_modifier(w, h, 105.0, 0.0) or { panic('нет геометрии') }
+	a := c.effective_scale(m0, w, h, 105.0)
+	assert a > 1.005 && a < 1.015, '${a}'
+	m1 := c.geometry_modifier(w, h, 105.0, a) or { panic('') }
+	mut r0 := []f32{len: 6}
+	mut r1 := []f32{len: 6}
+	C.lf_modifier_apply_subpixel_geometry_distortion(m0, f32(w - 1), f32(h - 1), 1, 1, unsafe { &f32(r0.data) })
+	C.lf_modifier_apply_subpixel_geometry_distortion(m1, f32(w - 1), f32(h - 1), 1, 1, unsafe { &f32(r1.data) })
+	assert math.abs(r0[2] - r1[2]) < 0.05 && math.abs(r0[3] - r1[3]) < 0.05
+	C.lf_modifier_destroy(m0)
+	C.lf_modifier_destroy(m1)
+	// zoom 1.05: точка у правого края берётся из источника на 5% ближе к центру
+	mut p1 := c.geometry_plan_zoom(w, h, 105.0, 1) or { panic('') }
+	mut p2 := c.geometry_plan_zoom(w, h, 105.0, 1.05) or { panic('') }
+	cx := f32(w - 1) / 2
+	C.lf_modifier_apply_subpixel_geometry_distortion(p1.m, f32(w - 1), f32(h - 1) / 2, 1, 1, unsafe { &f32(r0.data) })
+	C.lf_modifier_apply_subpixel_geometry_distortion(p2.m, f32(w - 1), f32(h - 1) / 2, 1, 1, unsafe { &f32(r1.data) })
+	k := (r1[2] - cx) / (r0[2] - cx)
+	assert math.abs(k - 1 / 1.05) < 0.005, '${k}'
+	p1.free()
+	p2.free()
+}

@@ -486,6 +486,7 @@ struct PrepJob {
 	focal     f32
 	aperture  f32
 	vign      f32    // сила коррекции виньетирования (CamLook.vign)
+	zoom      f32 = 1 // кадр «как у камеры» (CamLook.zoom)
 	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
 	ai_src    []u16  // результат модели по тому же сырью (только чтение) или пусто
 	ai_s      f32    // сила AI 0..100 (0 - без AI)
@@ -522,6 +523,7 @@ fn make_prep_job(mut st State) PrepJob {
 		focal:     st.meta.focal
 		aperture:  st.meta.aperture
 		vign:      st.look.vign
+		zoom:      st.look.zoom
 		nr:        st.edit.nr
 		ai_src:    if ai_s > 0 { st.ai_linear } else { []u16{} }
 		ai_s:      ai_s
@@ -557,7 +559,7 @@ fn prep_compute(job PrepJob) PrepResult {
 		rb := unsafe { &u16(lensed.data) }
 		job.corr.vignetting(rb, job.w, job.h, job.focal, job.aperture, job.vign)
 		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
-		job.corr.geometry(rb, job.w, job.h, job.focal)
+		job.corr.geometry_zoom(rb, job.w, job.h, job.focal, job.zoom)
 	}
 	// AI и шумодав - на своей копии сырья
 	use_ai := job.ai_s > 0 && job.ai_src.len == lensed.len

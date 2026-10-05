@@ -401,7 +401,13 @@ fn bilinear(s &u16, sb Region, w int, h int, ch int, x f32, y f32) u16 {
 // Вызывать ПОСЛЕ vignetting(): виньетка привязана к исходной геометрии
 // сенсора, править её нужно до перемещения пикселей (порядок lensfun).
 pub fn (c &Corrector) geometry(buf &u16, w int, h int, focal f32) bool {
-	mut p := c.geometry_plan(w, h, focal) or { return false }
+	return c.geometry_zoom(buf, w, h, focal, 1)
+}
+
+// geometry_zoom - geometry с кадром, увеличенным в zoom раз сверх
+// автомасштаба (zoom > 1 - уже, как обрезает кадр камера; см. geometry_plan_zoom)
+pub fn (c &Corrector) geometry_zoom(buf &u16, w int, h int, focal f32, zoom f32) bool {
+	mut p := c.geometry_plan_zoom(w, h, focal, zoom) or { return false }
 	defer {
 		p.free()
 	}
@@ -433,6 +439,15 @@ pub:
 // geometry_plan - план дисторсии + TCA кадра w x h; none - в профиле нет
 // данных геометрии
 pub fn (c &Corrector) geometry_plan(w int, h int, focal f32) ?&GeomPlan {
+	return c.geometry_plan_zoom(w, h, focal, 1)
+}
+
+// geometry_plan_zoom - geometry_plan с кадром, увеличенным в zoom раз
+// сверх автомасштаба (наименьшего без пустых углов). Камера после
+// исправления дисторсии обрезает кадр сильнее (RF 24-50 на 24 мм - на
+// 8.5%): zoom подбирается по JPEG камеры (lens_match в loader.v), чтобы
+// кадр совпал с камерным; zoom <= 1 - автомасштаб.
+pub fn (c &Corrector) geometry_plan_zoom(w int, h int, focal f32, zoom f32) ?&GeomPlan {
 	if isnil(c.lens) || w <= 0 || h <= 0 {
 		return none
 	}
@@ -441,15 +456,31 @@ pub fn (c &Corrector) geometry_plan(w int, h int, focal f32) ?&GeomPlan {
 	// бывает чуть меньше нужного, и край кадра берёт точки за пределами
 	// источника - после клампа это 3-4 повторённых крайних столбца.
 	// Меряем вылет по рамке кадра и доувеличиваем масштаб (обычно
-	// хватает одного шага, второй - страховка).
+	// хватает одного шага, второй - страховка). Масштаб, которым lensfun
+	// пользуется в авторежиме, - effective_scale: lf_modifier_get_auto_scale
+	// у lensfun 0.3.4 возвращает 1 (на 105 мм RF 24-105 настоящий - 1.010).
+	mut scale := c.effective_scale(m, w, h, focal)
+	if scale <= 0 {
+		// Масштаб не определяется (циркулярный фишай: картинка - круг в
+		// кадре) - как раньше: авторежим lensfun, без увеличения кадра
+		return &GeomPlan{
+			m: m
+			w: w
+			h: h
+		}
+	}
 	for _ in 0 .. 2 {
 		over := border_overflow(m, w, h)
 		if over <= 1.0 {
 			break
 		}
-		scale := C.lf_modifier_get_auto_scale(m, 0) * over * 1.001
+		scale *= over * 1.001
 		C.lf_modifier_destroy(m)
 		m = c.geometry_modifier(w, h, focal, scale)?
+	}
+	if zoom > 1.0005 {
+		C.lf_modifier_destroy(m)
+		m = c.geometry_modifier(w, h, focal, scale * zoom)?
 	}
 	return &GeomPlan{
 		m: m
@@ -569,6 +600,41 @@ fn (c &Corrector) geometry_modifier(w int, h int, focal f32, scale f32) ?&C.lfMo
 // максимум |s - центр| / полуразмер по обеим осям. <= 1 - всё внутри.
 // Около края дисторсия локально почти линейна, поэтому доувеличение
 // масштаба в это число раз убирает вылет.
+// effective_scale - масштаб, которым на деле пользуется модификатор m
+// (авторежим lensfun): явный масштаб, при котором точка у правого края
+// середины кадра уходит в ту же точку источника, что у m (двоичный поиск;
+// источник сдвигается к центру с ростом масштаба). Проверено по всей базе
+// lensfun (1522 объектива с дисторсией, 3 фокусных): совпадает с
+// авторежимом точнее 0.05 px; 0 - не определяется (циркулярные фишаи
+// Sigma 4.5 и 8 мм: поиск упирается в границы)
+fn (c &Corrector) effective_scale(m &C.lfModifier, w int, h int, focal f32) f32 {
+	px := f32(w - 1)
+	py := f32(h - 1) * 0.5
+	mut res := []f32{len: 6}
+	if C.lf_modifier_apply_subpixel_geometry_distortion(m, px, py, 1, 1, unsafe { &f32(res.data) }) == 0 {
+		return 1
+	}
+	target := res[2] // зелёный канал
+	mut lo := f32(0.5)
+	mut hi := f32(2.0)
+	for _ in 0 .. 32 {
+		mid := (lo + hi) * 0.5
+		t := c.geometry_modifier(w, h, focal, mid) or { return 1 }
+		ok := C.lf_modifier_apply_subpixel_geometry_distortion(t, px, py, 1, 1, unsafe { &f32(res.data) })
+		C.lf_modifier_destroy(t)
+		if ok == 0 {
+			return 1
+		}
+		if res[2] > target {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	a := (lo + hi) * 0.5
+	return if a < 0.51 || a > 1.99 { f32(0) } else { a }
+}
+
 fn border_overflow(m &C.lfModifier, w int, h int) f32 {
 	cx := f32(w - 1) * 0.5
 	cy := f32(h - 1) * 0.5

@@ -40,6 +40,11 @@ pub mut:
 	// Насыщенность «как JPEG камеры» (match_saturation) - производное
 	// поле, множитель к saturation; 1 - нет
 	cam_sat f32 = 1.0
+	// Цвет «как JPEG камеры» (camhue.v, match_hues) - производные поля:
+	// сдвиг оттенка (секстанты HSV) и множитель насыщенности на cam_hue_n
+	// секторов; пусто - нет. Применяются в HSL-эквалайзере.
+	cam_hue  []f32
+	cam_hsat []f32
 	// Сочность (vibrance) -100..100: бережная насыщенность - блёклые цвета
 	// меняются сильнее насыщенных, тона кожи при подъёме защищены
 	vibrance f32
@@ -233,6 +238,9 @@ struct HslLut {
 }
 
 fn hsl_active(p &Params) bool {
+	if p.cam_hue.len == cam_hue_n && p.cam_hsat.len == cam_hue_n {
+		return true
+	}
 	for i in 0 .. 8 {
 		if p.hsl_hue[i] != 0 || p.hsl_sat[i] != 0 || p.hsl_lum[i] != 0 {
 			return true
@@ -270,6 +278,12 @@ fn build_hsl(p &Params) HslLut {
 		}
 		sm[b] = sv
 		lm[b] = math.powf(2.0, hsl_interp(p.hsl_lum, deg) * f32(1.0 / 100.0)) - 1.0
+		// Цвет «как JPEG» (camhue.v) - вместе с ползунками пользователя
+		if p.cam_hue.len == cam_hue_n && p.cam_hsat.len == cam_hue_n {
+			h := deg / 60
+			dh[b] += cam_table(p.cam_hue, h)
+			sm[b] *= cam_table(p.cam_hsat, h)
+		}
 		if dh[b] != 0 || sm[b] != 1 || lm[b] != 0 {
 			act[b] = 1
 		}
@@ -794,21 +808,132 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	wm := wx.m
 	wl := wx.lim
 	to_tone := !isnil(tone)
+	ctx := RenderCtx{
+		src:        src
+		mask:       mask
+		dst:        unsafe { &u8(dst.data) }
+		dst_stride: dst_stride
+		tone:       tone
+		to_tone:    to_tone
+		dither:     p.dither
+		haze_on:    haze_on
+		hl:         hl
+		hd:         hd
+		ha0:        ha0
+		ha1:        ha1
+		ha2:        ha2
+		ml:         unsafe { &f32(mlut.data) }
+		flr:        unsafe { &f32(flut_r.data) }
+		flg:        unsafe { &f32(flut_g.data) }
+		flb:        unsafe { &f32(flut_b.data) }
+		use_hsl:    use_hsl
+		hdh:        unsafe { &f32(hsl.dh.data) }
+		hsm:        unsafe { &f32(hsl.sm.data) }
+		hlm:        unsafe { &f32(hsl.lm.data) }
+		hact:       unsafe { &u8(hsl.act.data) }
+		use_sh:     use_sh
+		sl:         unsafe { &f32(slut.data) }
+		sat:        sat
+		vib:        vib
+		wb_on:      wb_on
+		wc:         wc
+		wd:         wd
+		wr:         wr
+		wg:         wg
+		wm:         wm
+		wl:         wl
+	}
+	// Пиксели независимы (дизер - по номеру пикселя): большие кадры -
+	// полосами в несколько потоков (превью 6 Мп: 70 -> ~15 мс), таблицы
+	// общие, только чтение. Функция потока - обычная, не замыкание (post.v)
+	nt := bands(npix, 1)
+	if nt <= 1 {
+		render_rows(&ctx, 0, npix)
+		return
+	}
+	step := (npix + nt - 1) / nt
+	mut ts := []thread{}
+	for a := 0; a < npix; a += step {
+		ts << spawn render_rows(&ctx, a, imin(npix, a + step))
+	}
+	ts.wait()
+}
+
+// RenderCtx - всё, что нужно циклу по пикселям render_rows: входы,
+// выходы и готовые таблицы (общие для потоков, только чтение)
+struct RenderCtx {
+	src        &u16 = unsafe { nil }
+	mask       &u16 = unsafe { nil }
+	dst        &u8  = unsafe { nil }
+	dst_stride int
+	tone       &u16 = unsafe { nil }
+	to_tone    bool
+	dither     bool
+	haze_on    bool
+	hl         &f32 = unsafe { nil }
+	hd         &u16 = unsafe { nil }
+	ha0        f32
+	ha1        f32
+	ha2        f32
+	ml         &f32 = unsafe { nil }
+	flr        &f32 = unsafe { nil }
+	flg        &f32 = unsafe { nil }
+	flb        &f32 = unsafe { nil }
+	use_hsl    bool
+	hdh        &f32 = unsafe { nil }
+	hsm        &f32 = unsafe { nil }
+	hlm        &f32 = unsafe { nil }
+	hact       &u8  = unsafe { nil }
+	use_sh     bool
+	sl         &f32 = unsafe { nil }
+	sat        f32
+	vib        f32
+	wb_on      bool
+	wc         [9]f32
+	wd         [3]f32
+	wr         [9]f32
+	wg         int
+	wm         [9]f32
+	wl         f32
+}
+
+// render_rows - пиксели i0..i1 (render): тело цикла пайплайна
+fn render_rows(rc &RenderCtx, i0 int, i1 int) {
+	haze_on := rc.haze_on
+	hl := rc.hl
+	hd := rc.hd
+	ha0 := rc.ha0
+	ha1 := rc.ha1
+	ha2 := rc.ha2
+	wb_on := rc.wb_on
+	wc := rc.wc
+	wd := rc.wd
+	wr := rc.wr
+	wg := rc.wg
+	wm := rc.wm
+	wl := rc.wl
+	use_sh := rc.use_sh
+	use_hsl := rc.use_hsl
+	sat := rc.sat
+	vib := rc.vib
+	to_tone := rc.to_tone
+	dst_stride := rc.dst_stride
+	dither := rc.dither
 	unsafe {
-		mut s := &u16(src)
-		mut d := &u8(dst.data)
-		mut t := &u16(tone)
-		ml := &f32(mlut.data)
-		flr := &f32(flut_r.data)
-		flg := &f32(flut_g.data)
-		flb := &f32(flut_b.data)
-		hdh := &f32(hsl.dh.data)
-		hsm := &f32(hsl.sm.data)
-		hlm := &f32(hsl.lm.data)
-		hact := &u8(hsl.act.data)
-		sl := &f32(slut.data)
-		mk := mask
-		for i in 0 .. npix {
+		mut s := rc.src + i0 * 3
+		mut d := rc.dst + i0 * dst_stride
+		mut t := if to_tone { rc.tone + i0 * 3 } else { rc.tone }
+		ml := rc.ml
+		flr := rc.flr
+		flg := rc.flg
+		flb := rc.flb
+		hdh := rc.hdh
+		hsm := rc.hsm
+		hlm := rc.hlm
+		hact := rc.hact
+		sl := rc.sl
+		mk := rc.mask
+		for i in i0 .. i1 {
 			mut cr := f32(s[0])
 			mut cg := f32(s[1])
 			mut cb := f32(s[2])
@@ -946,7 +1071,7 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 				t[2] = u16(vb * 256.0 + 0.5)
 				t += 3
 			} else {
-				put_px(d, i, vr, vg, vb, p.dither, dst_stride)
+				put_px(d, i, vr, vg, vb, dither, dst_stride)
 				d += dst_stride
 			}
 			s += 3

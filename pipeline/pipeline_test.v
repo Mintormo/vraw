@@ -422,3 +422,100 @@ fn test_match_saturation() {
 	kg := match_saturation(unsafe { &u16(gray.data) }, npix, []f32{}, unsafe { &u8(r15.data) }, npix)
 	assert kg == 1
 }
+
+// Цвет «как JPEG» (match_hues): эталон - наш кадр с голубыми x1.4 по
+// насыщенности и зелёными, сдвинутыми на +12° - таблица это находит и
+// приближает; эталон без изменений - таблицы нет (подгонка не помогает)
+fn test_match_hues() {
+	w, h := 480, 90
+	mut ours := []u8{len: w * h * 3}
+	mut ref_ := []u8{len: w * h * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			// Круг оттенков по x, насыщенность 0.25..0.55 по y
+			hh := f32(x) / f32(w) * 6
+			s := 0.25 + 0.3 * f32(y) / f32(h)
+			v := f32(180)
+			r, g, b := hsv_to_rgb_test(hh, s, v)
+			i := (y * w + x) * 3
+			ours[i], ours[i + 1], ours[i + 2] = u8(r), u8(g), u8(b)
+			mut h2 := hh
+			mut s2 := s
+			if hh >= 3.0 && hh < 3.8 { // голубые
+				s2 = s * 1.4
+			}
+			if hh >= 1.6 && hh < 2.4 { // зелёные
+				h2 = hh + 0.2 * s
+			}
+			r2, g2, b2 := hsv_to_rgb_test(h2, s2, v)
+			ref_[i], ref_[i + 1], ref_[i + 2] = u8(r2), u8(g2), u8(b2)
+		}
+	}
+	dh, sk := match_hues(unsafe { &u8(ours.data) }, 3, unsafe { &u8(ref_.data) }, 3, w, h)
+	assert dh.len == cam_hue_n && sk.len == cam_hue_n
+	assert cam_table(sk, 3.4) > 1.15, '${cam_table(sk, 3.4)}'
+	assert cam_table(dh, 2.0) > 0.1, '${cam_table(dh, 2.0)}'
+	assert math.abs(cam_table(dh, 0.5)) < 0.05 && math.abs(cam_table(sk, 0.5) - 1) < 0.1
+	// Эталон совпадает с нашим - подгонка не нужна
+	dh0, _ := match_hues(unsafe { &u8(ours.data) }, 3, unsafe { &u8(ours.data) }, 3, w, h)
+	assert dh0.len == 0
+}
+
+fn hsv_to_rgb_test(h0 f32, s f32, v f32) (f32, f32, f32) {
+	mut h := h0
+	for h >= 6 {
+		h -= 6
+	}
+	sec := int(h)
+	f := h - f32(sec)
+	p := v * (1 - s)
+	q := v * (1 - s * f)
+	t := v * (1 - s * (1 - f))
+	return match sec {
+		0 { v, t, p }
+		1 { q, v, p }
+		2 { p, v, t }
+		3 { p, q, v }
+		4 { t, p, v }
+		else { v, p, q }
+	}
+}
+
+// Многопоточный рендер (render: полосы пикселей в потоках) - байт в байт
+// как однопоточный: большой кадр целиком против тех же строк по одной
+// (строка мала - считается в одном потоке); с дизером - тоже, он зависит
+// только от номера пикселя
+fn test_render_threads_match() {
+	w, h := 700, 500 // 350 тыс. пикселей - больше порога потоков
+	npix := w * h
+	mut src := []u16{len: npix * 3}
+	mut mask := []u16{len: npix}
+	mut s := u32(12345)
+	for i in 0 .. npix * 3 {
+		s = s * 1664525 + 1013904223
+		src[i] = u16(s >> 16)
+	}
+	for i in 0 .. npix {
+		mask[i] = src[i * 3 + 1]
+	}
+	mut p := Params{
+		exposure:    0.5
+		contrast:    0.3
+		saturation:  1.2
+		sh_shadows:  30
+		dither:      false
+		cam_hue:     []f32{len: cam_hue_n, init: 0.1}
+		cam_hsat:    []f32{len: cam_hue_n, init: 1.2}
+	}
+	p.hsl_sat[3] = 40
+	mut full := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, p, mut full, 4)
+	mut rows := []u8{len: npix * 4}
+	for y in 0 .. h {
+		mut row := []u8{len: w * 4}
+		apply(unsafe { &u16(src.data) + y * w * 3 }, unsafe { &u16(mask.data) + y * w }, w,
+			p, mut row, 4)
+		unsafe { vmemcpy(&u8(rows.data) + y * w * 4, row.data, w * 4) }
+	}
+	assert full == rows
+}

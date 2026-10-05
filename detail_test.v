@@ -82,7 +82,7 @@ fn test_detail_matches_full() {
 		return
 	}
 	vign := f32(0.5)
-	mut ln := make_detail_lens(c, src, vign)
+	mut ln := make_detail_lens(c, src, vign, 1)
 	assert ln.lut.len > 0
 	assert !isnil(ln.plan)
 	// Всё включено и поворот с кадрированием

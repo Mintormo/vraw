@@ -472,7 +472,10 @@ fn with_derived(e EditState, look CamLook, cam pipeline.CamColor) EditState {
 	mut d := e.clone()
 	d.params.curve = if e.use_curve { look.curve.clone() } else { []f32{} }
 	d.params.cam_sat = if e.use_curve && look.curve.len > 0 { look.sat } else { f32(1) }
+	d.params.cam_hue = if e.use_curve && look.curve.len > 0 { look.hue.clone() } else { []f32{} }
+	d.params.cam_hsat = if e.use_curve && look.curve.len > 0 { look.hsat.clone() } else { []f32{} }
 	d.vign = look.vign
+	d.lens_zoom = look.zoom
 	d.params.tc_rgb = tone_lut(e.curve_pts[0])
 	d.params.tc_r = tone_lut(e.curve_pts[1])
 	d.params.tc_g = tone_lut(e.curve_pts[2])

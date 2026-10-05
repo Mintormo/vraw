@@ -46,6 +46,9 @@ mut:
 	// Сила коррекции виньетирования кадра «как JPEG камеры» (CamLook.vign) -
 	// производное, как params.curve (with_derived), в сайдкар не пишется
 	vign f32 = lens.vign_default
+	// Увеличение кадра «как у камеры» после исправления дисторсии
+	// (CamLook.zoom) - тоже производное, в сайдкар не пишется
+	lens_zoom f32 = 1
 }
 
 // neutral_edit - настройки только что открытого файла (запись «Открыт файл»)
@@ -60,6 +63,8 @@ fn neutral_edit() EditState {
 fn (e EditState) clone() EditState {
 	mut c := e
 	c.params.curve = e.params.curve.clone()
+	c.params.cam_hue = e.params.cam_hue.clone()
+	c.params.cam_hsat = e.params.cam_hsat.clone()
 	c.params.tc_rgb = e.params.tc_rgb.clone()
 	c.params.tc_r = e.params.tc_r.clone()
 	c.params.tc_g = e.params.tc_g.clone()
