@@ -216,10 +216,16 @@ fn impulse_pass(src []f32, mut dst []f32, w int, h int, t f32) {
 // Два прохода: демозаика размазывает выброс в пятно 2-3 пк, первый проход
 // снимает края пятна, второй добивает центр. Резкие края переживают детект:
 // у пикселя на границе медиана соседей лежит на его же стороне перепада.
+// Кадр считается полосами в потоках (nr_bands) - результат тот же.
 pub fn impulse(buf &u16, w int, h int, strength f32) {
 	if strength <= 0 {
 		return
 	}
+	nr_bands(buf, w, h, .impulse, strength, 0, 0, 0)
+}
+
+// impulse_whole - impulse одним куском (плоскости на весь кадр)
+fn impulse_whole(buf &u16, w int, h int, strength f32) {
 	npix := w * h
 	t := f32(55.0) - strength * f32(0.5) // sqrt-домен: 100 -> 5, 50 -> 30
 	mut a := bigbuf.new_f32(npix)
@@ -257,6 +263,11 @@ pub fn denoise(buf &u16, w int, h int, luma f32, chroma f32) {
 	if luma <= 0 && chroma <= 0 {
 		return
 	}
+	nr_bands(buf, w, h, .denoise, luma, chroma, 0, 0)
+}
+
+// denoise_whole - denoise одним куском
+fn denoise_whole(buf &u16, w int, h int, luma f32, chroma f32) {
 	npix := w * h
 	mut y, mut u, mut v := to_yuv_sqrt(buf, npix)
 	defer {
@@ -287,6 +298,11 @@ pub fn defringe(buf &u16, w int, h int, strength f32) {
 	if strength <= 0 {
 		return
 	}
+	nr_bands(buf, w, h, .defringe, strength, 0, 0, 0)
+}
+
+// defringe_whole - defringe одним куском
+fn defringe_whole(buf &u16, w int, h int, strength f32) {
 	npix := w * h
 	mut y, mut u, mut v := to_yuv_sqrt(buf, npix)
 	// Размытая цветность окрестности: два уровня B3 (шаги 1 и 2) ~ гаусс

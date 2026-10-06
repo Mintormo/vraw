@@ -12,6 +12,8 @@ module main
 // Здесь - только расчёт, без State и vgui: выполняется в фоне.
 import raw
 import lens
+import ai
+import bigbuf
 import pipeline { Region }
 
 // Запас вокруг фрагмента для фильтров с окрестностью (вейвлет шумодава
@@ -20,15 +22,22 @@ import pipeline { Region }
 const detail_margin = 96
 
 // DetailSrc - сырьё полного кадра для фрагментов: выход LibRaw полного
-// размера (как у экспорта), один на кадр и режим пересветов.
+// размера (как у экспорта), один на кадр и режим пересветов. dev (~150 МБ
+// на 24 Мп) - вне сборщика (bigbuf): держатель один - DetailCtl (или
+// воркер, пока результат в пути), отпускает free().
 @[heap]
 struct DetailSrc {
 	path      string
 	highlight int
 	w         int
 	h         int
-	dev       []u16 // w x h RGB
 	meta      raw.Meta
+mut:
+	dev []u16 // w x h RGB
+}
+
+fn (mut s DetailSrc) free() {
+	bigbuf.free(mut s.dev)
 }
 
 // load_detail_src - полный кадр из файла (~0.6 с): свой LibRaw, годится для
@@ -43,7 +52,7 @@ fn load_detail_src(path string, highlight int) !&DetailSrc {
 		img.free()
 	}
 	n := img.width * img.height * 3
-	mut dev := []u16{len: n}
+	mut dev := bigbuf.new_u16(n)
 	unsafe { vmemcpy(dev.data, img.data_u16(), n * 2) }
 	return &DetailSrc{
 		path:      path
@@ -99,16 +108,26 @@ struct DetailJob {
 	margin int = detail_margin
 }
 
-// detail_prep - линейное сырьё фрагмента r.w x r.h RGB: то же, что та же
-// область полного кадра после подготовки и геометрии (develop_full до
-// pipeline.apply). ln - nil или пустой: без коррекции объектива.
-fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob) []u16 {
+// DetailAi - AI-шумодав фрагмента: плитки модели по полному кадру после
+// объектива (те же, что у экспорта - ai.TileCache), сила 1..100. tiles nil
+// или strength 0 - без AI.
+struct DetailAi {
+	tiles    &ai.TileCache = unsafe { nil }
+	model    ai.Runner     = ai.Runner(NoRunner{})
+	strength f32
+}
+
+struct NoRunner {}
+
+fn (n NoRunner) run(_ []f32, mut _ []f32, _ int, _ int) ! {
+	return error('модели нет')
+}
+
+// lens_piece - прямоугольник p кадра после коррекции объектива (ln nil -
+// без неё): побитово равен той же области полной коррекции
+fn lens_piece(src &DetailSrc, ln &DetailLens, p Region) []u16 {
 	w := src.w
 	h := src.h
-	// Кусок кадра (после объектива), из которого геометрия читает r, с
-	// запасом для фильтров
-	p := pipeline.geom_source_box(job.geom, w, h, true, job.r).expand(job.margin, w, h)
-	mut buf := []u16{}
 	has_lut := !isnil(ln) && ln.lut.len > 0
 	if !isnil(ln) && !isnil(ln.plan) {
 		// Дисторсия: кусок источника под p, виньетирование по нему, ремап
@@ -117,13 +136,49 @@ fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob) []u16 {
 		if has_lut {
 			lens.vign_apply_region(unsafe { &u16(piece.data) }, sb, w, h, ln.lut)
 		}
-		buf = []u16{len: p.w * p.h * 3}
+		mut buf := []u16{len: p.w * p.h * 3}
 		ln.plan.remap(unsafe { &u16(piece.data) }, sb, p, unsafe { &u16(buf.data) })
+		return buf
+	}
+	buf := pipeline.crop_region(unsafe { &u16(src.dev.data) }, w, 3, p)
+	if has_lut {
+		lens.vign_apply_region(unsafe { &u16(buf.data) }, p, w, h, ln.lut)
+	}
+	return buf
+}
+
+// detail_region - кусок кадра после объектива, из которого геометрия
+// читает r, с запасом для фильтров
+fn detail_region(src &DetailSrc, job DetailJob) Region {
+	return pipeline.geom_source_box(job.geom, src.w, src.h, true, job.r).expand(job.margin,
+		src.w, src.h)
+}
+
+// detail_prep - линейное сырьё фрагмента r.w x r.h RGB: то же, что та же
+// область полного кадра после подготовки и геометрии (develop_full до
+// pipeline.apply). ln - nil или пустой: без коррекции объектива. С AI
+// недостающие плитки модели считаются здесь же (долго: секунды на плитку;
+// progress - после каждой, false - отмена с ошибкой ai.Cancelled,
+// посчитанные плитки остаются в кэше).
+fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob, dai DetailAi, mut progress ai.Progress) ![]u16 {
+	w := src.w
+	h := src.h
+	p := detail_region(src, job)
+	mut buf := []u16{}
+	if !isnil(dai.tiles) && dai.strength > 0 {
+		// AI - как в экспорте: по сырью после объектива, до импульсов.
+		// Плиткам нужно своё окно (шире p), объектив - по нему
+		mut tc := dai.tiles
+		t := tc.grid.cover(ai.Rect{p.x, p.y, p.w, p.h})
+		wr := tc.grid.window(t)
+		win := Region{wr.x, wr.y, wr.w, wr.h}
+		lw := lens_piece(src, ln, win)
+		tc.fill(dai.model, t, unsafe { &u16(lw.data) }, wr, mut progress)!
+		den := tc.compose(ai.Rect{p.x, p.y, p.w, p.h})!
+		buf = pipeline.crop_region(unsafe { &u16(lw.data) }, win.w, 3, Region{p.x - win.x, p.y - win.y, p.w, p.h})
+		ai.blend(unsafe { &u16(buf.data) }, den, dai.strength / 100)
 	} else {
-		buf = pipeline.crop_region(unsafe { &u16(src.dev.data) }, w, 3, p)
-		if has_lut {
-			lens.vign_apply_region(unsafe { &u16(buf.data) }, p, w, h, ln.lut)
-		}
+		buf = lens_piece(src, ln, p)
 	}
 	pb := unsafe { &u16(buf.data) }
 	if job.nr[0] > 0 {

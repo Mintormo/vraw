@@ -9,6 +9,7 @@ import os
 import time
 import raw
 import lens
+import ai
 import pipeline { Region }
 
 fn detail_case() ?(&DetailSrc, &lens.Database) {
@@ -75,7 +76,7 @@ fn detail_diff(got []u16, full []u16, ow int, r Region) int {
 	return m
 }
 
-fn test_detail_matches_full() {
+fn test_detail_matches_full() ! {
 	src, db := detail_case() or { return }
 	c := db.find(src.meta.cam_make, src.meta.cam_model, src.meta.lens) or {
 		eprintln('ПРОПУСК: профиль объектива не найден')
@@ -107,7 +108,8 @@ fn test_detail_matches_full() {
 	for r in [Region{ow / 3, oh / 3, 500, 400}, Region{0, 0, 300, 200},
 		Region{ow - 400, oh - 300, 400, 300}] {
 		sw.restart()
-		got := detail_prep(src, ln, DetailJob{ ...job0, r: r })
+		mut np := ai.NoProgress{}
+		got := detail_prep(src, ln, DetailJob{ ...job0, r: r }, DetailAi{}, mut np)!
 		t_frag := sw.elapsed().milliseconds()
 		d := detail_diff(got, full, ow, r)
 		eprintln('фрагмент ${r.w}x${r.h} в (${r.x}, ${r.y}): расхождение ${d}, ${t_frag} мс (полный кадр ${ow}x${oh} - ${t_full} мс)')
@@ -116,7 +118,7 @@ fn test_detail_matches_full() {
 	ln.free()
 }
 
-fn test_detail_no_lens() {
+fn test_detail_no_lens() ! {
 	src, _ := detail_case() or { return }
 	job := DetailJob{
 		geom: pipeline.Geom{
@@ -126,7 +128,8 @@ fn test_detail_no_lens() {
 		r:    Region{100, 200, 300, 250}
 	}
 	full, ow, _ := detail_full(src, unsafe { nil }, 0, job)
-	got := detail_prep(src, unsafe { nil }, job)
+	mut np := ai.NoProgress{}
+	got := detail_prep(src, unsafe { nil }, job, DetailAi{}, mut np)!
 	assert detail_diff(got, full, ow, job.r) <= 1
 }
 
@@ -191,4 +194,71 @@ fn test_detail_render_close_to_full() {
 	eprintln('финальный проход фрагмента против полного: наибольшее ${maxd}, среднее ${mean:.3f} (8 бит)')
 	assert maxd <= 4
 	assert mean < 0.5
+}
+
+// Поддельная модель: выход зависит от всей плитки и места в ней
+struct DtFakeModel {}
+
+fn (f DtFakeModel) run(input []f32, mut output []f32, h int, w int) ! {
+	n := h * w
+	mut mean := f32(0)
+	for v in input {
+		mean += v
+	}
+	mean /= f32(input.len)
+	for c in 0 .. 3 {
+		for i in 0 .. n {
+			output[c * n + i] = input[c * n + i] * (0.7 + 0.3 * mean) + f32(i % w % 5) * 0.002
+		}
+	}
+}
+
+// AI на фрагменте = экспорт: объектив по всему кадру, модель по всему
+// кадру (ai.denoise_with - те же плитки), смешение по силе, дальше как
+// всегда. Плитки, посчитанные для одного фрагмента, служат соседнему.
+fn test_detail_ai_matches_full() ! {
+	src, db := detail_case() or { return }
+	c := db.find(src.meta.cam_make, src.meta.cam_model, src.meta.lens) or { return }
+	vign := f32(0.5)
+	mut ln := make_detail_lens(c, src, vign, 1)
+	defer {
+		ln.free()
+	}
+	job0 := DetailJob{
+		geom: pipeline.Geom{
+			angle: -1.5
+		}
+		nr:   [f32(0), 30, 30, 20]!
+	}
+	// Полный проход: объектив, модель, сила 60, шумодав, геометрия
+	mut buf := src.dev.clone()
+	pb := unsafe { &u16(buf.data) }
+	c.vignetting(pb, src.w, src.h, src.meta.focal, src.meta.aperture, vign)
+	c.geometry(pb, src.w, src.h, src.meta.focal)
+	mut den := []u16{len: buf.len}
+	mut np := ai.NoProgress{}
+	ai.denoise_with(DtFakeModel{}, pb, src.w, src.h, mut den, mut np)!
+	ai.blend(pb, den, 0.6)
+	pipeline.denoise(pb, src.w, src.h, 30, 30)
+	pipeline.defringe(pb, src.w, src.h, 20)
+	full, ow, _ := pipeline.geom_apply(pb, src.w, src.h, 3, job0.geom, true)
+	mut tiles := ai.new_tile_cache(src.w, src.h)
+	defer {
+		tiles.free()
+	}
+	dai := DetailAi{
+		tiles:    tiles
+		model:    DtFakeModel{}
+		strength: 60
+	}
+	mut n_first := 0
+	for k, r in [Region{700, 400, 400, 300}, Region{900, 500, 400, 300}] {
+		got := detail_prep(src, ln, DetailJob{ ...job0, r: r }, dai, mut np)!
+		assert detail_diff(got, full, ow, r) == 0, '${r}'
+		if k == 0 {
+			n_first = tiles.len()
+		}
+	}
+	// Второй фрагмент перекрывает первый: часть плиток - из кэша
+	assert tiles.len() < 2 * n_first
 }

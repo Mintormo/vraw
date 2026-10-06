@@ -8,21 +8,36 @@ module main
 // - detail_watch (из on_overlay холста, на каждую отрисовку) сверяет
 //   масштаб и видимую часть с прошлой отрисовкой; изменилось - detail_check
 //   через app.post (не посреди draw).
-// - detail_check: не нужен (вписан, режим кадрирования, показ дымки,
-//   до/после, AI в превью) - слой снят; готовый фрагмент покрывает видимое
-//   и посчитан по тем же настройкам подготовки - показать; иначе - фоновый
-//   расчёт (один за раз; запрос во время работы - ещё проход после).
+// - detail_check: не нужен (вписан, режим кадрирования, показ дымки, JPEG
+//   камеры) - слои сняты; готовые фрагменты покрывают видимое и посчитаны
+//   по тем же настройкам подготовки - показать; иначе - фоновый расчёт
+//   недостающего (один за раз; запрос во время работы - ещё проход после).
+// - Фрагментов два (сторона DetailSide): «после» - нынешние настройки,
+//   «до» - запись «до» сравнения (compare.v: удержание «\», шторка, бок о
+//   бок). У «до» своя подготовка сырья (пересветы, объектив, шумодав,
+//   Capture, AI) и свой тон; геометрия - нынешняя. В шторке слой - оба
+//   фрагмента, сшитые по линии; бок о бок - «до» на своём холсте.
 // - Полный кадр LibRaw (~0.6 с) и объектив кадра грузятся ЛЕНИВО - при
-//   первом увеличении - и живут до смены кадра (~150 МБ).
-// - Тональные ползунки (apply_pipeline) перерисовывают готовый фрагмент
+//   первом увеличении - и живут до смены кадра (~150 МБ вне сборщика:
+//   detail_free отдаёт их системе). Полных кадров - до двух (у «до» другие
+//   пересветы).
+// - Тональные ползунки (apply_pipeline) перерисовывают готовые фрагменты
 //   сразу (detail_show, ~10-30 мс); шумодав, объектив, резкость, геометрия
 //   меняют ключ подготовки - фрагмент пересчитывается в фоне, до этого виден
 //   прежний.
 // Запрос - в долях видимой части превью: размер полного кадра воркер узнаёт
 // сам (у превью half-size нечётный край обрезан).
+// - AI-шумодав (если он есть в превью): модель считает плитки ПОЛНОГО
+//   кадра после объектива - те же, что у экспорта (ai.TileCache), поэтому
+//   фрагмент совпадает с экспортом. Плитки кэшируются: при прокрутке
+//   считаются только новые. Это долго (SCUNet ~2 с на плитку): пока
+//   считается, виден прежний фрагмент или увеличенное превью (с AI), снизу
+//   подпись «AI 1:1: плитка N из M»; ушли из 100% или сдвинули вид -
+//   прогон отменяется после текущей плитки, посчитанное остаётся.
 import math
 import vgui
 import lens
+import ai
 import pipeline { Region }
 
 // Запас вокруг видимой части, в долях её размера: прокрутка на четверть
@@ -33,26 +48,54 @@ const detail_min_scale = f32(1.01)
 // Настоящие 100%: пиксель полного кадра на пиксель экрана - зум холста
 // превью 1 / preview_scale
 const zoom_one = f32(1.0) / preview_scale
+// Плиток AI в кэше (3 x 256 x 256 f32 = 768 КБ каждая): ~150 МБ, экран
+// 100% с запасом - ~80 плиток
+const detail_tiles_max = 200
+// Полных кадров LibRaw в памяти (по ~150 МБ): «после» и «до» с другими
+// пересветами
+const detail_srcs_max = 2
 
-@[heap]
-struct DetailCtl {
+// Стороны фрагмента: 0 - «после», 1 - «до»
+const side_after = 0
+const side_before = 1
+
+// DetailFrag - готовый фрагмент: сырьё lin прямоугольника r выхода ow x oh,
+// ключ подготовки key, кадр gen
+struct DetailFrag {
 mut:
-	src      &DetailSrc  = unsafe { nil }
-	src_key  string // путь и режим пересветов src
-	lens     &DetailLens = unsafe { nil }
-	lens_key string // кадр, профиль и сила виньетки lens
-	running  bool
-	pending  bool // запрос во время работы - ещё проход после
-	drop     bool // кадр сменился во время работы - src и lens выбросить
-	threads  []thread
-	// Готовый фрагмент: сырьё lin прямоугольника r выхода ow x oh, ключ
-	// подготовки key, кадр gen
 	lin []u16
 	r   Region
 	ow  int
 	oh  int
 	key string
 	gen int
+}
+
+@[heap]
+struct DetailCtl {
+mut:
+	srcs     []&DetailSrc // полные кадры (src_key - путь и пересветы)
+	lens     &DetailLens = unsafe { nil }
+	lens_key string // кадр, сила виньетки и увеличение lens
+	running  bool
+	pending  bool // запрос во время работы - ещё проход после
+	drop     bool // кадр сменился во время работы - src и lens выбросить
+	threads  []thread
+	// AI на фрагменте: плитки модели (ключ - объектив кадра и модель),
+	// отмена идущего прогона, его прогресс (подпись) и запрошенный вид
+	tiles     &ai.TileCache = unsafe { nil }
+	tiles_key string
+	stop      &StopFlag = unsafe { nil }
+	ai_done   int
+	ai_total  int
+	run_key   string     // ключ подготовки идущего расчёта (со стороной)
+	run_frac  DetailFrac // его видимая часть с запасом
+	ai_failed string     // tiles_key, на котором модель не загрузилась
+	frag      [2]DetailFrag
+	// Шторка на 1:1: последние картинки «после» и «до» (RGBA фрагмента) -
+	// линию двигают без финального прохода
+	split_a []u8
+	split_b []u8
 	// Последний увиденный вид холста (detail_watch)
 	seen string
 }
@@ -65,42 +108,118 @@ struct DetailFrac {
 	y1 f32
 }
 
+// DetailPrep - подготовка сырья фрагмента одной стороны
+struct DetailPrep {
+	highlight int
+	use_lens  bool
+	nr        [4]f32
+	dc        pipeline.Sharpen
+	ai_s      f32 // 0 - без AI
+	model     string
+}
+
+// detail_prep_of - подготовка стороны: «после» - нынешние настройки (AI -
+// как в превью: сила, если результат модели готов), «до» - запись «до»
+fn detail_prep_of(st &State, side int) DetailPrep {
+	if side == side_before && st.history.len > 0 {
+		b := ba_state(st)
+		return DetailPrep{
+			highlight: b.highlight
+			use_lens:  b.lens_corr && !isnil(st.corr)
+			nr:        b.nr
+			dc:        b.params.sharp
+			ai_s:      ba_ai(st, b)
+			model:     st.ai_lin_model
+		}
+	}
+	return DetailPrep{
+		highlight: st.edit.highlight
+		use_lens:  st.edit.lens_corr && !isnil(st.corr)
+		nr:        st.edit.nr
+		dc:        st.edit.params.sharp
+		ai_s:      ai_effective(st)
+		model:     ai_run_model(st)
+	}
+}
+
 // DetailReq - снимок для фонового расчёта (без State и vgui)
 struct DetailReq {
 	gen       int
+	side      int
 	path      string
-	highlight int
 	src_key   string
 	lens_key  string
-	use_lens  bool
+	prep      DetailPrep
 	corr      &lens.Corrector = unsafe { nil }
 	vign      f32
 	zoom      f32 = 1
 	src       &DetailSrc  = unsafe { nil } // готовый (тот же src_key) или nil
 	lens      &DetailLens = unsafe { nil } // готовый (тот же lens_key) или nil
 	frac      DetailFrac
+	region    Region // задан (w > 0) - считать ровно его, а не frac с запасом
 	geom      pipeline.Geom
-	nr        [4]f32
-	dc        pipeline.Sharpen
 	key       string
+	// AI: модель, плитки (готовые с тем же tiles_key или nil)
+	ai_cache  &ai.Cache     = unsafe { nil }
+	tiles     &ai.TileCache = unsafe { nil }
+	tiles_key string
+	stop      &StopFlag = unsafe { nil }
+	on_tick   fn (DetailTick) = unsafe { nil }
+}
+
+// DetailTick - прогресс плиток AI фрагмента (из воркера, post_result)
+struct DetailTick {
+	gen   int
+	done  int
+	total int
+}
+
+// DetailPoster - ai.Progress воркера 1:1: прогресс в главный поток, отмена
+// по флагу
+struct DetailPoster {
+mut:
+	app     &vgui.App = unsafe { nil }
+	stop    &StopFlag = unsafe { nil }
+	on_tick fn (DetailTick) = unsafe { nil }
+	gen     int
+}
+
+fn (mut p DetailPoster) step(done int, total int) bool {
+	mut app := p.app
+	post_result(mut app, p.on_tick, DetailTick{p.gen, done, total})
+	return !p.stop.stop
 }
 
 struct DetailRes {
 	req DetailReq
 mut:
-	src  &DetailSrc  = unsafe { nil }
-	lens &DetailLens = unsafe { nil }
-	lin  []u16
-	r    Region
-	ow   int
-	oh   int
-	err  string
+	src       &DetailSrc    = unsafe { nil }
+	lens      &DetailLens   = unsafe { nil }
+	tiles     &ai.TileCache = unsafe { nil }
+	cancelled bool // AI отменён (вид сменился) - фрагмента нет
+	ai_err    bool // модель не загрузилась
+	lin       []u16
+	r         Region
+	ow        int
+	oh        int
+	err       string
 }
 
-// detail_prep_key - настройки, от которых зависит сырьё фрагмента
-fn detail_prep_key(st &State) string {
+// detail_prep_key - настройки, от которых зависит сырьё фрагмента стороны
+fn detail_prep_key(st &State, side int) string {
 	g := out_geom(&st.edit)
-	return '${st.file_gen}|${st.edit.highlight}|${st.edit.lens_corr}|${st.look.vign}|${st.look.zoom}|${st.edit.nr}|${dc_key(st.edit.params.sharp)}|${g}'
+	p := detail_prep_of(st, side)
+	return '${st.file_gen}|${p.highlight}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
+		p.model
+	} else {
+		''
+	}}'
+}
+
+// detail_tiles_key - от чего зависят плитки модели: сырьё после объектива
+// и модель
+fn detail_tiles_key(st &State, p DetailPrep) string {
+	return '${st.raw_path}|${p.highlight}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.model}'
 }
 
 // detail_wanted - нужен ли слой детализации сейчас
@@ -108,13 +227,30 @@ fn detail_wanted(st &State) bool {
 	if isnil(st.cv) || isnil(st.dt) || st.loading || st.raw_path == '' || st.glin.len == 0 {
 		return false
 	}
-	// Режим кадрирования - весь повёрнутый кадр; дымка показывается картой;
-	// до/после и AI на фрагменте - позже (ROADMAP)
-	if st.crop_mode || st.haze_show || ba_active(st) || jpeg_active(st) || st.ai_applied > 0 {
+	// Режим кадрирования - весь повёрнутый кадр; дымка и резкость
+	// показываются картой
+	if st.crop_mode || st.haze_show || jpeg_active(st) {
+		return false
+	}
+	// AI в превью, а модель для фрагмента не загрузилась - увеличенное превью
+	p := detail_prep_of(st, side_after)
+	if p.ai_s > 0 && st.dt.ai_failed == detail_tiles_key(st, p) {
 		return false
 	}
 	cv := st.cv
 	return !cv.auto_fit && cv.screen_scale() > detail_min_scale
+}
+
+// detail_sides - какие фрагменты сейчас видны (первым - тот, что важнее
+// показать раньше)
+fn detail_sides(st &State) []int {
+	if !ba_active(st) {
+		return [side_after]
+	}
+	if st.ba_hold {
+		return [side_before]
+	}
+	return [side_after, side_before]
 }
 
 // detail_frac - видимая часть холста в долях буфера
@@ -144,6 +280,13 @@ fn frac_region(f DetailFrac, ow int, oh int, pad f32) Region {
 	return Region{cx0, cy0, cx1 - cx0, cy1 - cy0}
 }
 
+// frac_contains - часть a (с запасом pad) накрывает часть b
+fn frac_contains(a DetailFrac, pad f32, b DetailFrac) bool {
+	mx := (a.x1 - a.x0) * pad
+	my := (a.y1 - a.y0) * pad
+	return b.x0 >= a.x0 - mx && b.y0 >= a.y0 - my && b.x1 <= a.x1 + mx && b.y1 <= a.y1 + my
+}
+
 // detail_watch - из on_overlay холста: вид (масштаб, видимая часть)
 // изменился - проверка после отрисовки
 fn detail_watch(mut st State) {
@@ -162,64 +305,152 @@ fn detail_watch(mut st State) {
 	app.post(st.dt_check)
 }
 
-// detail_check - показать готовый фрагмент, запросить новый или снять слой
+// frag_ready - фрагмент стороны покрывает видимое и посчитан по нынешним
+// настройкам; в шторке «до» ещё и совпадает по месту с «после» (сшиваются)
+fn frag_ready(st &State, side int, f DetailFrac) bool {
+	dt := st.dt
+	fr := dt.frag[side]
+	if fr.lin.len == 0 || fr.gen != st.file_gen || fr.ow <= 0 {
+		return false
+	}
+	if fr.key != detail_prep_key(st, side) || !fr.r.contains(frac_region(f, fr.ow, fr.oh, 0)) {
+		return false
+	}
+	if side == side_before && st.ba_split && !st.ba_hold {
+		return fr.r == dt.frag[side_after].r
+	}
+	return true
+}
+
+// clear_details - снять слои детализации с обоих холстов
+fn clear_details(mut st State) {
+	mut cv := st.cv
+	if cv.has_detail() {
+		cv.clear_detail()
+		cv.mark_dirty()
+	}
+	if !isnil(st.cv_b) {
+		mut cb := st.cv_b
+		if cb.has_detail() {
+			cb.clear_detail()
+			cb.mark_dirty()
+		}
+	}
+}
+
+// detail_check - показать готовые фрагменты, запросить недостающий или
+// снять слои
 fn detail_check(mut st State) {
 	if isnil(st.dt) || isnil(st.cv) {
 		return
 	}
-	mut cv := st.cv
 	if !detail_wanted(st) {
-		if cv.has_detail() {
-			cv.clear_detail()
-			cv.mark_dirty()
-		}
+		clear_details(mut st)
+		detail_cancel(mut st)
 		return
 	}
-	mut dt := st.dt
 	f := detail_frac(st)
 	if f.x1 <= f.x0 {
 		return
 	}
-	if dt.lin.len > 0 && dt.gen == st.file_gen && dt.ow > 0 {
-		if !cv.has_detail() {
-			detail_show(mut st)
-		}
-		if dt.key == detail_prep_key(st) && dt.r.contains(frac_region(f, dt.ow, dt.oh, 0)) {
+	// Слоя нет (только что увеличили, сменили режим до/после) - показать
+	// готовое; при прокрутке слой уже стоит - без перерисовки
+	cv := st.cv
+	if !cv.has_detail() || (st.ba_sbs && ba_active(st) && !isnil(st.cv_b) && !st.cv_b.has_detail()) {
+		detail_show(mut st)
+	}
+	for side in detail_sides(st) {
+		if !frag_ready(st, side, f) {
+			detail_start(mut st, side)
 			return
 		}
 	}
-	detail_start(mut st)
 }
 
-// detail_start - фоновый расчёт фрагмента по текущему виду и настройкам
-fn detail_start(mut st State) {
+// detail_cancel - идущий расчёт больше не нужен: прогон AI - остановить
+// после текущей плитки (посчитанные остаются в кэше)
+fn detail_cancel(mut st State) {
 	mut dt := st.dt
+	if dt.running && !isnil(dt.stop) {
+		mut f := dt.stop
+		f.stop = true
+	}
+}
+
+// find_src - готовый полный кадр по ключу или nil
+fn find_src(dt &DetailCtl, key string) &DetailSrc {
+	for s in dt.srcs {
+		if '${s.path}|${s.highlight}' == key {
+			return s
+		}
+	}
+	return unsafe { nil }
+}
+
+// detail_start - фоновый расчёт фрагмента стороны side по текущему виду и
+// настройкам
+fn detail_start(mut st State, side int) {
+	mut dt := st.dt
+	key := detail_prep_key(st, side)
+	run_key := '${side}|${key}'
 	if dt.running {
+		// Идущий расчёт и так даст нужное - ждать его (иначе любая
+		// перерисовка во время AI отменяла бы прогон)
+		if dt.run_key == run_key && frac_contains(dt.run_frac, detail_pad, detail_frac(st)) {
+			return
+		}
 		dt.pending = true
+		detail_cancel(mut st)
 		return
 	}
-	src_key := '${st.raw_path}|${st.edit.highlight}'
-	use_lens := st.edit.lens_corr && !isnil(st.corr)
-	lens_key := '${src_key}|${use_lens}|${st.look.vign}|${st.look.zoom}'
+	p := detail_prep_of(st, side)
+	src_key := '${st.raw_path}|${p.highlight}'
+	lens_key := '${st.raw_path}|${st.look.vign}|${st.look.zoom}'
+	mut ai_cache := unsafe { &ai.Cache(nil) }
+	if p.ai_s > 0 {
+		ai_cache = ai_cache_for(mut st, p.model) or { unsafe { nil } }
+	}
+	tiles_key := detail_tiles_key(st, p)
+	stop := &StopFlag{}
+	// Шторка: «до» - ровно на месте готового «после» (сшиваются по линии)
+	fa := dt.frag[side_after]
+	region := if side == side_before && st.ba_split && !st.ba_hold && fa.lin.len > 0
+		&& fa.gen == st.file_gen {
+		fa.r
+	} else {
+		Region{}
+	}
 	req := DetailReq{
 		gen:       st.file_gen
+		side:      side
 		path:      st.raw_path
-		highlight: st.edit.highlight
 		src_key:   src_key
 		lens_key:  lens_key
-		use_lens:  use_lens
+		prep:      DetailPrep{
+			...p
+			ai_s: if isnil(ai_cache) { f32(0) } else { p.ai_s }
+		}
 		corr:      st.corr
 		vign:      st.look.vign
 		zoom:      st.look.zoom
-		src:       if dt.src_key == src_key { dt.src } else { unsafe { nil } }
+		src:       find_src(dt, src_key)
 		lens:      if dt.lens_key == lens_key { dt.lens } else { unsafe { nil } }
 		frac:      detail_frac(st)
+		region:    region
 		geom:      out_geom(&st.edit)
-		nr:        st.edit.nr
-		dc:        st.edit.params.sharp
-		key:       detail_prep_key(st)
+		key:       key
+		ai_cache:  ai_cache
+		tiles:     if dt.tiles_key == tiles_key { dt.tiles } else { unsafe { nil } }
+		tiles_key: tiles_key
+		stop:      stop
+		on_tick:   st.dt_tick
 	}
 	dt.running = true
+	dt.stop = stop
+	dt.ai_done = 0
+	dt.ai_total = 0
+	dt.run_key = run_key
+	dt.run_frac = detail_frac(st)
 	mut app := st.app
 	dt.threads << spawn detail_worker(req, mut app, st.dt_done)
 }
@@ -231,25 +462,66 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 		lens: req.lens
 	}
 	if isnil(res.src) {
-		res.src = load_detail_src(req.path, req.highlight) or {
+		res.src = load_detail_src(req.path, req.prep.highlight) or {
 			res.err = err.msg()
 			post_result(mut app, on_done, res)
 			return
 		}
 	}
-	if req.use_lens && isnil(res.lens) {
+	if req.prep.use_lens && isnil(res.lens) {
 		res.lens = make_detail_lens(req.corr, res.src, req.vign, req.zoom)
 	}
 	ow, oh := req.geom.out_size(res.src.w, res.src.h, true)
-	r := frac_region(req.frac, ow, oh, detail_pad)
+	// Шторка: «до» - ровно прямоугольник готового «после»
+	r := if req.region.w > 0 && req.region.x + req.region.w <= ow && req.region.y + req.region.h <= oh {
+		req.region
+	} else {
+		frac_region(req.frac, ow, oh, detail_pad)
+	}
+	mut dai := DetailAi{}
+	if req.prep.ai_s > 0 {
+		res.tiles = req.tiles
+		if isnil(res.tiles) {
+			res.tiles = ai.new_tile_cache(res.src.w, res.src.h)
+		}
+		mut c := req.ai_cache
+		model := c.get() or {
+			res.ai_err = true
+			res.err = err.msg()
+			post_result(mut app, on_done, res)
+			return
+		}
+		dai = DetailAi{
+			tiles:    res.tiles
+			model:    ai.Runner(model)
+			strength: req.prep.ai_s
+		}
+	}
 	if !r.is_empty() {
-		ln := if req.use_lens { res.lens } else { unsafe { &DetailLens(nil) } }
+		ln := if req.prep.use_lens { res.lens } else { unsafe { &DetailLens(nil) } }
+		mut prog := DetailPoster{
+			app:     app
+			stop:    req.stop
+			on_tick: req.on_tick
+			gen:     req.gen
+		}
 		res.lin = detail_prep(res.src, ln, DetailJob{
 			r:    r
 			geom: req.geom
-			nr:   req.nr
-			dc:   req.dc
-		})
+			nr:   req.prep.nr
+			dc:   req.prep.dc
+		}, dai, mut prog) or {
+			if err is ai.Cancelled {
+				res.cancelled = true
+			} else {
+				res.err = err.msg()
+			}
+			[]u16{}
+		}
+	}
+	if !isnil(res.tiles) {
+		mut tc := res.tiles
+		tc.trim(detail_tiles_max)
 	}
 	res.r = r
 	res.ow = ow
@@ -261,25 +533,51 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 fn detail_done(mut st State, res DetailRes) {
 	mut dt := st.dt
 	dt.running = false
-	// Объектив, который воркер собрал заново, - теперь наш или лишний
+	dt.stop = unsafe { nil }
+	dt.ai_total = 0
+	dt.run_key = ''
+	// То, что воркер собрал заново (полный кадр, объектив, плитки), -
+	// теперь наше или лишнее
 	if dt.drop || res.req.gen != st.file_gen {
 		dt.drop = false
-		detail_free(mut dt)
-		if !isnil(res.lens) && res.lens != dt.lens {
+		if !isnil(res.src) && !has_src(dt, res.src) {
+			mut s := res.src
+			s.free()
+		}
+		if !isnil(res.lens) && voidptr(res.lens) != voidptr(dt.lens) {
 			mut l := res.lens
 			l.free()
 		}
+		if !isnil(res.tiles) && voidptr(res.tiles) != voidptr(dt.tiles) {
+			mut t := res.tiles
+			t.free()
+		}
+		detail_free(mut dt)
 		dt.pending = false
 		detail_check(mut st)
 		return
 	}
-	if res.err.len > 0 {
-		dt.pending = false
-		return
+	if !isnil(res.src) && !has_src(dt, res.src) {
+		dt.srcs << res.src
+		// Не больше двух полных кадров: лишний - тот, что не нужен ни
+		// «после», ни «до»
+		if dt.srcs.len > detail_srcs_max {
+			keep_a := '${st.raw_path}|${detail_prep_of(st, side_after).highlight}'
+			keep_b := '${st.raw_path}|${detail_prep_of(st, side_before).highlight}'
+			mut kept := []&DetailSrc{}
+			for i in 0 .. dt.srcs.len {
+				mut x := dt.srcs[i]
+				k := '${x.path}|${x.highlight}'
+				if voidptr(x) == voidptr(res.src) || ((k == keep_a || k == keep_b) && kept.len < detail_srcs_max - 1) {
+					kept << x
+				} else {
+					x.free()
+				}
+			}
+			dt.srcs = kept
+		}
 	}
-	dt.src = res.src
-	dt.src_key = res.req.src_key
-	if res.req.use_lens && res.lens != dt.lens {
+	if !isnil(res.lens) && voidptr(res.lens) != voidptr(dt.lens) {
 		if !isnil(dt.lens) {
 			mut l := dt.lens
 			l.free()
@@ -287,32 +585,136 @@ fn detail_done(mut st State, res DetailRes) {
 		dt.lens = res.lens
 		dt.lens_key = res.req.lens_key
 	}
-	dt.lin = res.lin
-	dt.r = res.r
-	dt.ow = res.ow
-	dt.oh = res.oh
-	dt.key = res.req.key
-	dt.gen = res.req.gen
-	detail_show(mut st)
-	if dt.pending {
-		dt.pending = false
+	if !isnil(res.tiles) && voidptr(res.tiles) != voidptr(dt.tiles) {
+		if !isnil(dt.tiles) {
+			mut t := dt.tiles
+			t.free()
+		}
+		dt.tiles = res.tiles
+		dt.tiles_key = res.req.tiles_key
 	}
-	// Вид или настройки могли смениться за время расчёта
+	mut cv := st.cv
+	cv.mark_dirty() // подпись прогресса AI
+	if res.ai_err {
+		// Модель не загрузилась: фрагмент с AI не посчитать - увеличенное
+		// превью (с AI) вместо него, один тост
+		dt.ai_failed = res.req.tiles_key
+		dt.pending = false
+		if !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_warning('1:1 без AI: ${res.err}')
+		}
+		detail_check(mut st)
+		return
+	}
+	if res.err.len > 0 {
+		dt.pending = false
+		return
+	}
+	if res.cancelled {
+		// Вид сменился посреди AI - новый расчёт по нему (готовые плитки
+		// возьмутся из кэша)
+		dt.pending = false
+		detail_check(mut st)
+		return
+	}
+	dt.frag[res.req.side] = DetailFrag{
+		lin: res.lin
+		r:   res.r
+		ow:  res.ow
+		oh:  res.oh
+		key: res.req.key
+		gen: res.req.gen
+	}
+	dt.pending = false
+	// Показать и досчитать недостающее (вид или настройки могли смениться
+	// за время расчёта; в до/после - вторая сторона)
+	detail_show(mut st)
 	detail_check(mut st)
 }
 
-// detail_show - готовый фрагмент с текущим тоном на холст (финальный проход)
+// has_src - полный кадр p уже у DetailCtl (сравнение по адресу)
+fn has_src(dt &DetailCtl, p &DetailSrc) bool {
+	for s in dt.srcs {
+		if voidptr(s) == voidptr(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// detail_tick - прогресс плиток AI (главный поток): подпись на холсте
+fn detail_tick(mut st State, t DetailTick) {
+	if isnil(st.dt) || t.gen != st.file_gen || !st.dt.running {
+		return
+	}
+	mut dt := st.dt
+	dt.ai_done = t.done
+	dt.ai_total = t.total
+	if !isnil(st.cv) {
+		mut cv := st.cv
+		cv.mark_dirty()
+	}
+}
+
+// detail_overlay - подпись прогресса AI на 1:1 (из on_overlay холста)
+fn detail_overlay(st &State, mut ctx vgui.RenderContext) {
+	if isnil(st.dt) || isnil(st.cv) || !st.dt.running || st.dt.ai_total <= 0
+		|| !detail_wanted(st) {
+		return
+	}
+	cv := st.cv
+	text := 'AI 1:1: плитка ${st.dt.ai_done + 1} из ${st.dt.ai_total}'
+	ba_label(mut ctx, text, cv.bounds.x + 10, cv.bounds.y + cv.bounds.h - 30)
+}
+
+// frag_usable - фрагмент стороны есть для этого кадра (может быть по
+// прежним настройкам - показывается, пока считается новый)
+fn frag_usable(st &State, side int) bool {
+	fr := st.dt.frag[side]
+	return fr.lin.len > 0 && fr.gen == st.file_gen && fr.ow > 0
+}
+
+// render_side - фрагмент стороны с её тоном (финальный проход) в RGBA
+fn render_side(st &State, side int, view pipeline.SharpView) []u8 {
+	fr := st.dt.frag[side]
+	if side == side_before {
+		gmask, haze := ba_maps(st)
+		return detail_render(fr.lin, fr.r, fr.ow, fr.oh, gmask, st.gw, st.gh, haze, ba_state(st).params,
+			view)
+	}
+	return detail_render(fr.lin, fr.r, fr.ow, fr.oh, st.gmask, st.gw, st.gh, &st.haze,
+		st.edit.params, view)
+}
+
+// set_frag_layer - фрагмент pix (на месте фрагмента стороны side) - слоем
+// детализации холста
+fn set_frag_layer(st &State, mut cv vgui.Canvas, side int, pix []u8) {
+	fr := st.dt.frag[side]
+	kx := f32(st.gw) / f32(fr.ow)
+	ky := f32(st.gh) / f32(fr.oh)
+	cv.set_detail(pix.data, pix.len, fr.r.w, fr.r.h, f32(fr.r.x) * kx, f32(fr.r.y) * ky,
+		f32(fr.r.w) * kx, f32(fr.r.h) * ky)
+	cv.mark_dirty()
+}
+
+fn clear_layer(mut cv vgui.Canvas) {
+	if cv.has_detail() {
+		cv.clear_detail()
+		cv.mark_dirty()
+	}
+}
+
+// detail_show - готовые фрагменты с текущим тоном на холсты (финальный
+// проход): обычно - «после»; удержание «\» - «до»; шторка - «до» левее
+// линии, «после» правее; бок о бок - «до» на холсте «до»
 fn detail_show(mut st State) {
 	if isnil(st.dt) || isnil(st.cv) {
 		return
 	}
 	mut cv := st.cv
-	dt := st.dt
-	if !detail_wanted(st) || dt.lin.len == 0 || dt.gen != st.file_gen || dt.ow <= 0 {
-		if cv.has_detail() {
-			cv.clear_detail()
-			cv.mark_dirty()
-		}
+	if !detail_wanted(st) {
+		clear_details(mut st)
 		return
 	}
 	view := if st.sharp_drag != .off {
@@ -322,26 +724,93 @@ fn detail_show(mut st State) {
 	} else {
 		pipeline.SharpView.off
 	}
-	mut pix := detail_render(dt.lin, dt.r, dt.ow, dt.oh, st.gmask, st.gw, st.gh, &st.haze,
-		st.edit.params, view)
+	ba := ba_active(st)
+	// Холст «до» (бок о бок)
+	if !isnil(st.cv_b) {
+		mut cb := st.cv_b
+		if ba && st.ba_sbs && !st.ba_hold && frag_usable(st, side_before) {
+			mut pb := render_side(st, side_before, view)
+			mark_clipping(mut pb, st.clip_hi, st.clip_lo)
+			set_frag_layer(st, mut cb, side_before, pb)
+		} else {
+			clear_layer(mut cb)
+		}
+	}
+	if ba && st.ba_hold {
+		if frag_usable(st, side_before) {
+			mut pb := render_side(st, side_before, view)
+			mark_clipping(mut pb, st.clip_hi, st.clip_lo)
+			set_frag_layer(st, mut cv, side_before, pb)
+		} else {
+			clear_layer(mut cv)
+		}
+		return
+	}
+	if !frag_usable(st, side_after) {
+		clear_layer(mut cv)
+		return
+	}
+	mut pix := render_side(st, side_after, view)
 	if view == .off {
 		mark_clipping(mut pix, st.clip_hi, st.clip_lo)
 	}
-	kx := f32(st.gw) / f32(dt.ow)
-	ky := f32(st.gh) / f32(dt.oh)
-	cv.set_detail(pix.data, pix.len, dt.r.w, dt.r.h, f32(dt.r.x) * kx, f32(dt.r.y) * ky,
-		f32(dt.r.w) * kx, f32(dt.r.h) * ky)
-	cv.mark_dirty()
+	if ba && st.ba_split {
+		// Шторка: без «до» на том же месте слоя нет (видно превью со
+		// шторкой), иначе - левее линии «до»
+		fa := st.dt.frag[side_after]
+		fb := st.dt.frag[side_before]
+		if !frag_usable(st, side_before) || fb.r != fa.r || fb.ow != fa.ow {
+			clear_layer(mut cv)
+			return
+		}
+		mut pb := render_side(st, side_before, view)
+		mark_clipping(mut pb, st.clip_hi, st.clip_lo)
+		mut dt := st.dt
+		dt.split_a = pix
+		dt.split_b = pb
+		detail_split_compose(mut st)
+		return
+	}
+	set_frag_layer(st, mut cv, side_after, pix)
 }
 
-// detail_refresh - после пересчёта превью: тот же фрагмент с новым тоном
+// detail_split_compose - слой шторки из готовых картинок «до» и «после»:
+// левее линии «до»
+fn detail_split_compose(mut st State) {
+	dt := st.dt
+	fa := dt.frag[side_after]
+	n := fa.r.w * fa.r.h * 4
+	if dt.split_a.len != n || dt.split_b.len != n || fa.ow <= 0 {
+		return
+	}
+	mut pix := dt.split_a.clone()
+	// Линия шторки - в пикселях превью; в выходе полного кадра
+	split := int(f32(ba_split_x(st)) * f32(fa.ow) / f32(st.gw) + 0.5) - fa.r.x
+	cut := if split < 0 { 0 } else if split > fa.r.w { fa.r.w } else { split }
+	for y in 0 .. fa.r.h {
+		o := y * fa.r.w * 4
+		unsafe { vmemcpy(&u8(pix.data) + o, &u8(dt.split_b.data) + o, cut * 4) }
+	}
+	mut cv := st.cv
+	set_frag_layer(st, mut cv, side_after, pix)
+}
+
+// detail_split_move - линию шторки сдвинули: слой - из готовых картинок
+fn detail_split_move(mut st State) {
+	if isnil(st.dt) || isnil(st.cv) || !st.cv.has_detail() || !st.ba_split || st.ba_hold {
+		return
+	}
+	detail_split_compose(mut st)
+}
+
+// detail_refresh - после пересчёта превью: те же фрагменты с новым тоном
 // и, если вид или подготовка сменились, - новый расчёт
 fn detail_refresh(mut st State) {
 	detail_show(mut st)
 	detail_check(mut st)
 }
 
-// detail_free - выбросить полный кадр и объектив (смена кадра)
+// detail_free - выбросить полные кадры, объектив и плитки (смена кадра)
 fn detail_free(mut dt DetailCtl) {
 	if !isnil(dt.lens) {
 		mut l := dt.lens
@@ -349,29 +818,42 @@ fn detail_free(mut dt DetailCtl) {
 	}
 	dt.lens = unsafe { nil }
 	dt.lens_key = ''
-	dt.src = unsafe { nil }
-	dt.src_key = ''
+	if !isnil(dt.tiles) {
+		mut t := dt.tiles
+		t.free()
+	}
+	dt.tiles = unsafe { nil }
+	dt.tiles_key = ''
+	dt.ai_failed = ''
+	for i in 0 .. dt.srcs.len {
+		mut x := dt.srcs[i]
+		x.free()
+	}
+	dt.srcs.clear()
 }
 
-// detail_reset - новый кадр: слой снят, готовый фрагмент забыт; полный
-// кадр прежнего - выброшен (если воркер его ещё держит - по окончании)
+// detail_reset - новый кадр: слои сняты, готовые фрагменты забыты; полные
+// кадры прежнего - выброшены (если воркер их ещё держит - по окончании)
 fn detail_reset(mut st State) {
 	if isnil(st.dt) {
 		return
 	}
 	mut dt := st.dt
-	dt.lin = []u16{}
-	dt.key = ''
-	dt.ow = 0
+	dt.frag = [2]DetailFrag{}
 	dt.seen = ''
 	if dt.running {
 		dt.drop = true
+		detail_cancel(mut st)
 	} else {
 		detail_free(mut dt)
 	}
 	if !isnil(st.cv) {
 		mut cv := st.cv
 		cv.clear_detail()
+	}
+	if !isnil(st.cv_b) {
+		mut cb := st.cv_b
+		cb.clear_detail()
 	}
 }
 

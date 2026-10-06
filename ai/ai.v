@@ -84,6 +84,11 @@ pub fn (m &Model) run(input []f32, mut output []f32, h int, w int) ! {
 	}
 }
 
+// Runner - то, что считает плитку (Model; в тестах - подделка)
+pub interface Runner {
+	run(input []f32, mut output []f32, h int, w int) !
+}
+
 pub fn (m &Model) free() {
 	C.vr_model_close(m.ptr)
 }
@@ -233,69 +238,36 @@ pub fn denoise(m &Model, src &u16, w int, h int, mut progress Progress) ![]u16 {
 }
 
 // denoise_into - то же в готовый буфер out (w * h * 3; экспорт даёт буфер
-// вне сборщика - bigbuf)
+// вне сборщика - bigbuf). Плитки и их сложение - те же функции, что у
+// фрагмента (tiles.v): фрагмент 1:1 совпадает с этим проходом бит в бит.
 pub fn denoise_into(m &Model, src &u16, w int, h int, mut out []u16, mut progress Progress) ! {
-	fwd, inv := srgb_luts()
-	xs := positions(w)
-	ys := positions(h)
-	wx := axis_weights(xs, w)
-	wy := axis_weights(ys, h)
-	total := xs.len * ys.len
-	plane := tile * tile
-	mut input := []f32{len: 3 * plane}
-	mut output := []f32{len: 3 * plane}
+	denoise_with(m, src, w, h, mut out, mut progress)!
+}
+
+pub fn denoise_with(m Runner, src &u16, w int, h int, mut out []u16, mut progress Progress) ! {
+	g := new_grid(w, h)
+	total := g.xs.len * g.ys.len
+	mut input := []f32{len: 3 * tile * tile}
+	mut output := []f32{len: 3 * tile * tile}
 	// Накопитель - вне сборщика (bigbuf): на полном кадре 288 МБ
 	mut acc := bigbuf.new_f32(w * h * 3)
 	defer {
 		bigbuf.free(mut acc)
 	}
+	frame := Rect{0, 0, w, h}
 	mut done := 0
-	for j, y0 in ys {
-		for i, x0 in xs {
-			// Плитка в sRGB, планарно; за краем кадра - повтор крайнего пикселя
-			for ty in 0 .. tile {
-				sy := math.min(y0 + ty, h - 1)
-				for tx in 0 .. tile {
-					sx := math.min(x0 + tx, w - 1)
-					s := (sy * w + sx) * 3
-					o := ty * tile + tx
-					unsafe {
-						input[o] = fwd[src[s]]
-						input[plane + o] = fwd[src[s + 1]]
-						input[2 * plane + o] = fwd[src[s + 2]]
-					}
-				}
-			}
+	for j in 0 .. g.ys.len {
+		for i in 0 .. g.xs.len {
+			g.fill_input(i, j, src, frame, mut input)
 			m.run(input, mut output, tile, tile)!
-			for ty in 0 .. tile {
-				yy := y0 + ty
-				if yy >= h {
-					break
-				}
-				ky := wy[j][ty]
-				for tx in 0 .. tile {
-					xx := x0 + tx
-					if xx >= w {
-						break
-					}
-					k := ky * wx[i][tx]
-					d := (yy * w + xx) * 3
-					o := ty * tile + tx
-					acc[d] += k * output[o]
-					acc[d + 1] += k * output[plane + o]
-					acc[d + 2] += k * output[2 * plane + o]
-				}
-			}
+			g.accumulate(i, j, output, mut acc, frame)
 			done++
 			if !progress.step(done, total) {
 				return Cancelled{}
 			}
 		}
 	}
-	for n, v in acc {
-		g := if v <= 0 { 0 } else if v >= 1 { 65535 } else { int(v * 65535 + 0.5) }
-		out[n] = inv[g]
-	}
+	finish(acc, mut out)
 }
 
 // blend - смешение на месте: buf = buf + (den - buf) * strength (0..1).

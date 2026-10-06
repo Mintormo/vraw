@@ -177,8 +177,11 @@ fn refresh_history(mut st State) {
 	}
 	mut lb := st.hist_lb
 	lb.clear()
+	bi := ba_index(st)
 	for i, e in st.history {
-		mut l := vgui.label('${i + 1}. ${e.name}')
+		// Запись «до» сравнения (compare.v), если выбрана не первая
+		tag := if i == bi && bi > 0 { '  · до' } else { '' }
+		mut l := vgui.label('${i + 1}. ${e.name}${tag}')
 		l.color = if i == st.hist_pos {
 			st.pal.text
 		} else if i < st.hist_pos {
@@ -192,6 +195,7 @@ fn refresh_history(mut st State) {
 		lb.add_row_widgets([l])
 	}
 	lb.set_selected(st.hist_pos)
+	sync_ba_ui(mut st)
 	// Прокрутка к текущей записи (ensure_visible у ListBox приватный)
 	view_h := lb.bounds.h - 2 * lb.pad
 	if view_h > 0 {

@@ -208,6 +208,7 @@ mut:
 	dt       &DetailCtl = unsafe { nil }
 	dt_check fn ()          = unsafe { nil } // detail_check через app.post
 	dt_done  fn (DetailRes) = unsafe { nil } // итог detail_worker
+	dt_tick  fn (DetailTick) = unsafe { nil } // прогресс плиток AI 1:1
 	tone_fx     fn () = unsafe { nil }
 	// Удаление дымки: карта кадра по st.linear (считается при первой
 	// надобности, сбрасывается с каждым новым linear), показ карты вместо
@@ -267,6 +268,31 @@ mut:
 	ba_before  []u8
 	ba_after   []u8
 	m_split    &vgui.MenuItem = unsafe { nil }
+	// «До» - запись истории ba_ref (подпись под историей - ba_lb); её
+	// сырьё, если подготовка не та, что сейчас (ba_lin/ba_mask превью,
+	// после геометрии - ba_glin/ba_gmask, карта дымки; ключ подготовки,
+	// номер сырья, фоновый воркер - compare.v)
+	ba_ref       int
+	ba_lb        &vgui.Label = unsafe { nil }
+	ba_lin       []u16
+	ba_mask      []u16
+	ba_glin      []u16
+	ba_gmask     []u16
+	ba_gkey      GeomKey
+	ba_haze      pipeline.HazeMap
+	ba_raw_key   string
+	ba_want      string
+	ba_gen       int
+	ba_running   bool
+	ba_threads   []thread
+	ba_prep_done fn (PrepResult) = unsafe { nil }
+	// Бок о бок: холст «до» слева, ряд холстов, пункт меню, последний
+	// связанный вид
+	ba_sbs   bool
+	cv_b     &vgui.Canvas = unsafe { nil }
+	cmp_row  &vgui.HBox   = unsafe { nil }
+	m_sbs    &vgui.MenuItem = unsafe { nil }
+	sbs_last ViewState
 	// «Вид - JPEG камеры» (camjpeg.v): показ, JPEG кадра (RGBA pw x ph
 	// до геометрии; пусто - нет), пункт меню
 	jpeg_show bool
@@ -1422,6 +1448,9 @@ fn main() {
 	st.dt_done = fn [mut st] (res DetailRes) {
 		detail_done(mut st, res)
 	}
+	st.dt_tick = fn [mut st] (t DetailTick) {
+		detail_tick(mut st, t)
+	}
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = lens.load_db() or { unsafe { nil } }
@@ -1546,6 +1575,8 @@ fn main() {
 		crop_overlay(mut st, mut ctx)
 		ba_overlay(mut st, mut ctx) // шторка до/после
 		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
+		detail_overlay(st, mut ctx) // прогресс AI на 1:1
+		sbs_sync(mut st, false) // бок о бок: зум и прокрутка - холсту «до»
 		detail_watch(mut st) // настоящий 1:1: изменился вид - фрагмент
 	}
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
@@ -1561,7 +1592,24 @@ fn main() {
 		if ba_input(mut st, ev) {
 			return
 		}
-		zoom_click(mut st, ev)
+		mut c := st.cv
+		zoom_click(mut st, mut c, ev)
+	}
+	// Бок о бок (compare.v): холст «до» слева - тот же зум и прокрутка,
+	// что у основного (sbs_sync), щелчок - 100% / вписать
+	mut cv_b := vgui.canvas(4, 3)
+	cv_b.fill(viewer_bg)
+	cv_b.take_keys = false
+	cv_b.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
+		ba_overlay_b(st, mut ctx)
+		sbs_sync(mut st, true)
+	}
+	cv_b.on_input = fn [mut st, mut cv_b] (ev &vgui.CanvasInputEvent) {
+		zoom_click(mut st, mut cv_b, ev)
+	}
+	st.cv_b = cv_b
+	st.ba_prep_done = fn [mut st] (res PrepResult) {
+		ba_prep_take(mut st, res)
 	}
 	// Шумодав и ореолы - подготовка сырья (~1 с на превью, в фоне): LibRaw
 	// и коррекция объектива не перезапускаются - сырьё в raw_linear.
@@ -2110,6 +2158,27 @@ fn main() {
 		goto_history(mut st, idx, mut cv, mut hist, mut nm, mut app)
 	}
 	st.hist_lb = hist_lb
+	// «До» для сравнения (compare.v) - выделенная запись: подпись, кнопка
+	// и сброс к первой записи
+	mut ba_lb := vgui.label('До: первая запись')
+	st.secondary_labels << ba_lb
+	st.ba_lb = ba_lb
+	mut b_ba := icon_button(mut st, 'git-compare', 'Выделенная запись - «до» для сравнения (шторка Y, бок о бок Shift+Y)')
+	b_ba.on_click = fn [mut st] () {
+		if isnil(st.hist_lb) {
+			return
+		}
+		set_ba_ref(mut st, st.hist_lb.selected)
+	}
+	mut b_ba0 := reset_button(mut st, '«До» - первая запись')
+	b_ba0.on_click = fn [mut st] () {
+		set_ba_ref(mut st, 0)
+	}
+	mut ba_row := vgui.create_hbox_fill()
+	ba_row.set_spacing(6)
+	ba_row.add(ba_lb, flex: 1)
+	ba_row.add(b_ba)
+	ba_row.add(b_ba0)
 	mut hist_hint := vgui.label('Двойной щелчок - перейти, Ctrl+Z / Ctrl+Shift+Z')
 	st.hint_labels << hist_hint
 	hist_hint.font_size = 12
@@ -2152,6 +2221,7 @@ fn main() {
 		st.corr = unsafe { nil }
 		st.file_gen++
 		detail_reset(mut st)
+		ba_forget(mut st)
 		st.loading = true
 		ai_forget(mut st)
 		st.raw_pending = false
@@ -2409,6 +2479,7 @@ fn main() {
 		st.corr = unsafe { nil }
 		st.file_gen++
 		detail_reset(mut st)
+		ba_forget(mut st)
 		ai_forget(mut st)
 		st.raw_pending = false
 		drop(mut st.dev_linear)
@@ -2836,6 +2907,12 @@ fn main() {
 		set_ba_split(mut st, v)
 	}
 	st.m_split = m_split
+	mut m_sbs := vgui.menu_checkbox('До/после: бок о бок', false)
+	m_sbs.shortcut = 'Shift+Y'
+	m_sbs.on_toggle = fn [mut st] (v bool) {
+		set_ba_sbs(mut st, v)
+	}
+	st.m_sbs = m_sbs
 	// JPEG камеры вместо проявки (camjpeg.v)
 	mut m_jpeg := vgui.menu_checkbox('JPEG камеры', false)
 	m_jpeg.shortcut = 'K'
@@ -2877,7 +2954,7 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_jpeg, m_clipwarn, m_strip, m_bg, m_themes])
+		m_sbs, m_jpeg, m_clipwarn, m_strip, m_bg, m_themes])
 
 	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
@@ -3015,6 +3092,7 @@ fn main() {
 	// История - последней секцией, открыта: 8 строк списка и подсказка
 	acc.add_section_expanded('История', section([
 		SectionRow{hist_lb},
+		SectionRow{ba_row},
 		SectionRow{hist_hint},
 	]))
 
@@ -3034,8 +3112,13 @@ fn main() {
 
 	// Область снимка: фон, выбранный в меню «Вид», картинка с отступом от
 	// краёв. Холст и заглушка лежат друг на друге в Stack, видим один.
+	// Холст - в ряду: «бок о бок» добавляет слева холст «до» (set_ba_sbs)
+	mut cmp_row := vgui.create_hbox_fill()
+	cmp_row.set_spacing(sbs_gap)
+	cmp_row.add(cv, flex: 1)
+	st.cmp_row = cmp_row
 	mut view_stack := &vgui.Stack{}
-	view_stack.add(cv)
+	view_stack.add(cmp_row)
 	view_stack.add(placeholder)
 	mut load_ov := make_load_overlay(theme)
 	st.load_ov = load_ov
@@ -3137,6 +3220,7 @@ fn main() {
 	}
 	wait_prep(mut st) // воркер пользуется профилем из st.lens_db
 	wait_details(mut st) // и фрагмент 1:1 - тоже
+	wait_ba(mut st) // и сырьё «до»
 	wait_thumbs(mut st)
 	wait_loads(mut st)
 	// Потоки сохранения уже дождались выше (повторный wait того же потока

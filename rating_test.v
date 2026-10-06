@@ -230,6 +230,62 @@ fn test_ba_compose() {
 	assert cv.pixels.all(it == 7)
 }
 
+// Бок о бок: «до» - на своём холсте, основной - «после»
+fn test_ba_compose_sbs() {
+	mut st := &State{}
+	st.gw = 4
+	st.gh = 2
+	st.ba_before = []u8{len: 32, init: 10}
+	st.ba_after = []u8{len: 32, init: 200}
+	mut cv := vgui.canvas(4, 2)
+	st.cv_b = vgui.canvas(1, 1)
+	st.ba_sbs = true
+	ba_compose(mut st, mut cv)
+	assert cv.pixels.all(it == 200)
+	assert st.cv_b.width == 4 && st.cv_b.height == 2
+	assert st.cv_b.pixels.all(it == 10)
+}
+
+// «До» - выбранная запись истории; её нет (историю обрезали) - первая.
+// Своё сырьё «до» нужно, только когда подготовка записи - другая
+fn test_ba_ref_and_prep_key() {
+	mut st := &State{}
+	mut e0 := neutral_edit()
+	mut e1 := e0
+	e1.params.exposure = 1
+	mut e2 := e1
+	e2.nr = [f32(0), 30, 0, 0]!
+	st.history = [HistEntry{
+		name:  'Открыт файл'
+		state: e0
+	}, HistEntry{
+		name:  'Экспозиция'
+		state: e1
+	}, HistEntry{
+		name:  'Шумодав'
+		state: e2
+	}]
+	st.edit = e2
+	st.hl_developed = e2.highlight
+	st.nr_applied = e2.nr
+	st.dc_applied = dc_key(e2.params.sharp)
+	assert ba_index(st) == 0
+	st.ba_ref = 1
+	assert ba_index(st) == 1
+	assert ba_state(st).params.exposure == 1
+	// У записи «до» шумодава нет, сейчас есть - нужна своя подготовка
+	assert ba_prep_key(st, ba_state(st)) != cur_prep_key(st)
+	st.ba_ref = 2
+	assert ba_prep_key(st, ba_state(st)) == cur_prep_key(st)
+	// Историю обрезали - «до» снова первая запись
+	st.history = st.history[..2].clone()
+	assert ba_index(st) == 0
+	// AI у «до» - только при годном результате модели
+	mut e3 := e2
+	e3.ai = 80
+	assert ba_ai(st, e3) == 0
+}
+
 // Увеличение в точку: точка буфера остаётся на месте экрана; повторно -
 // «вписать»
 fn test_zoom_at_point() {

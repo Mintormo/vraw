@@ -25,7 +25,6 @@ module main
 // сразу выходят. load_done сверяет итог с настройками на момент
 // окончания и досчитывает разницу (как restore_edit).
 import math
-import stbi
 import vgui
 import raw
 import lens
@@ -158,10 +157,10 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 
 // cam_view - JPEG камеры для показа: вписан в размер превью w x h в
 // ориентации кадра (RGBA, вне сборщика - одна ссылка); без JPEG - пусто
-fn cam_view(cj ?stbi.Image, flip int, w int, h int) []u8 {
+fn cam_view(cj ?raw.Jpeg, flip int, w int, h int) []u8 {
 	t := cj or { return []u8{} }
 	mut out := own_new[u8](w * h * 4)
-	fit_thumb_into(mut out, unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width,
+	fit_thumb_into(mut out, t.pix, t.width,
 		t.height, flip, w, h)
 	return out
 }
@@ -192,14 +191,15 @@ struct CamLook {
 }
 
 // cam_jpeg - встроенный полный JPEG камеры, декодированный в RGB (в
-// ориентации сенсора; освобождает вызывающий - free()). Именно полный:
+// ориентации сенсора, вне сборщика - raw.decode_jpeg; освобождает
+// вызывающий - free()). Именно полный:
 // у CR3 превью 1620x1080 обработано иначе. Камеры разные (Canon, Nikon,
 // Sony...) и стили у них разные - поэтому «как JPEG» всё по встроенному
 // JPEG этого же кадра, а не константами; JPEG меньше cam_look_min_px
 // пикселей (бывают крошечные превью) - none.
-fn cam_jpeg(mut d raw.Developer) ?stbi.Image {
+fn cam_jpeg(mut d raw.Developer) ?raw.Jpeg {
 	tj := d.thumb() or { return none }
-	mut t := stbi.load_from_memory(tj.data, tj.len, desired_channels: 3) or { return none }
+	mut t := raw.decode_jpeg(tj) or { return none }
 	if t.width * t.height < cam_look_min_px {
 		t.free()
 		return none
@@ -211,7 +211,7 @@ fn cam_jpeg(mut d raw.Developer) ?stbi.Image {
 // проявки превью linear (npix пикселей, после коррекции объектива с силой
 // vign): кривая - сопоставлением гистограмм, насыщенность - по средней
 // цветности с этой кривой
-fn camera_look(cj ?stbi.Image, flip int, linear []u16, w int, h int, vign f32) CamLook {
+fn camera_look(cj ?raw.Jpeg, flip int, linear []u16, w int, h int, vign f32) CamLook {
 	t := cj or {
 		return CamLook{
 			vign: vign
@@ -219,7 +219,7 @@ fn camera_look(cj ?stbi.Image, flip int, linear []u16, w int, h int, vign f32) C
 	}
 	npix := w * h
 	src := unsafe { &u16(linear.data) }
-	ref_ := unsafe { &u8(t.data) }
+	ref_ := unsafe { &u8(t.pix.data) }
 	curve := pipeline.match_curve(src, npix, ref_, t.width * t.height)
 	sat := pipeline.match_saturation(src, npix, curve, ref_, t.width * t.height)
 	hue, hsat := camera_hues(t, flip, linear, w, h, curve, sat)
@@ -237,7 +237,7 @@ fn camera_look(cj ?stbi.Image, flip int, linear []u16, w int, h int, vign f32) C
 // насыщенностью против JPEG, вписанного в тот же размер. Кадр уже совмещён
 // с JPEG (коррекция объектива с увеличением «как у камеры»); JPEG другой
 // пропорции - без цвета.
-fn camera_hues(t stbi.Image, flip int, linear []u16, w int, h int, curve []f32, sat f32) ([]f32, []f32) {
+fn camera_hues(t raw.Jpeg, flip int, linear []u16, w int, h int, curve []f32, sat f32) ([]f32, []f32) {
 	ow := if flip & 4 != 0 { t.height } else { t.width }
 	oh := if flip & 4 != 0 { t.width } else { t.height }
 	if math.abs(f64(ow) * h / (f64(oh) * w) - 1) > 0.01 {
@@ -251,7 +251,7 @@ fn camera_hues(t stbi.Image, flip int, linear []u16, w int, h int, curve []f32, 
 		cam_sat: sat
 		dither:  false
 	}, mut ours, 4)
-	ref_ := fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height,
+	ref_ := fit_thumb(t.pix, t.width, t.height,
 		flip, sw, sh)
 	return pipeline.match_hues(unsafe { &u8(ours.data) }, 4, unsafe { &u8(ref_.data) }, 4,
 		sw, sh)
@@ -281,7 +281,7 @@ const frame_zoom_max = f32(1.2)
 // или без надёжной оценки - LensMatch{} (lens.vign_default, без
 // увеличения). Порядок: сначала это, потом камерная кривая (виньетка
 // меняет гистограмму).
-fn lens_match(cj ?stbi.Image, flip int, corr &lens.Corrector, src []u16, w int, h int, m raw.Meta) LensMatch {
+fn lens_match(cj ?raw.Jpeg, flip int, corr &lens.Corrector, src []u16, w int, h int, m raw.Meta) LensMatch {
 	t := cj or { return LensMatch{} }
 	if isnil(corr) {
 		return LensMatch{}
@@ -295,7 +295,7 @@ fn lens_match(cj ?stbi.Image, flip int, corr &lens.Corrector, src []u16, w int, 
 	mf := corr.match_frame(unsafe { &u16(src.data) }, w, h, m.focal, m.aperture) or {
 		return LensMatch{}
 	}
-	rgba := fit_thumb(unsafe { t.data.vbytes(t.width * t.height * 3) }, t.width, t.height,
+	rgba := fit_thumb(t.pix, t.width, t.height,
 		flip, mf.w, mf.h)
 	vr := VignRef.new(rgba, mf) or { return LensMatch{} }
 	z := vr.zoom
