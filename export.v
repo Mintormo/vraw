@@ -351,7 +351,9 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		haze = pipeline.haze_map_big(src, gw, gh)
 	}
 	mut rgb := bigbuf.new_u8(gw * gh * 3)
-	pipeline.apply_image(src, mask, &haze, gw, gh, e.params, 1.0, mut rgb, 3)
+	// Градиентные фильтры - по пикселям кадра после геометрии
+	ep := with_lmap(e.params, pipeline.mask_map(out_geom(&e), w, h, true, gw, gh))
+	pipeline.apply_image(src, mask, &haze, gw, gh, ep, 1.0, mut rgb, 3)
 	// Размер на выход (окно «Экспорт»): только уменьшение, с резкостью на
 	// выход (она - только при уменьшении)
 	fw, fh := export_dims(o.size, gw, gh)

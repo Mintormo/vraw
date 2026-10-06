@@ -10,6 +10,9 @@ module pipeline
 //     -> гамма 1/2.2 + камерная кривая + контраст (S-кривая)
 //     -> тональные кривые (общая RGB, затем по каналу) -> насыщенность
 //     -> сочность -> HSL-эквалайзер -> резкость (sharpen.v, apply_image) -> 8 бит
+// Градиентные фильтры (local.v) встраиваются в те же шаги на пиксель:
+// температура/оттенок - до люмы, экспозиция и тени/света - в множитель
+// k, контраст и насыщенность - после тона.
 //
 // Ради живых ползунков всё тяжёлое вынесено в две таблицы, которые
 // перестраиваются за ~130К операций при изменении любого параметра:
@@ -92,6 +95,11 @@ pub mut:
 	haze_depth f32 = 25
 	// Резкость (sharpen.v) - последний шаг, только в apply_image
 	sharp Sharpen
+	// Градиентные фильтры (local.v) и отображение пикселя буфера в кадр -
+	// производное, его задаёт вызывающий под свой буфер (mask_map); без
+	// него (w == 0) фильтры не действуют
+	masks []Mask
+	lmap  MaskMap
 }
 
 // Sharpen - резкость: unsharp mask в тоновом пространстве (по люме или
@@ -932,7 +940,9 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	wm := wx.m
 	wl := wx.lim
 	to_tone := !isnil(tone)
+	lc := local_ctx(&p)
 	ctx := RenderCtx{
+		lc:         &lc
 		src:        src
 		mask:       mask
 		dst:        unsafe { &u8(dst.data) }
@@ -992,6 +1002,7 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 // RenderCtx - всё, что нужно циклу по пикселям render_rows: входы,
 // выходы и готовые таблицы (общие для потоков, только чтение)
 struct RenderCtx {
+	lc         &LocalCtx = unsafe { nil } // градиентные фильтры (n == 0 - нет)
 	src        &u16 = unsafe { nil }
 	mask       &u16 = unsafe { nil }
 	dst        &u8  = unsafe { nil }
@@ -1055,6 +1066,11 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	to_tone := rc.to_tone
 	dst_stride := rc.dst_stride
 	dither := rc.dither
+	lc := rc.lc
+	local := lc.n > 0
+	// Пиксель (x, y) буфера - для веса фильтров
+	mut px := if local { i0 % lc.w } else { 0 }
+	mut py := if local { i0 / lc.w } else { 0 }
 	unsafe {
 		mut s := rc.src + i0 * 3
 		mut d := rc.dst + i0 * dst_stride
@@ -1154,7 +1170,24 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 					cb = 0
 				}
 			}
-			if wb_on || haze_on {
+			mut ls := LocalSum{}
+			if local {
+				ls = local_sum(lc, f32(px), f32(py))
+				px++
+				if px == lc.w {
+					px = 0
+					py++
+				}
+			}
+			loc_wb := ls.any && lc.use_wb && (ls.temp != 0 || ls.tint != 0)
+			if loc_wb {
+				// Температура и оттенок фильтров - множители каналов (люма та же)
+				gr, gg, gb := local_wb(&ls)
+				cr *= gr
+				cg *= gg
+				cb *= gb
+			}
+			if wb_on || haze_on || loc_wb {
 				yf := 0.2126 * cr + 0.7152 * cg + 0.0722 * cb
 				y = if yf >= 65535.0 { 65535 } else { int(yf) }
 			} else {
@@ -1164,6 +1197,17 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			mut k := ml[y]
 			if use_sh {
 				k *= sl[int(mk[i])]
+			}
+			if ls.any && lc.use_ev {
+				// Экспозиция фильтров и их тени/света (по тоновой позиции)
+				mut ev := ls.ev
+				if lc.use_tn {
+					tp := lc.tl[y]
+					ev += local_tone_ev * (ls.sh * (1 - tp) * (1 - tp) + ls.hi * tp * tp)
+				}
+				if ev != 0 {
+					k *= exp2f(ev)
+				}
 			}
 			mut fr := cr * k
 			mut fg := cg * k
@@ -1196,11 +1240,22 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 				vg = flg[int(fg)]
 				vb = flb[int(fb)]
 			}
-			if sat != 1.0 {
+			mut sp := sat
+			if ls.any {
+				if lc.use_cn && ls.con != 0 {
+					vr = local_contrast(lc, ls.con, vr)
+					vg = local_contrast(lc, ls.con, vg)
+					vb = local_contrast(lc, ls.con, vb)
+				}
+				if lc.use_st && ls.sat != 0 {
+					sp = sat * if ls.sat < -1 { f32(0) } else { 1 + ls.sat }
+				}
+			}
+			if sp != 1.0 {
 				l := 0.2126 * vr + 0.7152 * vg + 0.0722 * vb
-				vr = l + sat * (vr - l)
-				vg = l + sat * (vg - l)
-				vb = l + sat * (vb - l)
+				vr = l + sp * (vr - l)
+				vg = l + sp * (vg - l)
+				vb = l + sp * (vb - l)
 			}
 			if vib != 0 {
 				vr, vg, vb = vibrance_pixel(vr, vg, vb, vib)

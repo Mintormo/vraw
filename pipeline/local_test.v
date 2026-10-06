@@ -1,0 +1,330 @@
+module pipeline
+
+import math
+
+// Градиентные фильтры (local.v): вес по форме, правки только под
+// фильтром, сложение фильтров, отображение через геометрию и фрагменты.
+
+fn lt_gray(w int, h int, v u16) []u16 {
+	mut src := []u16{len: w * h * 3}
+	for i in 0 .. src.len {
+		src[i] = v
+	}
+	return src
+}
+
+fn lt_render(src []u16, w int, h int, p Params) []u8 {
+	mut out := []u8{len: w * h * 3}
+	apply_image(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w, h, p, 1.0, mut
+		out, 3)
+	return out
+}
+
+// Кадр w x h без геометрии: отображение пикселя в доли высоты
+fn lt_map(w int, h int) MaskMap {
+	return mask_map(Geom{}, w, h, true, w, h)
+}
+
+fn test_local_none_is_identity() {
+	w, h := 64, 48
+	src := lt_gray(w, h, 12000)
+	base := lt_render(src, w, h, Params{})
+	// Фильтр без правок, выключенный, или без отображения - как без фильтров
+	empty := Mask{
+		kind: .linear
+		ax:   0
+		ay:   0
+		bx:   0
+		by:   1
+	}
+	mut off := empty
+	off.exposure = 1
+	off.on = false
+	mut nomap := empty
+	nomap.exposure = 1
+	for p in [Params{
+		masks: [empty]
+		lmap:  lt_map(w, h)
+	}, Params{
+		masks: [off]
+		lmap:  lt_map(w, h)
+	}, Params{
+		masks: [nomap]
+	}] {
+		assert lt_render(src, w, h, p) == base
+	}
+}
+
+fn test_local_linear() {
+	w, h := 40, 100
+	src := lt_gray(w, h, 8000)
+	base := lt_render(src, w, h, Params{})
+	// Переход с 20% до 60% высоты: выше - +1 EV целиком, ниже - без изменений
+	m := Mask{
+		kind:     .linear
+		ax:       0.5
+		ay:       0.2
+		bx:       0.5
+		by:       0.6
+		exposure: 1
+	}
+	out := lt_render(src, w, h, Params{
+		masks: [m]
+		lmap:  lt_map(w, h)
+	})
+	full := lt_render(src, w, h, Params{ exposure: 1 })
+	px := fn [w] (o []u8, y int) int {
+		return int(o[(y * w + w / 2) * 3 + 1])
+	}
+	// Полное действие - как глобальная экспозиция (±1 уровень дизера)
+	assert math.abs(px(out, 5) - px(full, 5)) <= 1
+	assert math.abs(px(out, 90) - px(base, 90)) <= 1
+	assert px(out, 5) > px(base, 5) + 20
+	// Переход монотонный (сравнение через 4 строки - сквозь дизер)
+	for y in 20 .. 56 {
+		assert px(out, y) >= px(out, y + 4) - 1
+	}
+	// По ширине одинаково
+	assert math.abs(int(out[(30 * w + 1) * 3]) - int(out[(30 * w + w - 2) * 3])) <= 1
+}
+
+fn test_local_radial() {
+	w, h := 120, 80
+	src := lt_gray(w, h, 8000)
+	base := lt_render(src, w, h, Params{})
+	mut m := Mask{
+		kind:     .radial
+		ax:       0.5
+		ay:       0.5
+		rx:       0.3
+		ry:       0.2
+		feather:  50
+		exposure: 1
+	}
+	out := lt_render(src, w, h, Params{
+		masks: [m]
+		lmap:  lt_map(w, h)
+	})
+	at := fn [w] (o []u8, x int, y int) int {
+		return int(o[(y * w + x) * 3 + 1])
+	}
+	assert at(out, 60, 40) > at(base, 60, 40) + 20
+	assert math.abs(at(out, 2, 2) - at(base, 2, 2)) <= 1
+	// Полуось rx = 0.3 высоты = 24 px: за ней по горизонтали - без изменений
+	assert math.abs(at(out, 60 + 26, 40) - at(base, 60 + 26, 40)) <= 1
+	assert math.abs(at(out, 60, 40 + 18) - at(base, 60, 40 + 18)) <= 1
+	// Растушёвка 50%: до половины радиуса - полное действие
+	assert math.abs(at(out, 60 + 10, 40) - at(out, 60, 40)) <= 1
+	// Поворот на 90° меняет полуоси местами
+	m.angle = 90
+	rot := lt_render(src, w, h, Params{
+		masks: [m]
+		lmap:  lt_map(w, h)
+	})
+	assert at(rot, 60, 40 + 20) > at(base, 60, 40 + 20) + 5
+	assert math.abs(at(rot, 60 + 20, 40) - at(base, 60 + 20, 40)) <= 1
+	// Снаружи: центр как был, угол светлее
+	m.angle = 0
+	m.invert = true
+	inv := lt_render(src, w, h, Params{
+		masks: [m]
+		lmap:  lt_map(w, h)
+	})
+	assert math.abs(at(inv, 60, 40) - at(base, 60, 40)) <= 1
+	assert at(inv, 2, 2) > at(base, 2, 2) + 20
+}
+
+fn test_local_stack_and_edits() {
+	w, h := 16, 16
+	src := lt_gray(w, h, 8000)
+	mmap := lt_map(w, h)
+	all := Mask{
+		kind: .linear
+		ax:   0
+		ay:   2
+		bx:   0
+		by:   3 // весь кадр - до точки a: полное действие
+	}
+	mut one := all
+	one.exposure = 1
+	mut two := all
+	two.exposure = 2
+	a := lt_render(src, w, h, Params{
+		masks: [one, one]
+		lmap:  mmap
+	})
+	b := lt_render(src, w, h, Params{
+		masks: [two]
+		lmap:  mmap
+	})
+	for i in 0 .. a.len {
+		assert math.abs(int(a[i]) - int(b[i])) <= 1
+	}
+	// Температура: теплее - R > B, люма почти та же; оттенок + - G ниже
+	mut warm := all
+	warm.temp = 100
+	o := lt_render(src, w, h, Params{
+		masks:  [warm]
+		lmap:   mmap
+		dither: false
+	})
+	g := lt_render(src, w, h, Params{ dither: false })
+	assert o[0] > o[2] + 10
+	l0 := 0.2126 * f32(g[0]) + 0.7152 * f32(g[1]) + 0.0722 * f32(g[2])
+	l1 := 0.2126 * f32(o[0]) + 0.7152 * f32(o[1]) + 0.0722 * f32(o[2])
+	assert math.abs(l0 - l1) < 4
+	mut mag := all
+	mag.tint = 100
+	t := lt_render(src, w, h, Params{
+		masks:  [mag]
+		lmap:   mmap
+		dither: false
+	})
+	assert t[1] < t[0] && t[1] < t[2]
+	// Насыщенность -100 - ч/б; контраст + на тёмном - темнее
+	col := [u16(30000), 12000, 6000]
+	mut cs := all
+	cs.saturation = -100
+	c := lt_render(col, 1, 1, Params{
+		masks:  [cs]
+		lmap:   lt_map(1, 1)
+		dither: false
+	})
+	assert c[0] == c[1] && c[1] == c[2]
+	mut ct := all
+	ct.contrast = 100
+	dark := lt_gray(1, 1, 3000)
+	d0 := lt_render(dark, 1, 1, Params{ dither: false })
+	d1 := lt_render(dark, 1, 1, Params{
+		masks:  [ct]
+		lmap:   lt_map(1, 1)
+		dither: false
+	})
+	assert d1[1] < d0[1]
+	// Тени + поднимают тёмное сильнее светлого
+	mut sh := all
+	sh.shadows = 100
+	light := lt_gray(1, 1, 40000)
+	ds := lt_render(dark, 1, 1, Params{
+		masks:  [sh]
+		lmap:   lt_map(1, 1)
+		dither: false
+	})
+	l_0 := lt_render(light, 1, 1, Params{ dither: false })
+	ls := lt_render(light, 1, 1, Params{
+		masks:  [sh]
+		lmap:   lt_map(1, 1)
+		dither: false
+	})
+	assert int(ds[1]) - int(d0[1]) > int(ls[1]) - int(l_0[1])
+}
+
+// Фильтр приклеен к снимку: под поворотом на 90° и кадрированием вес в
+// пикселе выхода - вес той же точки кадра без геометрии
+fn test_local_geometry() {
+	w, h := 60, 40
+	m := Mask{
+		kind:    .radial
+		ax:      0.3
+		ay:      0.4
+		rx:      0.25
+		ry:      0.15
+		angle:   30
+		feather: 70
+	}
+	plain := mask_weights(m, lt_map(w, h), w, h)
+	for g in [Geom{
+		rot90: 1
+	}, Geom{
+		flip_h: true
+		x0:     0.1
+		y0:     0.2
+		x1:     0.9
+		y1:     0.8
+	}] {
+		ow, oh := g.out_size(w, h, true)
+		got := mask_weights(m, mask_map(g, w, h, true, ow, oh), ow, oh)
+		mut checked := 0
+		mp := geom_affine(g, w, h, true, ow, oh)
+		for j in 0 .. oh {
+			for i in 0 .. ow {
+				sx := mp.a * i + mp.b * j + mp.c
+				sy := mp.d * i + mp.e * j + mp.f
+				// Центр пикселя выхода попадает в центр пикселя S
+				fx := sx - 0.5
+				fy := sy - 0.5
+				if math.abs(fx - math.round(fx)) > 1e-3 || math.abs(fy - math.round(fy)) > 1e-3 {
+					continue
+				}
+				assert math.abs(int(got[j * ow + i]) - int(plain[int(math.round(fy)) * w + int(math.round(fx))])) <= 1
+				checked++
+			}
+		}
+		assert checked > ow * oh / 2
+	}
+	// Фрагмент: отображение со сдвигом = вырезка из целого
+	mm := lt_map(w, h)
+	part := mask_weights(m, mm.region(7, 5, 20), 20, 10)
+	for j in 0 .. 10 {
+		for i in 0 .. 20 {
+			assert math.abs(int(part[j * 20 + i]) - int(plain[(j + 5) * w + i + 7])) <= 1
+		}
+	}
+}
+
+// Рендер полосами в потоках и фрагментами строк - тот же результат
+fn test_local_threads_rows() {
+	w, h := 700, 500
+	npix := w * h
+	mut src := []u16{len: npix * 3}
+	mut s := u32(777)
+	for i in 0 .. npix * 3 {
+		s = s * 1664525 + 1013904223
+		src[i] = u16(s >> 17)
+	}
+	mm := lt_map(w, h)
+	p := Params{
+		masks: [
+			Mask{
+				kind:       .radial
+				ax:         0.4
+				ay:         0.5
+				rx:         0.4
+				ry:         0.3
+				exposure:   0.7
+				contrast:   40
+				saturation: 30
+				shadows:    50
+			},
+			Mask{
+				kind:       .linear
+				ax:         0.2
+				ay:         0
+				bx:         0.6
+				by:         0.5
+				temp:       -40
+				highlights: -60
+			},
+		]
+		lmap:  mm
+	}
+	mut full := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, unsafe { nil }, npix, p, mut full, 4)
+	for y in [0, 137, 499] {
+		mut row := []u8{len: w * 4}
+		mut pr := p
+		pr.lmap = mm.region(0, y, w)
+		apply(unsafe { &u16(src.data) + y * w * 3 }, unsafe { nil }, w, pr, mut row, 4)
+		// Дизер - по номеру пикселя: сравнение без последнего бита
+		for i in 0 .. w * 4 {
+			assert math.abs(int(row[i]) - int(full[y * w * 4 + i])) <= 2
+		}
+	}
+}
+
+fn test_exp2f() {
+	for x in [f32(-8), -3.3, -1, -0.01, 0, 0.5, 1, 2.75, 7.9] {
+		want := math.pow(2, f64(x))
+		assert math.abs(f64(exp2f(x)) / want - 1) < 3e-4
+	}
+}

@@ -81,6 +81,81 @@ struct SideState {
 	crop_portrait bool
 	// Поля размера на выход (size_mode, size_w...) из сайдкаров 30.09.2026
 	// json2 при чтении пропускает: размер теперь - настройка экспорта
+	// Градиентные фильтры (в старых файлах нет - пусто)
+	masks []SideMask
+}
+
+// SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
+// ('linear' / 'radial'), точки - доли кадра до поворота и кадрирования
+struct SideMask {
+	kind       string
+	on         bool
+	ax         f32
+	ay         f32
+	bx         f32
+	by         f32
+	rx         f32
+	ry         f32
+	angle      f32
+	feather    f32
+	invert     bool
+	exposure   f32
+	contrast   f32
+	highlights f32
+	shadows    f32
+	saturation f32
+	temp       f32
+	tint       f32
+}
+
+fn side_mask(m pipeline.Mask) SideMask {
+	return SideMask{
+		kind:       if m.kind == .radial { 'radial' } else { 'linear' }
+		on:         m.on
+		ax:         m.ax
+		ay:         m.ay
+		bx:         m.bx
+		by:         m.by
+		rx:         m.rx
+		ry:         m.ry
+		angle:      m.angle
+		feather:    m.feather
+		invert:     m.invert
+		exposure:   m.exposure
+		contrast:   m.contrast
+		highlights: m.highlights
+		shadows:    m.shadows
+		saturation: m.saturation
+		temp:       m.temp
+		tint:       m.tint
+	}
+}
+
+// mask_of - фильтр из файла; значения правок - в пределах ползунков
+fn mask_of(s SideMask) pipeline.Mask {
+	c := fn (v f32, lim f32) f32 {
+		return if v < -lim { -lim } else if v > lim { lim } else { v }
+	}
+	return pipeline.Mask{
+		kind:       if s.kind == 'radial' { pipeline.MaskKind.radial } else { pipeline.MaskKind.linear }
+		on:         s.on
+		ax:         s.ax
+		ay:         s.ay
+		bx:         s.bx
+		by:         s.by
+		rx:         c(s.rx, 10)
+		ry:         c(s.ry, 10)
+		angle:      s.angle
+		feather:    c(s.feather, 100)
+		invert:     s.invert
+		exposure:   c(s.exposure, 4)
+		contrast:   c(s.contrast, 100)
+		highlights: c(s.highlights, 100)
+		shadows:    c(s.shadows, 100)
+		saturation: c(s.saturation, 100)
+		temp:       c(s.temp, 100)
+		tint:       c(s.tint, 100)
+	}
 }
 
 // validate - размеры массивов (испорченный или чужой файл - ошибка, а не
@@ -177,6 +252,7 @@ fn side_state(e EditState) SideState {
 		crop_aw:       e.crop_aw
 		crop_ah:       e.crop_ah
 		crop_portrait: e.crop_portrait
+		masks:         p.masks.map(side_mask(it))
 	}
 }
 
@@ -195,6 +271,7 @@ fn edit_state(s SideState) !EditState {
 			sh_highlights: s.sh_highlights
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
+			masks:         s.masks.map(mask_of(it))
 			sharp:         pipeline.Sharpen{
 				amount:      s.sharp_amount
 				radius:      if s.sharp_radius > 0 { s.sharp_radius } else { f32(1.0) }

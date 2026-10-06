@@ -236,6 +236,12 @@ mut:
 	crop_drag   CropDrag
 	crop_before EditState // настройки при входе в режим (Esc)
 	crop_ui     &CropUi = unsafe { nil }
+	// Градиентные фильтры (masks.v): выделенный фильтр (-1 - нет; не
+	// правка), заливка маски, перетаскивание ручки, виджеты секции
+	mask_sel   int = -1
+	mask_show  bool
+	mask_drag  MaskDrag
+	mask_ui    &MaskUi = unsafe { nil }
 	// Копирование настроек и пресеты (presets.v): буфер настроек и его
 	// группы (пусто - ничего не скопировано), пункт «Вставить настройки»,
 	// меню (номер пункта «Пресеты» в нём), вставка в кадры (paste_settings
@@ -440,7 +446,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		}
 		mask := if st.gmask.len == npix { unsafe { &u16(st.gmask.data) } } else { unsafe { &u16(nil) } }
 		pipeline.apply_image_view(unsafe { &u16(st.glin.data) }, mask, &st.haze, st.gw,
-			st.gh, st.edit.params, preview_scale, view, mut cv.pixels, 4)
+			st.gh, view_params(st, st.edit.params), preview_scale, view, mut cv.pixels, 4)
 	}
 	// Показ работы резкости - вид поверх снимка: гистограмма остаётся
 	// снимка (последняя посчитанная), подсветки клипа нет
@@ -472,6 +478,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	show_clip_marks(mut st, mut hist)
 	if !st.haze_show {
 		mark_clipping(mut cv.pixels, st.clip_hi, st.clip_lo)
+		mask_paint(st, mut cv.pixels) // заливка маски фильтра (masks.v)
 	}
 	sync_crop_total(mut st)
 	// До/после (compare.v): гистограмма и подсветка - у «после»
@@ -1573,6 +1580,7 @@ fn main() {
 	// Рамка кадрирования, ручки и сетка - поверх снимка, без пересчёта
 	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
 		crop_overlay(mut st, mut ctx)
+		mask_overlay(mut st, mut ctx) // ручки градиентного фильтра
 		ba_overlay(mut st, mut ctx) // шторка до/после
 		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
 		detail_overlay(st, mut ctx) // прогресс AI на 1:1
@@ -1582,6 +1590,10 @@ fn main() {
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
 		// Режим кадрирования (crop.v): рамка, ручки, линия горизонта
 		if crop_input(mut st, ev) {
+			return
+		}
+		// Ручки выделенного градиентного фильтра (masks.v)
+		if mask_input(mut st, ev) {
 			return
 		}
 		if st.wb_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
@@ -2141,6 +2153,8 @@ fn main() {
 	wb_rows := build_wb_section(mut st, lbl_w, val_w)
 	// Кадрирование и поворот (crop.v)
 	crop_rows := build_crop_section(mut st, lbl_w, val_w)
+	// Градиентные фильтры (masks.v)
+	mask_rows := build_mask_section(mut st, lbl_w, val_w)
 
 	// ── История правок: список, текущая запись выделена ──
 	// Щелчок (или стрелки в списке) - откат к записи, более поздняя -
@@ -2233,6 +2247,8 @@ fn main() {
 		drop(mut st.glin)
 		drop(mut st.gmask)
 		crop_leave(mut st)
+		st.mask_sel = -1
+		st.mask_drag = MaskDrag{}
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
 		drop(mut st.cam_view)
@@ -2432,8 +2448,10 @@ fn main() {
 			st.horizon = false
 			st.crop_drag = CropDrag{}
 			sync_crop_ui(mut st)
-		} else {
+		} else if st.crop_mode {
 			crop_cancel(mut st)
+		} else if st.mask_sel >= 0 {
+			select_mask(mut st, -1) // градиентный фильтр: снять выделение
 		}
 	})
 	// Соседи - среди кадров фильтра ленты
@@ -2490,6 +2508,8 @@ fn main() {
 		drop(mut st.glin)
 		drop(mut st.gmask)
 		crop_leave(mut st)
+		st.mask_sel = -1
+		st.mask_drag = MaskDrag{}
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
 		drop(mut st.cam_view)
@@ -2932,6 +2952,13 @@ fn main() {
 		set_clip_warn(mut st, v, v)
 	}
 	st.m_clipwarn = m_clipwarn
+	// Заливка маски выделенного градиентного фильтра (masks.v)
+	mut m_mask := vgui.menu_checkbox('Маска фильтра', false)
+	m_mask.shortcut = 'O'
+	m_mask.on_toggle = fn [mut st] (v bool) {
+		set_mask_show(mut st, v)
+	}
+	st.mask_ui.m_show = m_mask
 	// Фон вокруг снимка: пункты-флажки, работают как переключатель
 	// (отмечен ровно один - set_viewer_bg)
 	mut m_bg := vgui.menu_submenu('Фон вокруг снимка')
@@ -2954,7 +2981,7 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_jpeg, m_clipwarn, m_strip, m_bg, m_themes])
+		m_sbs, m_jpeg, m_clipwarn, m_mask, m_strip, m_bg, m_themes])
 
 	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
 	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
@@ -3063,6 +3090,7 @@ fn main() {
 	acc.add_section('HSL', section([
 		SectionRow{hsl_tabs},
 	]))
+	acc.add_section('Градиентные фильтры', section(mask_rows))
 	acc.add_section('Шумодав и ореолы', section([
 		SectionRow{ai_caption},
 		SectionRow{ai_block},

@@ -20,14 +20,17 @@ import json2
 import vgui
 
 // Группы настроек: ключи (settings.json, файлы пресетов) и названия в окне
-const copy_groups = ['tone', 'color', 'curves', 'hsl', 'nr', 'sharp', 'haze', 'lens', 'crop']
+const copy_groups = ['tone', 'color', 'curves', 'hsl', 'nr', 'sharp', 'haze', 'lens', 'crop',
+	'masks']
 const copy_group_names = ['Экспозиция и тон', 'Баланс белого и цвет',
 	'Кривые', 'HSL', 'Шумодав и ореолы (и AI)', 'Резкость',
-	'Удаление дымки', 'Коррекция объектива', 'Кадрирование и поворот']
+	'Удаление дымки', 'Коррекция объектива', 'Кадрирование и поворот',
+	'Градиентные фильтры']
 
 // Группы по умолчанию (нет выбора в settings.json) - все, кроме
-// кадрирования: как в Lightroom, рамку обычно не переносят на другие кадры
-const default_copy_groups = copy_groups.filter(it != 'crop')
+// кадрирования и фильтров: как в Lightroom, рамку и места фильтров обычно
+// не переносят на другие кадры
+const default_copy_groups = copy_groups.filter(it != 'crop' && it != 'masks')
 
 // merge_groups - настройки dst, в которых группы groups взяты из src.
 // Производные поля (таблицы кривых, камерная кривая, матрица ББ) не
@@ -41,6 +44,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop')
 //   nr     - классический шумодав и ореолы, AI-шумодав (сила и модель)
 //   sharp, haze, lens - резкость, удаление дымки, коррекция объектива
 //   crop   - кадрирование и поворот (геометрия, пропорция)
+//   masks  - градиентные фильтры (заменяют фильтры кадра целиком)
 fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 	mut e := dst.clone()
 	s := src
@@ -95,6 +99,9 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.crop_aw = s.crop_aw
 				e.crop_ah = s.crop_ah
 				e.crop_portrait = s.crop_portrait
+			}
+			'masks' {
+				e.params.masks = s.params.masks.clone()
 			}
 			else {}
 		}

@@ -69,6 +69,7 @@ fn (e EditState) clone() EditState {
 	c.params.tc_r = e.params.tc_r.clone()
 	c.params.tc_g = e.params.tc_g.clone()
 	c.params.tc_b = e.params.tc_b.clone()
+	c.params.masks = e.params.masks.clone()
 	c.curve_pts = [][]vgui.CurvePoint{}
 	for pts in e.curve_pts {
 		c.curve_pts << pts.clone()
@@ -235,6 +236,7 @@ fn set_edit(mut st State, e EditState) {
 	sync_curve_editor(mut st)
 	sync_wb_mode(mut st)
 	sync_crop_ui(mut st)
+	sync_mask_ui(mut st)
 }
 
 // restore_edit - откат/возврат к снимку: виджеты (set_edit) и ровно нужные

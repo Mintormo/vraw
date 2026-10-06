@@ -678,13 +678,16 @@ fn frag_usable(st &State, side int) bool {
 // render_side - фрагмент стороны с её тоном (финальный проход) в RGBA
 fn render_side(st &State, side int, view pipeline.SharpView) []u8 {
 	fr := st.dt.frag[side]
+	// Градиентные фильтры: пиксель фрагмента - пиксель полного выхода
+	mm := pipeline.mask_map(out_geom(&st.edit), st.pw, st.ph, true, fr.ow, fr.oh).region(fr.r.x,
+		fr.r.y, fr.r.w)
 	if side == side_before {
 		gmask, haze := ba_maps(st)
-		return detail_render(fr.lin, fr.r, fr.ow, fr.oh, gmask, st.gw, st.gh, haze, ba_state(st).params,
-			view)
+		return detail_render(fr.lin, fr.r, fr.ow, fr.oh, gmask, st.gw, st.gh, haze, with_lmap(ba_state(st).params,
+			mm), view)
 	}
 	return detail_render(fr.lin, fr.r, fr.ow, fr.oh, st.gmask, st.gw, st.gh, &st.haze,
-		st.edit.params, view)
+		with_lmap(st.edit.params, mm), view)
 }
 
 // set_frag_layer - фрагмент pix (на месте фрагмента стороны side) - слоем

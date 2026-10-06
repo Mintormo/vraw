@@ -147,6 +147,53 @@ fn test_develop_full() {
 	assert !os.read_file(p)!.contains('Canon EOS R8')
 }
 
+// Экспорт с градиентным фильтром под поворотом на 90°: фильтр на верхней
+// трети кадра (до поворота) - на выходе правая сторона темнее, левая
+// как без фильтра
+fn test_develop_full_mask() {
+	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
+	if !os.exists(path) {
+		eprintln('нет тестового CR3, пропуск')
+		return
+	}
+	mut e0 := neutral_edit()
+	e0.lens_corr = false
+	e0.geom.rot90 = 1
+	e0.params.dither = false
+	n := develop_full(path, with_derived(e0, CamLook{}, pipeline.CamColor{}), unsafe { nil })!
+	mut e1 := e0.clone()
+	e1.params.masks << pipeline.Mask{
+		kind:     .linear
+		ax:       0.5
+		ay:       0.2
+		bx:       0.5
+		by:       0.4
+		exposure: -1
+	}
+	b := develop_full(path, with_derived(e1, CamLook{}, pipeline.CamColor{}), unsafe { nil })!
+	assert n.width == b.width && n.height == b.height && n.height > n.width
+	// Суммы по столбцам: x < 0.55 ширины - как было, x > 0.85 - темнее
+	w := n.width
+	mut left_n := u64(0)
+	mut left_b := u64(0)
+	mut right_n := u64(0)
+	mut right_b := u64(0)
+	for y := 0; y < n.height; y += 7 {
+		for x in 0 .. w {
+			i := (y * w + x) * 3 + 1
+			if x < w * 55 / 100 {
+				left_n += n.rgb[i]
+				left_b += b.rgb[i]
+			} else if x > w * 85 / 100 {
+				right_n += n.rgb[i]
+				right_b += b.rgb[i]
+			}
+		}
+	}
+	assert left_b == left_n
+	assert right_b < right_n * 80 / 100
+}
+
 // Настройки старой версии (без поля) - EXIF при экспорте пишется
 fn test_settings_exif_default() {
 	old := json2.decode[Settings]('{"theme": "dark"}')!
