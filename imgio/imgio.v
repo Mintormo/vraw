@@ -7,11 +7,6 @@ module imgio
 import os
 import stbi
 
-// stbi зовёт libm, а ld в Ubuntu (--as-needed) отбрасывает -lm, стоящую
-// раньше объектника stbi: без флага линковка под gcc падает и V молча
-// берёт запасной компилятор (см. raw/thumb_test.v)
-#flag -Wl,--no-as-needed -lm
-
 pub enum Format {
 	jpeg
 	png

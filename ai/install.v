@@ -220,7 +220,8 @@ pub fn install_runtime(p Places, progress fn (done i64, total i64) bool) ! {
 		os.rmdir_all(tmp)!
 	}
 	os.mkdir_all(tmp)!
-	res := os.execute('tar -xzf ${os.quoted_path(tgz)} -C ${os.quoted_path(tmp)} --strip-components=1')
+	// Аргументы массивом, без оболочки (os.execute со строкой устарел)
+	res := os.exec(['tar', '-xzf', tgz, '-C', tmp, '--strip-components=1'])
 	if res.exit_code != 0 {
 		os.rmdir_all(tmp) or {}
 		return error('не удалось распаковать ${f.name}: ${res.output.trim_space()}')

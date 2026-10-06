@@ -5,6 +5,9 @@ module imgio
 // в полосе хранятся разности соседних пикселей строки - так сжатие
 // фотографии заметно лучше. Deflate - zlib-компрессор из stb_image_write
 // (тот же, что пишет PNG; stbi.o слинкован импортом stbi в imgio.v).
+// Прототип - свой заголовок (см. stbiw_zlib.h).
+
+#include "@VMODROOT/imgio/stbiw_zlib.h"
 
 fn C.stbi_zlib_compress(data &u8, data_len int, out_len &int, quality int) &u8
 
