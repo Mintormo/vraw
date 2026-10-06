@@ -33,7 +33,6 @@ mut:
 	pw           int   // размеры превью
 	ph           int
 	edit         EditState // все настройки правки кадра (history.v)
-	hl_developed int = -1 // режим пересветов последней проявки (не проявлять зря)
 	// true = пакетная установка виджетов (откат истории, сброс, новый файл):
 	// on_change только пишут настройки - без пересчётов и записей в историю
 	suppress bool
@@ -74,7 +73,6 @@ mut:
 	history    []HistEntry
 	hist_pos   int
 	hist_ms    i64
-	hist_label string
 	// Виджеты, которые выставляет откат истории (set_edit)
 	binds   []SliderBind
 	lens_cb &vgui.CheckBox = unsafe { nil }
@@ -324,16 +322,6 @@ fn cam_color(c raw.ColorData) pipeline.CamColor {
 	}
 }
 
-// highlight_name - подпись режима пересветов LibRaw (аналог dcraw -H)
-fn highlight_name(h int) string {
-	return match h {
-		0 { 'клип' }
-		1 { 'без клипа' }
-		2 { 'смешение' }
-		else { 'восстан. ${h}' }
-	}
-}
-
 // GeomKey - от чего зависит геометрия превью (glin)
 struct GeomKey {
 	lin_gen int
@@ -486,46 +474,6 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	ba_apply(mut st, mut cv)
 	cv.mark_dirty()
 	detail_refresh(mut st)
-}
-
-// load_preview перепроявляет открытый RAW в линейное 16-битное превью
-// (LibRaw, ~0.1 с, в главном потоке) - смена режима пересветов - и
-// запускает подготовку сырья: при async - в фоне, иначе сразу (смена
-// размера - холст и буферы должны совпасть до первого apply). Открытие
-// файла идёт другим путём - фоновой загрузкой (loader.v).
-fn load_preview(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager, mut app vgui.App, async bool) {
-	if isnil(st.dev) {
-		return
-	}
-	mut img := st.dev.develop(half: true, highlight: st.edit.highlight) or {
-		nm.show_error('Ошибка проявки: ${err.msg()}')
-		return
-	}
-	st.hl_developed = st.edit.highlight
-	resized := img.width != st.pw || img.height != st.ph
-	if resized || !async {
-		// Воркер считает буфер старого размера - дождаться до смены pw/ph
-		wait_prep(mut st)
-	}
-	st.pw = img.width
-	st.ph = img.height
-	n := img.width * img.height * 3
-	drop(mut st.dev_linear)
-	st.dev_linear = own_new[u16](n)
-	unsafe { vmemcpy(st.dev_linear.data, img.data_u16(), n * 2) }
-	img.free()
-	st.lens_dirty = true
-
-	// Холст под новый размер подгонит apply_pipeline (ensure_geom): при
-	// перепроявке того же файла (смена режима пересветов) размер не
-	// меняется - зум и панорама не сбрасываются
-	if async && !resized {
-		request_prep(mut st, mut app, true)
-	} else {
-		take_prep(mut st, prep_compute(make_prep_job(mut st)))
-		apply_pipeline(mut st, mut cv, mut hist)
-		ai_check(mut st, mut app)
-	}
 }
 
 // PrepJob - снимок для подготовки сырья: коррекция объектива (только при
@@ -913,50 +861,6 @@ fn repaint_histogram(mut st State) {
 	}
 }
 
-// auto_exposure_ev подбирает экспозицию по линейному превью: медиана
-// люмы приводится к среднему серому (18% линейно - это ~0.46 после
-// гаммы 2.2, середина тонов). Вариант «дотянуть света до 1% клипа»
-// (авто-яркость dcraw) отвергнут: на контровом свете (тёмная комната,
-// яркое окно) света уже клипнуты и он даёт 0 EV - см. IMG_0631.
-fn auto_exposure_ev(linear []u16, npix int) f32 {
-	if npix == 0 {
-		return 0
-	}
-	mut hist := []u32{len: 65536}
-	unsafe {
-		mut s := &u16(linear.data)
-		ph := &u32(hist.data)
-		for _ in 0 .. npix {
-			// Целочисленная BT.709-люма - как в пайплайне
-			y := (54 * u32(s[0]) + 183 * u32(s[1]) + 19 * u32(s[2])) >> 8
-			ph[y]++
-			s += 3
-		}
-	}
-	half := u64(npix) / 2
-	mut acc := u64(0)
-	mut med := 0
-	for i in 0 .. 65536 {
-		acc += u64(hist[i])
-		if acc >= half {
-			med = i
-			break
-		}
-	}
-	if med < 1 {
-		med = 1 // защита от log2(inf) на полностью чёрном кадре
-	}
-	mut ev := f32(math.log2(0.18 * 65535.0 / f64(med)))
-	// В пределы ползунка экспозиции
-	if ev < -4 {
-		ev = -4
-	}
-	if ev > 4 {
-		ev = 4
-	}
-	return ev
-}
-
 // show_lens - подпись и доступность чекбокса «Коррекция объектива» по
 // найденному профилю (после загрузки кадра, load_done)
 fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
@@ -1041,7 +945,7 @@ struct SliderCfg {
 	def    f32
 	digits int  = 2    // знаков после запятой в значении; 0 - целые, step 1
 	signed bool = true // в истории со знаком: «Экспозиция +0.70»
-	show   fn (f32) string         = unsafe { nil } // своя подпись значения (пересветы)
+	show   fn (f32) string         = unsafe { nil } // своя подпись значения
 	get    fn (&EditState) f32     = unsafe { nil } // значение в снимке (откат)
 	set    fn (mut e EditState, v f32) = unsafe { nil } // запись значения в st.edit
 	fx     fn ()                   = unsafe { nil } // пересчёт после завершённой правки
@@ -1077,7 +981,7 @@ fn slider_hist_text(cfg SliderCfg, v f32) string {
 }
 
 // edit_slider собирает ползунок настройки кадра по единому паттерну
-// (паттерн «Пересветов»): при перетаскивании on_change пишет только
+// (по отпусканию): при перетаскивании on_change пишет только
 // значение (cfg.set -> st.edit) и подпись, пересчёт cfg.fx и запись в
 // историю - в on_release. Одиночные on_change (колесо, клавиши, «×»)
 // пересчитывают сразу и пишут в историю со склейкой шагов. Под
@@ -1431,15 +1335,14 @@ fn main() {
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
-	// второй - самые длинные варианты значений (режимы пересветов и
-	// крайние числа ползунков). Новая подпись длиннее нынешних просто
+	// второй - самые длинные варианты значений (крайние числа
+	// ползунков). Новая подпись длиннее нынешних просто
 	// расширит колонку - наездов на ползунок не будет.
-	lbl_w := column_width(mut win, ['Пересветы', 'Экспозиция', 'Тени',
+	lbl_w := column_width(mut win, ['Экспозиция', 'Тени',
 		'Контраст', 'Сочность', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
 		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
 		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв'], 8)
-	val_w := column_width(mut win, ['без клипа', 'смешение', 'восстан. 9',
-		'-4.00', '100', '12000 K', '-150', '3.00 px'], 8)
+	val_w := column_width(mut win, ['-4.00', '100', '12000 K', '-150', '3.00 px'], 8)
 
 	mut st := &State{}
 	st.settings = settings
@@ -1566,8 +1469,7 @@ fn main() {
 	// ── Ползунки и чекбоксы правки ──
 	// Все настройки кадра живут в st.edit (снимок для истории). Ползунки
 	// собирает edit_slider; fx - пересчёт по виду настройки: тон -
-	// apply_pipeline (~60 мс), подготовка сырья - фоновый request_prep,
-	// пересветы - перепроявка превью.
+	// apply_pipeline (~60 мс), подготовка сырья - фоновый request_prep.
 	tone_fx := fn [mut st, mut cv, mut hist] () {
 		apply_pipeline(mut st, mut cv, mut hist)
 	}
@@ -1632,15 +1534,6 @@ fn main() {
 			request_prep(mut st, mut app, false)
 		}
 	}
-	// Пересветы - параметр LibRaw, не пайплайна: перепроявка превью
-	// (~0.1 с в главном потоке, коррекция и шумодав - в фоне), зум
-	// сохраняется. На том же режиме не перепроявляется.
-	hl_fx := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
-		if st.edit.highlight != st.hl_developed {
-			load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
-		}
-	}
-
 	// Коррекция объектива (lensfun): применяется к линейному сырью до
 	// пайплайна. Переключение пересчитывает сырьё из dev_linear (без
 	// LibRaw) в фоне, ~0.6 с + шумодав - окно не замирает.
@@ -1671,23 +1564,6 @@ fn main() {
 		record(mut st, 'camcurve', 'Как JPEG камеры: ${on_off(v)}', false)
 	}
 	st.crv_cb = crv_cb
-
-	mut hl := edit_slider(mut st, SliderCfg{
-		label:  'Пересветы'
-		hname:  'Пересветы:'
-		max:    9
-		digits: 0
-		show:   fn (v f32) string {
-			return highlight_name(int(v))
-		}
-		get:    fn (e &EditState) f32 {
-			return e.highlight
-		}
-		set:    fn (mut e EditState, v f32) {
-			e.highlight = int(v)
-		}
-		fx:     hl_fx
-	})
 
 	// Шумодав и ореолы: в «Сброс» не входят (подготовка сырья, не тон)
 	mut imp := edit_slider(mut st, SliderCfg{
@@ -1760,26 +1636,6 @@ fn main() {
 		}
 		fx:    tone_fx
 	})
-	// «Авто» - экспозиция по гистограмме превью. set_value сам вызовет
-	// on_change ползунка: параметры, подпись, пайплайн и запись в историю
-	// (под своим названием - hist_label) обновятся штатно.
-	mut exp_sl := exp.sl
-	mut b_autoexp := icon_button(mut st, 'wand-sparkles', 'Авто-экспозиция')
-	b_autoexp.on_click = fn [mut st, mut exp_sl] () {
-		if st.linear.len == 0 {
-			return
-		}
-		// По кадру после кадрирования (glin), до первого apply - по всему
-		ev := if st.glin.len == st.gw * st.gh * 3 && st.glin.len > 0 {
-			auto_exposure_ev(st.glin, st.gw * st.gh)
-		} else {
-			auto_exposure_ev(st.linear, st.pw * st.ph)
-		}
-		st.hist_label = 'Авто-экспозиция ${fmt_signed(ev, 2)}'
-		exp_sl.set_value(ev)
-		st.hist_label = ''
-	}
-
 	mut sh := edit_slider(mut st, SliderCfg{
 		label: 'Тени'
 		min:   -4
@@ -2169,8 +2025,8 @@ fn main() {
 	hist_lb.show_header = false // add_column включает заголовок
 	// Одиночный щелчок (и стрелки) только выделяет запись; переход -
 	// двойным щелчком или Enter (on_dbl_click зовётся на оба)
-	hist_lb.on_dbl_click = fn [mut st, mut cv, mut hist, mut nm, mut app] (idx int, text string) {
-		goto_history(mut st, idx, mut cv, mut hist, mut nm, mut app)
+	hist_lb.on_dbl_click = fn [mut st, mut cv, mut hist, mut app] (idx int, text string) {
+		goto_history(mut st, idx, mut cv, mut hist, mut app)
 	}
 	st.hist_lb = hist_lb
 	// «До» для сравнения (compare.v) - выделенная запись: подпись, кнопка
@@ -2199,11 +2055,11 @@ fn main() {
 	hist_hint.font_size = 12
 	// Ctrl+Z / Ctrl+Shift+Z - пункты меню «Правка» (сочетания обрабатывает
 	// меню); Ctrl+Y - дополнительно, горячей клавишей окна
-	undo := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
-		goto_history(mut st, st.hist_pos - 1, mut cv, mut hist, mut nm, mut app)
+	undo := fn [mut st, mut cv, mut hist, mut app] () {
+		goto_history(mut st, st.hist_pos - 1, mut cv, mut hist, mut app)
 	}
-	redo := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
-		goto_history(mut st, st.hist_pos + 1, mut cv, mut hist, mut nm, mut app)
+	redo := fn [mut st, mut cv, mut hist, mut app] () {
+		goto_history(mut st, st.hist_pos + 1, mut cv, mut hist, mut app)
 	}
 	win.bind_hotkey('Ctrl+Y', redo)
 
@@ -2293,7 +2149,6 @@ fn main() {
 			gen:       st.file_gen
 			dev:       nd
 			db:        st.lens_db
-			highlight: st.edit.highlight
 			lens_corr: st.edit.lens_corr
 			stop:      stop
 		}
@@ -2320,7 +2175,6 @@ fn main() {
 		st.meta = res.meta
 		st.corr = res.corr
 		show_lens(st, mut lens_cb, mut lens_lb)
-		st.hl_developed = res.highlight
 		// Холст - под размер кадра после геометрии (ensure_geom в apply)
 		st.pw = res.w
 		st.ph = res.h
@@ -2362,9 +2216,7 @@ fn main() {
 		show_viewer(mut cv, mut placeholder)
 		sync_view_bg(mut st)
 		// Что поменяли за время загрузки (и шумодав из сайдкара)
-		if st.edit.highlight != st.hl_developed {
-			load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
-		} else if st.edit.lens_corr != res.lens_corr {
+		if st.edit.lens_corr != res.lens_corr {
 			request_prep(mut st, mut app, true)
 		} else if prep_stale(st) {
 			request_prep(mut st, mut app, false)
@@ -2716,10 +2568,10 @@ fn main() {
 		st.save_threads << spawn batch_worker(job, mut app, save_done)
 	}
 
-	// «Сброс» тональный: пересветы, коррекция объектива, камерная кривая
+	// «Сброс» тональный: коррекция объектива, камерная кривая
 	// и шумодав остаются как есть. Это обычная правка - запись в истории,
 	// отменяется Ctrl+Z. Пункт меню «Правка - Сбросить тон».
-	reset_tone := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+	reset_tone := fn [mut st, mut cv, mut hist, mut app] () {
 		mut e := st.edit.clone()
 		// Баланс белого (в EditState, не в params) и резкость - не тон,
 		// «Сброс» их не трогает, как шумодав
@@ -2727,7 +2579,7 @@ fn main() {
 			sharp: st.edit.params.sharp
 		}
 		e.curve_pts = neutral_edit().curve_pts
-		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
+		restore_edit(mut st, e, mut cv, mut hist, mut app)
 		record(mut st, 'reset', 'Сброс', false)
 	}
 	// «Автотон» (autotone.v): экспозиция, контраст, «Тени/Света», чёрные и
@@ -2746,7 +2598,7 @@ fn main() {
 		}
 		mut e := st.edit.clone()
 		e.params = t.put(e.params)
-		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
+		restore_edit(mut st, e, mut cv, mut hist, mut app)
 		record(mut st, 'autotone', 'Автотон', false)
 	}
 
@@ -3008,20 +2860,7 @@ fn main() {
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
 		m_sbs, m_jpeg, m_clipwarn, m_mask, m_strip, m_bg, m_themes])
 
-	mut hl_row := edit_row(mut st, mut hl, lbl_w, val_w)
-	// Ряд экспозиции - как slider_row, но с дополнительной кнопкой «Авто»
-	// между значением и сбросом.
-	mut b_expreset := reset_button(mut st, 'Сбросить')
-	b_expreset.on_click = fn [mut exp_sl] () {
-		exp_sl.set_value(0.0)
-	}
-	mut exp_row := vgui.create_hbox_fill()
-	exp_row.set_spacing(6)
-	exp_row.add(exp.lb, min: lbl_w)
-	exp_row.add(exp_sl, flex: 1)
-	exp_row.add(exp.vl, min: val_w)
-	exp_row.add(b_autoexp)
-	exp_row.add(b_expreset)
+	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
 	mut b_autotone := vgui.button('Автотон')
 	b_autotone.icon_name = 'wand-sparkles'
@@ -3091,7 +2930,6 @@ fn main() {
 		SectionRow{lens_cb},
 		SectionRow{lens_lb},
 		SectionRow{crv_cb},
-		SectionRow{hl_row},
 	]))
 	acc.add_section('Кадрирование и поворот', section(crop_rows))
 	acc.add_section_expanded('Баланс белого', section(wb_rows))

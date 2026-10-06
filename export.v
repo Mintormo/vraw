@@ -4,7 +4,7 @@ module main
 // Выполняется в фоновом потоке (save_worker) - поэтому без vgui и без
 // общего состояния: свой LibRaw, всё нужное приходит копией в EditState.
 //
-// Порядок - как в превью: LibRaw (демозаика, камерный ББ, режим
+// Порядок - как в превью: LibRaw (демозаика, камерный ББ, клип
 // пересветов) -> коррекция объектива (виньетирование, затем дисторсия +
 // TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> Capture-резкость
 // -> маска -> кадрирование и поворот (сырьё и маска) -> pipeline -> размер
@@ -233,7 +233,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		return ExportCancelled{}
 	}
 	mut d := raw.open(path)!
-	mut img := d.develop(highlight: e.highlight) or {
+	mut img := d.develop() or {
 		d.close()
 		return err
 	}

@@ -1,7 +1,7 @@
 module main
 
 // Логика истории правок и сайдкара без окна: виджеты vgui создаются и работают без
-// App, а пересчёты (apply_pipeline, load_preview, request_prep) при
+// App, а пересчёты (apply_pipeline, request_prep) при
 // пустом State сразу выходят - проверяются только снимки и записи.
 import os
 import vgui
@@ -58,9 +58,8 @@ fn drag(mut sl vgui.Slider, v f32) {
 fn jump(mut st State, idx int) {
 	mut cv := vgui.canvas(4, 3)
 	mut hist := vgui.canvas(4, 3)
-	mut nm := vgui.notification_manager_at(.top_left)
 	mut app := &vgui.App{}
-	goto_history(mut st, idx, mut cv, mut hist, mut nm, mut app)
+	goto_history(mut st, idx, mut cv, mut hist, mut app)
 }
 
 fn hist_names(st &State) []string {
@@ -175,16 +174,6 @@ fn test_checkbox_restore() {
 	assert !st.lens_cb.checked
 }
 
-fn test_auto_label() {
-	mut st, mut exp, _ := new_state()
-	st.hist_label = 'Авто-экспозиция ${fmt_signed(1.234, 2)}'
-	exp.set_value(1.234)
-	st.hist_label = ''
-	// Следующий шаг колесом - отдельной записью
-	exp.set_value(1.3)
-	assert hist_names(st) == ['Открыт файл', 'Авто-экспозиция +1.23', 'Экспозиция +1.30']
-}
-
 fn test_no_history_without_file() {
 	mut st := &State{}
 	st.edit = neutral_edit()
@@ -221,7 +210,6 @@ fn test_roundtrip() {
 		vgui.CurvePoint{1, 1}]
 	st.edit.params.hsl_sat[3] = -40
 	st.edit.params.eq[4] = 1.5
-	st.edit.highlight = 5
 	st.edit.lens_corr = false
 	curves_to_params(mut st)
 	record(mut st, 'mix', 'Разное', false)
@@ -243,7 +231,6 @@ fn test_roundtrip() {
 	assert last.curve_pts[2].len == 3
 	assert last.params.hsl_sat[3] == -40
 	assert last.params.eq[4] == 1.5
-	assert last.highlight == 5
 	assert !last.lens_corr
 	assert last.nr[1] == 35
 	assert last.params.exposure == 0.75
@@ -400,6 +387,21 @@ fn test_sidecar_legacy_camera_curve() {
 	loaded := decode_sidecar(legacy)!
 	assert loaded.history.len == 2
 	assert loaded.history[1].state.params.exposure == f32(0.3)
+}
+
+// Режим пересветов LibRaw убран 06.10.2026: поле highlight старых
+// сайдкаров не пишется и при чтении пропускается
+fn test_sidecar_legacy_highlight() {
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('legacy_hl')
+	drag(mut exp, 0.4)
+	text := os.read_file(st.side_path)!
+	assert !text.contains('"highlight"')
+	legacy := text.replace('"lens_corr":', '"highlight": 5,\n      "lens_corr":')
+	assert legacy.contains('"highlight": 5')
+	loaded := decode_sidecar(legacy)!
+	assert loaded.history.len == 2
+	assert loaded.history[1].state.params.exposure == f32(0.4)
 }
 
 // AI-шумодав в сайдкаре: сила и модель пишутся и читаются

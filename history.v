@@ -22,7 +22,6 @@ struct EditState {
 mut:
 	params    pipeline.Params
 	curve_pts [][]vgui.CurvePoint // точки кривых: 0 - RGB, 1..3 - R, G, B
-	highlight int                 // режим пересветов LibRaw (0..9), смена - перепроявка
 	lens_corr bool = true // чекбокс «Коррекция объектива»
 	use_curve bool = true // чекбокс «Камерная кривая»
 	nr        [4]f32 // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
@@ -115,26 +114,16 @@ fn record(mut st State, key string, name string, merge bool) {
 	if st.suppress || st.history.len == 0 {
 		return
 	}
-	mut label := name
-	mut hkey := key
-	mut can_merge := merge
-	if st.hist_label.len > 0 {
-		// Особое название (кнопка «Авто») - отдельной записью, и следующие
-		// шаги того же ползунка к ней не приклеиваются (ключа нет)
-		label = st.hist_label
-		hkey = ''
-		can_merge = false
-	}
 	if st.history[st.hist_pos].state == st.edit {
 		return
 	}
 	now := time.ticks()
 	top := st.history[st.hist_pos]
-	if can_merge && st.hist_pos > 0 && st.hist_pos == st.history.len - 1 && top.key == hkey
-		&& hkey.len > 0 && st.hist_ms > 0 && now - st.hist_ms < hist_merge_ms {
+	if merge && st.hist_pos > 0 && st.hist_pos == st.history.len - 1 && top.key == key
+		&& key.len > 0 && st.hist_ms > 0 && now - st.hist_ms < hist_merge_ms {
 		st.history[st.hist_pos] = HistEntry{
-			name:  label
-			key:   hkey
+			name:  name
+			key:   key
 			state: st.edit.clone()
 		}
 	} else {
@@ -142,8 +131,8 @@ fn record(mut st State, key string, name string, merge bool) {
 			st.history.trim(st.hist_pos + 1)
 		}
 		st.history << HistEntry{
-			name:  label
-			key:   hkey
+			name:  name
+			key:   key
 			state: st.edit.clone()
 		}
 		st.hist_pos = st.history.len - 1
@@ -241,14 +230,11 @@ fn set_edit(mut st State, e EditState) {
 
 // restore_edit - откат/возврат к снимку: виджеты (set_edit) и ровно нужные
 // пересчёты. Тональные настройки - один apply (~60 мс); подготовка сырья
-// (коррекция объектива, шумодав) - фоновый request_prep; другой режим
-// пересветов - перепроявка превью (она же запустит подготовку).
-fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager, mut app vgui.App) {
+// (коррекция объектива, шумодав) - фоновый request_prep.
+fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Canvas, mut app vgui.App) {
 	lens_changed := st.edit.lens_corr != e.lens_corr
 	set_edit(mut st, e)
-	if st.edit.highlight != st.hl_developed {
-		load_preview(mut st, mut cv, mut hist, mut nm, mut app, true)
-	} else if lens_changed {
+	if lens_changed {
 		request_prep(mut st, mut app, true)
 	} else if prep_stale(st) {
 		request_prep(mut st, mut app, false)
@@ -262,7 +248,7 @@ fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Can
 // goto_history - переход к записи idx (двойной щелчок или Enter в списке,
 // Ctrl+Z / Ctrl+Shift+Z).
 // Записи не удаляются: можно вернуться вперёд, пока не сделана новая правка.
-fn goto_history(mut st State, idx int, mut cv vgui.Canvas, mut hist vgui.Canvas, mut nm vgui.NotificationManager, mut app vgui.App) {
+fn goto_history(mut st State, idx int, mut cv vgui.Canvas, mut hist vgui.Canvas, mut app vgui.App) {
 	if idx < 0 || idx >= st.history.len {
 		return
 	}
@@ -272,7 +258,7 @@ fn goto_history(mut st State, idx int, mut cv vgui.Canvas, mut hist vgui.Canvas,
 	}
 	st.hist_pos = idx
 	st.hist_ms = 0 // после перехода шаги не склеиваются с чужой записью
-	restore_edit(mut st, st.history[idx].state, mut cv, mut hist, mut nm, mut app)
+	restore_edit(mut st, st.history[idx].state, mut cv, mut hist, mut app)
 	refresh_history(mut st)
 	sync_sidecar(mut st)
 }

@@ -22,16 +22,15 @@ import pipeline { Region }
 const detail_margin = 96
 
 // DetailSrc - сырьё полного кадра для фрагментов: выход LibRaw полного
-// размера (как у экспорта), один на кадр и режим пересветов. dev (~150 МБ
+// размера (как у экспорта), один на кадр. dev (~150 МБ
 // на 24 Мп) - вне сборщика (bigbuf): держатель один - DetailCtl (или
 // воркер, пока результат в пути), отпускает free().
 @[heap]
 struct DetailSrc {
-	path      string
-	highlight int
-	w         int
-	h         int
-	meta      raw.Meta
+	path string
+	w    int
+	h    int
+	meta raw.Meta
 mut:
 	dev []u16 // w x h RGB
 }
@@ -42,12 +41,12 @@ fn (mut s DetailSrc) free() {
 
 // load_detail_src - полный кадр из файла (~0.6 с): свой LibRaw, годится для
 // фонового потока
-fn load_detail_src(path string, highlight int) !&DetailSrc {
+fn load_detail_src(path string) !&DetailSrc {
 	mut d := raw.open(path)!
 	defer {
 		d.close()
 	}
-	mut img := d.develop(highlight: highlight)!
+	mut img := d.develop()!
 	defer {
 		img.free()
 	}
@@ -55,12 +54,11 @@ fn load_detail_src(path string, highlight int) !&DetailSrc {
 	mut dev := bigbuf.new_u16(n)
 	unsafe { vmemcpy(dev.data, img.data_u16(), n * 2) }
 	return &DetailSrc{
-		path:      path
-		highlight: highlight
-		w:         img.width
-		h:         img.height
-		dev:       dev
-		meta:      d.meta()
+		path: path
+		w:    img.width
+		h:    img.height
+		dev:  dev
+		meta: d.meta()
 	}
 }
 

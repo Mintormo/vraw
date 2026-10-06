@@ -266,7 +266,6 @@ fn test_ba_ref_and_prep_key() {
 		state: e2
 	}]
 	st.edit = e2
-	st.hl_developed = e2.highlight
 	st.nr_applied = e2.nr
 	st.dc_applied = dc_key(e2.params.sharp)
 	assert ba_index(st) == 0

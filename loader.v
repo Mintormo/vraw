@@ -34,7 +34,6 @@ struct LoadJob {
 	gen       int
 	dev       &raw.Developer = unsafe { nil }
 	db        &lens.Database = unsafe { nil } // общая база lensfun (nil - без коррекции)
-	highlight int
 	lens_corr bool
 	stop &StopFlag = unsafe { nil }
 }
@@ -49,7 +48,6 @@ mut:
 	dev        &raw.Developer  = unsafe { nil }
 	corr       &lens.Corrector = unsafe { nil }
 	meta       raw.Meta
-	highlight  int
 	lens_corr  bool
 	w          int
 	h          int
@@ -78,7 +76,6 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 		gen:       job.gen
 		dev:       d
 		meta:      meta
-		highlight: job.highlight
 		lens_corr: job.lens_corr
 	}
 	// Профиль объектива, проявка, подготовка, камерная кривая
@@ -86,7 +83,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 		...res
 		corr: job.db.find(meta.cam_make, meta.cam_model, meta.lens) or { unsafe { nil } }
 	}
-	mut img := d.develop(half: true, highlight: job.highlight) or {
+	mut img := d.develop(half: true) or {
 		res = LoadResult{
 			...res
 			err: 'Ошибка проявки: ${err.msg()}'

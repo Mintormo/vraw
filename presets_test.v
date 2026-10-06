@@ -17,7 +17,6 @@ fn sample_edit() EditState {
 	mut e := neutral_edit()
 	e.params.exposure = 1.5
 	e.params.eq[2] = 0.5
-	e.highlight = 2
 	e.use_curve = false
 	e.wb_mode = 'cloudy'
 	e.wb_temp = 6500
@@ -38,10 +37,10 @@ fn sample_edit() EditState {
 fn test_merge_groups() {
 	src := sample_edit()
 	dst := neutral_edit()
-	// Только тон: экспозиция, эквалайзер, пересветы, камерная кривая
+	// Только тон: экспозиция, эквалайзер, камерная кривая
 	t := merge_groups(dst, src, ['tone'])
 	assert t.params.exposure == 1.5 && t.params.eq[2] == 0.5
-	assert t.highlight == 2 && !t.use_curve
+	assert !t.use_curve
 	assert t.wb_mode == '' && t.params.vibrance == 0 && t.curve_pts == dst.curve_pts
 	assert t.nr == dst.nr && t.lens_corr
 	// Цвет, кривые, HSL

@@ -39,7 +39,6 @@ struct SideState {
 	hsl_sat       []f32
 	hsl_lum       []f32
 	curves        [][]vgui.CurvePoint // точки кривых RGB, R, G, B
-	highlight     int
 	lens_corr     bool
 	use_curve     bool
 	nr            []f32 // импульсный, яркостный, цветовой, ореолы
@@ -250,7 +249,6 @@ fn side_state(e EditState) SideState {
 		hsl_sat:       p.hsl_sat[..].clone()
 		hsl_lum:       p.hsl_lum[..].clone()
 		curves:        e.curve_pts.map(it.clone())
-		highlight:     e.highlight
 		lens_corr:     e.lens_corr
 		use_curve:     e.use_curve
 		nr:            e.nr[..].clone()
@@ -314,7 +312,6 @@ fn edit_state(s SideState) !EditState {
 				}
 			}
 		}
-		highlight: s.highlight
 		lens_corr: s.lens_corr
 		use_curve: s.use_curve
 		ai:        s.ai

@@ -37,7 +37,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop' && it != 'masks')
 // пересчитываются: для открытого кадра это делает set_edit (with_derived),
 // в сайдкар они не пишутся.
 //   tone   - экспозиция, тени, контраст, тон-эквалайзер, «Тени/Света»,
-//            пересветы, камерная кривая (вкл/выкл)
+//            камерная кривая (вкл/выкл)
 //   color  - баланс белого, сочность, насыщенность
 //   curves - точки тональных кривых RGB, R, G, B
 //   hsl    - HSL-эквалайзер
@@ -57,7 +57,6 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.params.eq = s.params.eq
 				e.params.sh_shadows = s.params.sh_shadows
 				e.params.sh_highlights = s.params.sh_highlights
-				e.highlight = s.highlight
 				e.use_curve = s.use_curve
 			}
 			'color' {
@@ -198,7 +197,7 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 		if st.history.len > 0 && sidecar_path(p) == st.side_path {
 			// Открытый кадр - как обычная правка: виджеты, пересчёт, история
 			e := merge_groups(st.edit, src, groups)
-			restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
+			restore_edit(mut st, e, mut cv, mut hist, mut app)
 			n := st.history.len
 			pos := st.hist_pos
 			record(mut st, '', name, false)

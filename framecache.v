@@ -6,7 +6,7 @@ module main
 // возврате load_worker не запускается - тот же итог загрузки сразу идёт в
 // on_load_done, кадр на экране через один apply (~45 мс на 24 Мп), и
 // ползунки сразу работают. Правки при этом берутся из сайдкара как
-// обычно: что изменилось с тех пор (пересветы, объектив, шумодав),
+// обычно: что изменилось с тех пор (объектив, шумодав),
 // on_load_done досчитает так же, как после обычной загрузки.
 //
 // Буферы не копируются: кэш - ещё один держатель тех же массивов
@@ -59,7 +59,6 @@ fn frame_trim(mut st State) {
 struct FrameCache {
 mut:
 	path       string
-	highlight  int  // режим пересветов, которым проявлен dev_linear
 	lens_corr  bool // raw_linear - с коррекцией объектива
 	corr       &lens.Corrector = unsafe { nil } // из общей базы lensfun
 	w          int
@@ -90,7 +89,6 @@ fn frame_store(mut st State) {
 	ai_ok := st.ai_linear.len > 0 && st.ai_raw_gen == st.raw_gen
 	mut fc := &FrameCache{
 		path:       st.raw_path
-		highlight:  st.hl_developed
 		lens_corr:  st.edit.lens_corr
 		corr:       st.corr
 		w:          st.pw
@@ -164,7 +162,6 @@ fn frame_take(mut st State, path string, dev &raw.Developer) ?LoadResult {
 			dev:        dev
 			corr:       c.corr
 			meta:       d.meta()
-			highlight:  c.highlight
 			lens_corr:  c.lens_corr
 			w:          c.w
 			h:          c.h

@@ -18,7 +18,7 @@ module main
 //
 // Камерная кривая в сайдкаре не хранится - для неоткрытого кадра она
 // считается как у загрузчика (loader.v): по превью ПОЛОВИННОГО размера
-// с пересветами и коррекцией объектива кадра, без шумодава. По полному
+// с коррекцией объектива кадра, без шумодава. По полному
 // кадру кривая заметно другая (IMG_0817: до 11 из 255 в средних тонах).
 import os
 import time
@@ -181,7 +181,7 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 	cam := cam_color(d.color())
 	mut look := CamLook{}
 	if e.use_curve || e.lens_corr {
-		mut img := d.develop(half: true, highlight: e.highlight)!
+		mut img := d.develop(half: true)!
 		w := img.width
 		h := img.height
 		mut lin := []u16{len: w * h * 3}

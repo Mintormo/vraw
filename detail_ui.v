@@ -14,13 +14,13 @@ module main
 //   недостающего (один за раз; запрос во время работы - ещё проход после).
 // - Фрагментов два (сторона DetailSide): «после» - нынешние настройки,
 //   «до» - запись «до» сравнения (compare.v: удержание «\», шторка, бок о
-//   бок). У «до» своя подготовка сырья (пересветы, объектив, шумодав,
-//   Capture, AI) и свой тон; геометрия - нынешняя. В шторке слой - оба
+//   бок). У «до» своя подготовка сырья (объектив, шумодав, Capture,
+//   AI) и свой тон; геометрия - нынешняя. В шторке слой - оба
 //   фрагмента, сшитые по линии; бок о бок - «до» на своём холсте.
 // - Полный кадр LibRaw (~0.6 с) и объектив кадра грузятся ЛЕНИВО - при
 //   первом увеличении - и живут до смены кадра (~150 МБ вне сборщика:
-//   detail_free отдаёт их системе). Полных кадров - до двух (у «до» другие
-//   пересветы).
+//   detail_free отдаёт их системе). Полный кадр - один, общий у «после»
+//   и «до».
 // - Тональные ползунки (apply_pipeline) перерисовывают готовые фрагменты
 //   сразу (detail_show, ~10-30 мс); шумодав, объектив, резкость, геометрия
 //   меняют ключ подготовки - фрагмент пересчитывается в фоне, до этого виден
@@ -51,9 +51,9 @@ const zoom_one = f32(1.0) / preview_scale
 // Плиток AI в кэше (3 x 256 x 256 f32 = 768 КБ каждая): ~150 МБ, экран
 // 100% с запасом - ~80 плиток
 const detail_tiles_max = 200
-// Полных кадров LibRaw в памяти (по ~150 МБ): «после» и «до» с другими
-// пересветами
-const detail_srcs_max = 2
+// Полных кадров LibRaw в памяти (~150 МБ): один - открытого кадра, общий
+// у «после» и «до»
+const detail_srcs_max = 1
 
 // Стороны фрагмента: 0 - «после», 1 - «до»
 const side_after = 0
@@ -74,7 +74,7 @@ mut:
 @[heap]
 struct DetailCtl {
 mut:
-	srcs     []&DetailSrc // полные кадры (src_key - путь и пересветы)
+	srcs     []&DetailSrc // полные кадры (src_key - путь)
 	lens     &DetailLens = unsafe { nil }
 	lens_key string // кадр, сила виньетки и увеличение lens
 	running  bool
@@ -110,7 +110,6 @@ struct DetailFrac {
 
 // DetailPrep - подготовка сырья фрагмента одной стороны
 struct DetailPrep {
-	highlight int
 	use_lens  bool
 	nr        [4]f32
 	dc        pipeline.Sharpen
@@ -124,7 +123,6 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 	if side == side_before && st.history.len > 0 {
 		b := ba_state(st)
 		return DetailPrep{
-			highlight: b.highlight
 			use_lens:  b.lens_corr && !isnil(st.corr)
 			nr:        b.nr
 			dc:        b.params.sharp
@@ -133,7 +131,6 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 		}
 	}
 	return DetailPrep{
-		highlight: st.edit.highlight
 		use_lens:  st.edit.lens_corr && !isnil(st.corr)
 		nr:        st.edit.nr
 		dc:        st.edit.params.sharp
@@ -209,7 +206,7 @@ mut:
 fn detail_prep_key(st &State, side int) string {
 	g := out_geom(&st.edit)
 	p := detail_prep_of(st, side)
-	return '${st.file_gen}|${p.highlight}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
+	return '${st.file_gen}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
 		p.model
 	} else {
 		''
@@ -219,7 +216,7 @@ fn detail_prep_key(st &State, side int) string {
 // detail_tiles_key - от чего зависят плитки модели: сырьё после объектива
 // и модель
 fn detail_tiles_key(st &State, p DetailPrep) string {
-	return '${st.raw_path}|${p.highlight}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.model}'
+	return '${st.raw_path}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.model}'
 }
 
 // detail_wanted - нужен ли слой детализации сейчас
@@ -380,7 +377,7 @@ fn detail_cancel(mut st State) {
 // find_src - готовый полный кадр по ключу или nil
 fn find_src(dt &DetailCtl, key string) &DetailSrc {
 	for s in dt.srcs {
-		if '${s.path}|${s.highlight}' == key {
+		if s.path == key {
 			return s
 		}
 	}
@@ -404,7 +401,7 @@ fn detail_start(mut st State, side int) {
 		return
 	}
 	p := detail_prep_of(st, side)
-	src_key := '${st.raw_path}|${p.highlight}'
+	src_key := st.raw_path
 	lens_key := '${st.raw_path}|${st.look.vign}|${st.look.zoom}'
 	mut ai_cache := unsafe { &ai.Cache(nil) }
 	if p.ai_s > 0 {
@@ -462,7 +459,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 		lens: req.lens
 	}
 	if isnil(res.src) {
-		res.src = load_detail_src(req.path, req.prep.highlight) or {
+		res.src = load_detail_src(req.path) or {
 			res.err = err.msg()
 			post_result(mut app, on_done, res)
 			return
@@ -559,16 +556,12 @@ fn detail_done(mut st State, res DetailRes) {
 	}
 	if !isnil(res.src) && !has_src(dt, res.src) {
 		dt.srcs << res.src
-		// Не больше двух полных кадров: лишний - тот, что не нужен ни
-		// «после», ни «до»
+		// Лишний полный кадр - прежнего файла: остаётся только новый
 		if dt.srcs.len > detail_srcs_max {
-			keep_a := '${st.raw_path}|${detail_prep_of(st, side_after).highlight}'
-			keep_b := '${st.raw_path}|${detail_prep_of(st, side_before).highlight}'
 			mut kept := []&DetailSrc{}
 			for i in 0 .. dt.srcs.len {
 				mut x := dt.srcs[i]
-				k := '${x.path}|${x.highlight}'
-				if voidptr(x) == voidptr(res.src) || ((k == keep_a || k == keep_b) && kept.len < detail_srcs_max - 1) {
+				if voidptr(x) == voidptr(res.src) {
 					kept << x
 				} else {
 					x.free()
