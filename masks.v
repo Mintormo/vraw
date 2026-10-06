@@ -56,7 +56,13 @@ mut:
 	show_cb  &vgui.CheckBox = unsafe { nil }
 	inv_cb   &vgui.CheckBox = unsafe { nil }
 	sliders  []&vgui.Slider // правки выделенного (без фильтра - выключены)
-	feather  &vgui.Slider   = unsafe { nil } // только у радиального
+	feather  &vgui.Slider = unsafe { nil } // только у радиального
+	// Ограничение диапазоном: режим, ползунки яркости и цвета (включены по
+	// режиму), пипетка цвета
+	range_cb &vgui.ComboBox = unsafe { nil }
+	lum_sl   []&vgui.Slider
+	col_sl   []&vgui.Slider
+	pick_btn &vgui.Button   = unsafe { nil }
 	m_show   &vgui.MenuItem = unsafe { nil }
 }
 
@@ -156,6 +162,9 @@ fn mask_name(m pipeline.Mask, i int) string {
 fn select_mask(mut st State, idx int) {
 	st.mask_sel = if idx >= 0 && idx < st.edit.params.masks.len { idx } else { -1 }
 	st.mask_drag = MaskDrag{}
+	if st.mask_pick {
+		set_mask_pick(mut st, false)
+	}
 	sync_mask_ui(mut st)
 	if st.mask_show && !isnil(st.tone_fx) {
 		st.tone_fx() // заливка - другого фильтра
@@ -241,17 +250,22 @@ fn toggle_mask(mut st State) {
 // set_mask_show - заливка маски выделенного фильтра (вид, не правка)
 fn set_mask_show(mut st State, on bool) {
 	st.mask_show = on
+	sync_mask_show_ui(mut st)
+	if !isnil(st.tone_fx) {
+		st.tone_fx()
+	}
+}
+
+// sync_mask_show_ui - флажок секции и пункт меню по st.mask_show
+fn sync_mask_show_ui(mut st State) {
 	if !isnil(st.mask_ui) {
 		mut u := st.mask_ui
 		if !isnil(u.show_cb) {
-			u.show_cb.set_checked(on)
+			u.show_cb.set_checked(st.mask_show)
 		}
 		if !isnil(u.m_show) {
-			u.m_show.checked = on
+			u.m_show.checked = st.mask_show
 		}
-	}
-	if !isnil(st.tone_fx) {
-		st.tone_fx()
 	}
 }
 
@@ -261,8 +275,17 @@ fn mask_paint(st &State, mut pix []u8) {
 	if !st.mask_show || !mask_active(st) || pix.len != st.gw * st.gh * 4 {
 		return
 	}
-	wt := pipeline.mask_weights(st.edit.params.masks[st.mask_sel], view_map(st), st.gw,
-		st.gh)
+	if st.glin.len != st.gw * st.gh * 3 {
+		return
+	}
+	// Вес с ограничением диапазоном - тем же проходом, что снимок (дымка, ББ)
+	haze := if st.edit.params.haze != 0 && st.haze.d.len == st.gw * st.gh {
+		&st.haze
+	} else {
+		unsafe { &pipeline.HazeMap(nil) }
+	}
+	wt := pipeline.mask_view(unsafe { &u16(st.glin.data) }, haze, st.gw, st.gh, view_params(st,
+		st.edit.params), st.mask_sel)
 	for i, w in wt {
 		if w == 0 {
 			continue
@@ -349,6 +372,9 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 	sx, sy := cv.buf_to_screen(ev.fx, ev.fy)
 	match ev.kind {
 		.hover {
+			if st.mask_pick {
+				return false
+			}
 			h := mask_hit(st, mm, sx, sy)
 			if h.kind != .none {
 				vgui.set_cursor(if h.kind == .move {
@@ -366,6 +392,12 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 		.pointer_down {
 			if ev.button != 1 {
 				return false
+			}
+			if st.mask_pick {
+				if ev.in_image {
+					mask_pick_at(mut st, ev.x, ev.y)
+				}
+				return true
 			}
 			h := mask_hit(st, mm, sx, sy)
 			if h.kind == .none {
@@ -594,6 +626,28 @@ fn sync_mask_ui(mut st State) {
 	for mut sl in u.sliders {
 		sl.enabled = valid
 	}
+	// Ограничение диапазоном: режим и ползунки по нему
+	ri := if valid { range_index(st.edit.params.masks[st.mask_sel]) } else { 0 }
+	if !isnil(u.range_cb) {
+		mut rcb := u.range_cb
+		was2 := st.suppress
+		st.suppress = true
+		rcb.set_selected(ri)
+		st.suppress = was2
+		rcb.enabled = valid
+	}
+	for mut sl in u.lum_sl {
+		sl.enabled = valid && ri & 1 != 0
+	}
+	for mut sl in u.col_sl {
+		sl.enabled = valid && ri & 2 != 0
+	}
+	if !isnil(u.pick_btn) {
+		u.pick_btn.enabled = valid
+	}
+	if !valid && st.mask_pick {
+		set_mask_pick(mut st, false)
+	}
 	radial := valid && st.edit.params.masks[st.mask_sel].kind == .radial
 	if !isnil(u.feather) {
 		u.feather.enabled = radial
@@ -627,6 +681,11 @@ enum MaskField {
 	temp
 	tint
 	feather
+	lum_lo
+	lum_hi
+	lum_soft
+	hue
+	hue_w
 }
 
 fn mask_get(m pipeline.Mask, f MaskField) f32 {
@@ -639,6 +698,11 @@ fn mask_get(m pipeline.Mask, f MaskField) f32 {
 		.temp { m.temp }
 		.tint { m.tint }
 		.feather { m.feather }
+		.lum_lo { m.lum_lo }
+		.lum_hi { m.lum_hi }
+		.lum_soft { m.lum_soft }
+		.hue { m.hue }
+		.hue_w { m.hue_w }
 	}
 }
 
@@ -652,20 +716,28 @@ fn mask_set(mut m pipeline.Mask, f MaskField, v f32) {
 		.temp { m.temp = v }
 		.tint { m.tint = v }
 		.feather { m.feather = v }
+		.lum_lo { m.lum_lo = v }
+		.lum_hi { m.lum_hi = v }
+		.lum_soft { m.lum_soft = v }
+		.hue { m.hue = v }
+		.hue_w { m.hue_w = v }
 	}
 }
 
 // mask_slider - ползунок правки выделенного фильтра (edit_slider: история,
 // откат); без выделения - выключен
-fn mask_slider(mut st State, label string, f MaskField, min f32, max f32, def f32, digits int) EditSlider {
+fn mask_slider(mut st State, spec MaskSliderSpec) EditSlider {
+	f := spec.f
+	def := spec.def
 	s := edit_slider(mut st, SliderCfg{
-		label:  label
-		hname:  'Фильтр: ${label.to_lower()}'
-		min:    min
-		max:    max
+		label:  spec.label
+		hname:  'Фильтр: ${spec.label.to_lower()}'
+		min:    spec.min
+		max:    spec.max
 		def:    def
-		digits: digits
-		signed: f != .feather
+		digits: spec.digits
+		signed: spec.signed
+		show:   spec.show
 		get:    fn [mut st, f, def] (e &EditState) f32 {
 			i := st.mask_sel
 			return if i >= 0 && i < e.params.masks.len {
@@ -687,8 +759,11 @@ fn mask_slider(mut st State, label string, f MaskField, min f32, max f32, def f3
 	if !isnil(st.mask_ui) {
 		mut u := st.mask_ui
 		u.sliders << s.sl
-		if f == .feather {
-			u.feather = s.sl
+		match f {
+			.feather { u.feather = s.sl }
+			.lum_lo, .lum_hi, .lum_soft { u.lum_sl << s.sl }
+			.hue, .hue_w { u.col_sl << s.sl }
+			else {}
 		}
 	}
 	return s
@@ -760,19 +835,49 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 
 	mut rows := [SectionRow{add_row}, SectionRow{sel_row}, SectionRow{tools}]
 	for spec in [
-		MaskSliderSpec{'Экспозиция', .exposure, -4, 4, 2},
-		MaskSliderSpec{'Контраст', .contrast, -100, 100, 0},
-		MaskSliderSpec{'Света', .highlights, -100, 100, 0},
-		MaskSliderSpec{'Тени', .shadows, -100, 100, 0},
-		MaskSliderSpec{'Насыщенность', .saturation, -100, 100, 0},
-		MaskSliderSpec{'Температура', .temp, -100, 100, 0},
-		MaskSliderSpec{'Оттенок', .tint, -100, 100, 0},
+		MaskSliderSpec{
+			label:  'Экспозиция'
+			f:      .exposure
+			min:    -4
+			max:    4
+			digits: 2
+		},
+		MaskSliderSpec{
+			label: 'Контраст'
+			f:     .contrast
+		},
+		MaskSliderSpec{
+			label: 'Света'
+			f:     .highlights
+		},
+		MaskSliderSpec{
+			label: 'Тени'
+			f:     .shadows
+		},
+		MaskSliderSpec{
+			label: 'Насыщенность'
+			f:     .saturation
+		},
+		MaskSliderSpec{
+			label: 'Температура'
+			f:     .temp
+		},
+		MaskSliderSpec{
+			label: 'Оттенок'
+			f:     .tint
+		},
 	] {
-		mut s := mask_slider(mut st, spec.label, spec.f, spec.min, spec.max, 0, spec.digits)
+		mut s := mask_slider(mut st, spec)
 		rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w)}
 	}
 	rows << SectionRow{vgui.separator()}
-	mut fe := mask_slider(mut st, 'Растушёвка', .feather, 0, 100, 50, 0)
+	mut fe := mask_slider(mut st, MaskSliderSpec{
+		label:  'Растушёвка'
+		f:      .feather
+		min:    0
+		def:    50
+		signed: false
+	})
 	rows << SectionRow{edit_row(mut st, mut fe, lbl_w, val_w)}
 	mut inv_cb := vgui.checkbox('Действие снаружи эллипса')
 	inv_cb.on_change = fn [mut st] (v bool) {
@@ -784,6 +889,8 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	u.inv_cb = inv_cb
 	rows << SectionRow{inv_cb}
+	rows << SectionRow{vgui.separator()}
+	rows << build_range_rows(mut st, lbl_w, val_w)
 	mut hint := vgui.label('Точки на снимке: перенос, переход, размер и поворот')
 	hint.font_size = 12
 	st.hint_labels << hint
@@ -795,7 +902,183 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 struct MaskSliderSpec {
 	label  string
 	f      MaskField
-	min    f32
-	max    f32
+	min    f32 = -100
+	max    f32 = 100
+	def    f32
 	digits int
+	signed bool            = true
+	show   fn (f32) string = unsafe { nil }
+}
+
+// ── Ограничение диапазоном ──
+
+// Режимы ограничения: индекс = яркость + 2·цвет
+const range_modes = ['Нет', 'Яркость', 'Цвет', 'Яркость и цвет']
+
+fn range_index(m pipeline.Mask) int {
+	return (if m.lum_on { 1 } else { 0 }) + (if m.col_on { 2 } else { 0 })
+}
+
+// hue_name - оттенок (градусы) с названием - для истории («цвет 233° синий»)
+fn hue_name(deg f32) string {
+	h := int(math.round(deg)) % 360
+	name := match true {
+		h < 15 || h >= 345 { 'красный' }
+		h < 45 { 'оранжевый' }
+		h < 70 { 'жёлтый' }
+		h < 160 { 'зелёный' }
+		h < 200 { 'голубой' }
+		h < 255 { 'синий' }
+		h < 290 { 'фиолетовый' }
+		else { 'пурпурный' }
+	}
+	return '${h}° ${name}'
+}
+
+fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
+	mut u := st.mask_ui
+	mut rcb := vgui.combo_box()
+	rcb.set_items(range_modes)
+	rcb.set_selected(0)
+	rcb.on_change = fn [mut st] (idx int, text string) {
+		if st.suppress || !mask_valid(st) || idx < 0 || idx >= range_modes.len {
+			return
+		}
+		i := st.mask_sel
+		m := st.edit.params.masks[i]
+		if range_index(m) == idx {
+			return
+		}
+		st.edit.params.masks[i].lum_on = idx & 1 != 0
+		st.edit.params.masks[i].col_on = idx & 2 != 0
+		// Диапазон подбирают по заливке - показать её
+		if idx != 0 && !st.mask_show {
+			st.mask_show = true
+			sync_mask_show_ui(mut st)
+		}
+		mask_changed(mut st, 'mask_range', 'Фильтр ${i + 1}: ограничение - ${range_modes[idx].to_lower()}')
+	}
+	u.range_cb = rcb
+	mut pick := icon_button(mut st, 'pipette', 'Пипетка цвета: щёлкните по цвету на снимке')
+	pick.on_click = fn [mut st] () {
+		set_mask_pick(mut st, !st.mask_pick && mask_active(st))
+	}
+	u.pick_btn = pick
+	mut r_row := vgui.create_hbox_fill()
+	r_row.set_spacing(6)
+	r_row.add(vgui.label('Диапазон'), min: lbl_w)
+	r_row.add(rcb, flex: 1)
+	r_row.add(pick)
+	mut rows := [SectionRow{r_row}]
+	for spec in [
+		MaskSliderSpec{
+			label:  'Яркость от'
+			f:      .lum_lo
+			min:    0
+			signed: false
+		},
+		MaskSliderSpec{
+			label:  'Яркость до'
+			f:      .lum_hi
+			min:    0
+			def:    100
+			signed: false
+		},
+		MaskSliderSpec{
+			label:  'Мягкость'
+			f:      .lum_soft
+			min:    0
+			max:    50
+			def:    10
+			signed: false
+		},
+	] {
+		mut s := mask_slider(mut st, spec)
+		rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w)}
+	}
+	// Цвет - оттенок в градусах (в истории - с названием)
+	mut hue := mask_slider(mut st, MaskSliderSpec{
+		label:  'Цвет'
+		f:      .hue
+		min:    0
+		max:    359
+		signed: false
+		show:   fn (v f32) string {
+			return '${int(math.round(v))}°'
+		}
+	})
+	rows << SectionRow{edit_row(mut st, mut hue, lbl_w, val_w)}
+	mut hw := mask_slider(mut st, MaskSliderSpec{
+		label:  'Ширина'
+		f:      .hue_w
+		min:    5
+		max:    90
+		def:    30
+		signed: false
+		show:   fn (v f32) string {
+			return '±${int(math.round(v))}°'
+		}
+	})
+	rows << SectionRow{edit_row(mut st, mut hw, lbl_w, val_w)}
+	return rows
+}
+
+// set_mask_pick - режим пипетки цвета фильтра (кнопка подсвечена, на
+// снимке - кружок)
+fn set_mask_pick(mut st State, on bool) {
+	st.mask_pick = on
+	if !isnil(st.mask_ui) && !isnil(st.mask_ui.pick_btn) {
+		mut b := st.mask_ui.pick_btn
+		b.style = if on { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.flat }
+	}
+	if !isnil(st.cv) {
+		mut cv := st.cv
+		cv.brush_radius = if on { mask_pick_r } else { 0 }
+	}
+}
+
+const mask_pick_r = 4
+
+// mask_pick_at - пипетка: оттенок пятна превью (как его видит фильтр) -
+// в «Цвет», ограничение по цвету включается
+fn mask_pick_at(mut st State, x int, y int) {
+	set_mask_pick(mut st, false)
+	if !mask_valid(st) || st.glin.len != st.gw * st.gh * 3 {
+		return
+	}
+	mut sr := 0.0
+	mut sg := 0.0
+	mut sb := 0.0
+	mut n := 0
+	for yy in y - mask_pick_r .. y + mask_pick_r + 1 {
+		for xx in x - mask_pick_r .. x + mask_pick_r + 1 {
+			if xx < 0 || yy < 0 || xx >= st.gw || yy >= st.gh {
+				continue
+			}
+			i := (yy * st.gw + xx) * 3
+			sr += f64(st.glin[i])
+			sg += f64(st.glin[i + 1])
+			sb += f64(st.glin[i + 2])
+			n++
+		}
+	}
+	if n == 0 {
+		return
+	}
+	pr := pipeline.probe(f32(sr / n), f32(sg / n), f32(sb / n), &st.edit.params)
+	if pr.sat < 0.05 {
+		if !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_warning('Пипетка: место почти серое - у него нет цвета')
+		}
+		return
+	}
+	i := st.mask_sel
+	st.edit.params.masks[i].hue = f32(int(math.round(pr.hue)) % 360)
+	st.edit.params.masks[i].col_on = true
+	if !st.mask_show {
+		st.mask_show = true
+		sync_mask_show_ui(mut st)
+	}
+	mask_changed(mut st, 'mask_hue', 'Фильтр ${i + 1}: цвет ${hue_name(st.edit.params.masks[i].hue)}')
 }

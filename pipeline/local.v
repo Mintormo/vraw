@@ -48,6 +48,19 @@ pub mut:
 	angle   f32
 	feather f32 = 50
 	invert  bool
+	// Ограничение диапазоном (умножает вес формы). По яркости - тоновая
+	// позиция пикселя (0..100: гамма-шкала люмы после экспозиции, как у
+	// теней/светов) от lum_lo до lum_hi, края спадают на lum_soft. По
+	// цвету - оттенок hue (градусы, HSV линейного RGB после ББ): полное
+	// действие до hue_w/2 от него, спад до нуля к hue_w; серое (почти без
+	// насыщенности) не входит
+	lum_on   bool
+	lum_lo   f32
+	lum_hi   f32 = 100
+	lum_soft f32 = 10
+	col_on   bool
+	hue      f32
+	hue_w    f32 = 30
 	// Правки: экспозиция EV (-4..4), остальное -100..100
 	exposure   f32
 	contrast   f32
@@ -133,6 +146,15 @@ struct LocalMask {
 	sat    f32
 	temp   f32
 	tint   f32
+	// Ограничение диапазоном: яркость - тоновая позиция 0..1, цвет -
+	// оттенок и ширина в секстантах (0..6)
+	lum bool
+	llo f32
+	lhi f32
+	lsf f32
+	col bool
+	hue f32
+	hw  f32
 }
 
 // LocalCtx - фильтры кадра для render_rows (только чтение, общий для
@@ -142,7 +164,8 @@ struct LocalCtx {
 	w      int
 	ms     []LocalMask
 	use_wb bool  // есть температура/оттенок
-	use_tn bool  // есть тени/света - нужна таблица тоновой позиции tl
+	use_tn bool  // есть тени/света
+	use_tl bool  // нужна таблица тоновой позиции tl (тени/света, яркость)
 	use_ev bool  // есть экспозиция или тени/света
 	use_cn bool  // есть контраст
 	use_st bool  // есть насыщенность
@@ -159,6 +182,80 @@ const local_temp_ev = f32(0.3)
 const local_tint_ev = f32(0.25)
 const local_feather_min = f32(0.01)
 
+// compile_mask - фильтр к рендеру под отображение mm; none - форма
+// вырождена (точки линейного совпали, нулевой радиус)
+fn compile_mask(m Mask, mm MaskMap) ?LocalMask {
+	mut lm := LocalMask{
+		radial: m.kind == .radial
+		invert: m.invert
+		ev:     m.exposure
+		sh:     m.shadows / 100
+		hi:     m.highlights / 100
+		con:    m.contrast / 100
+		sat:    m.saturation / 100
+		temp:   m.temp / 100
+		tint:   m.tint / 100
+		lum:    m.lum_on
+		llo:    m.lum_lo / 100
+		lhi:    m.lum_hi / 100
+		lsf:    if m.lum_soft > 0.5 { m.lum_soft / 100 } else { f32(0.005) }
+		col:    m.col_on
+		hue:    hue_sextant(m.hue)
+		hw:     if m.hue_w > 1 { m.hue_w / 60 } else { f32(1.0 / 60) }
+	}
+	ax := f64(m.ax) * mm.ar
+	ay := f64(m.ay)
+	if m.kind == .linear {
+		dx := f64(m.bx) * mm.ar - ax
+		dy := f64(m.by) - ay
+		l2 := dx * dx + dy * dy
+		if l2 <= 1e-12 {
+			return none
+		}
+		return LocalMask{
+			...lm
+			ua: f32((mm.a * dx + mm.d * dy) / l2)
+			ub: f32((mm.b * dx + mm.e * dy) / l2)
+			uc: f32(((mm.c - ax) * dx + (mm.f - ay) * dy) / l2)
+		}
+	}
+	if m.rx <= 1e-6 || m.ry <= 1e-6 {
+		return none
+	}
+	a := f64(m.angle) * math.pi / 180
+	cs := math.cos(a)
+	sn := math.sin(a)
+	rx := f64(m.rx)
+	ry := f64(m.ry)
+	mut fe := m.feather / 100
+	if fe < local_feather_min {
+		fe = local_feather_min
+	} else if fe > 1 {
+		fe = 1
+	}
+	// u = ((X - ax)·cos + (Y - ay)·sin) / rx,
+	// v = (-(X - ax)·sin + (Y - ay)·cos) / ry
+	return LocalMask{
+		...lm
+		inner: 1 - fe
+		ua:    f32((mm.a * cs + mm.d * sn) / rx)
+		ub:    f32((mm.b * cs + mm.e * sn) / rx)
+		uc:    f32(((mm.c - ax) * cs + (mm.f - ay) * sn) / rx)
+		va:    f32((-mm.a * sn + mm.d * cs) / ry)
+		vb:    f32((-mm.b * sn + mm.e * cs) / ry)
+		vc:    f32((-(mm.c - ax) * sn + (mm.f - ay) * cs) / ry)
+	}
+}
+
+// hue_sextant - градусы -> секстанты 0..6
+fn hue_sextant(deg f32) f32 {
+	mut h := f32(math.fmod(f64(deg), 360))
+	if h < 0 {
+		h += 360
+	}
+	return h / 60
+}
+
 // local_ctx - фильтры к рендеру: только включённые и с правками
 fn local_ctx(p &Params) LocalCtx {
 	mm := p.lmap
@@ -166,89 +263,47 @@ fn local_ctx(p &Params) LocalCtx {
 		return LocalCtx{}
 	}
 	mut ms := []LocalMask{}
+	for m in p.masks {
+		if !m.on || !m.has_edits() {
+			continue
+		}
+		ms << compile_mask(m, mm) or { continue }
+	}
+	return ctx_of(p, ms, mm.w)
+}
+
+// ctx_of - контекст рендера по готовым фильтрам (флаги и таблицы - по
+// тому, что в них есть)
+fn ctx_of(p &Params, ms []LocalMask, w int) LocalCtx {
+	if ms.len == 0 {
+		return LocalCtx{}
+	}
 	mut use_wb := false
 	mut use_tn := false
 	mut use_ev := false
 	mut use_cn := false
 	mut use_st := false
-	for m in p.masks {
-		if !m.on || !m.has_edits() {
-			continue
-		}
-		mut lm := LocalMask{
-			radial: m.kind == .radial
-			invert: m.invert
-			ev:     m.exposure
-			sh:     m.shadows / 100
-			hi:     m.highlights / 100
-			con:    m.contrast / 100
-			sat:    m.saturation / 100
-			temp:   m.temp / 100
-			tint:   m.tint / 100
-		}
-		ax := f64(m.ax) * mm.ar
-		ay := f64(m.ay)
-		if m.kind == .linear {
-			dx := f64(m.bx) * mm.ar - ax
-			dy := f64(m.by) - ay
-			l2 := dx * dx + dy * dy
-			if l2 <= 1e-12 {
-				continue
-			}
-			lm = LocalMask{
-				...lm
-				ua: f32((mm.a * dx + mm.d * dy) / l2)
-				ub: f32((mm.b * dx + mm.e * dy) / l2)
-				uc: f32(((mm.c - ax) * dx + (mm.f - ay) * dy) / l2)
-			}
-		} else {
-			if m.rx <= 1e-6 || m.ry <= 1e-6 {
-				continue
-			}
-			a := f64(m.angle) * math.pi / 180
-			cs := math.cos(a)
-			sn := math.sin(a)
-			rx := f64(m.rx)
-			ry := f64(m.ry)
-			mut fe := m.feather / 100
-			if fe < local_feather_min {
-				fe = local_feather_min
-			} else if fe > 1 {
-				fe = 1
-			}
-			// u = ((X - ax)·cos + (Y - ay)·sin) / rx,
-			// v = (-(X - ax)·sin + (Y - ay)·cos) / ry
-			lm = LocalMask{
-				...lm
-				inner: 1 - fe
-				ua:    f32((mm.a * cs + mm.d * sn) / rx)
-				ub:    f32((mm.b * cs + mm.e * sn) / rx)
-				uc:    f32(((mm.c - ax) * cs + (mm.f - ay) * sn) / rx)
-				va:    f32((-mm.a * sn + mm.d * cs) / ry)
-				vb:    f32((-mm.b * sn + mm.e * cs) / ry)
-				vc:    f32((-(mm.c - ax) * sn + (mm.f - ay) * cs) / ry)
-			}
-		}
+	mut use_lum := false
+	for lm in ms {
 		use_wb = use_wb || lm.temp != 0 || lm.tint != 0
 		use_tn = use_tn || lm.sh != 0 || lm.hi != 0
 		use_ev = use_ev || lm.ev != 0 || lm.sh != 0 || lm.hi != 0
 		use_cn = use_cn || lm.con != 0
 		use_st = use_st || lm.sat != 0
-		ms << lm
+		use_lum = use_lum || lm.lum
 	}
-	if ms.len == 0 {
-		return LocalCtx{}
-	}
+	use_tl := use_tn || use_lum
 	return LocalCtx{
 		n:      ms.len
-		w:      mm.w
+		w:      w
 		ms:     ms
 		use_wb: use_wb
 		use_tn: use_tn
+		use_tl: use_tl
 		use_ev: use_ev
 		use_cn: use_cn
 		use_st: use_st
-		tl:     if use_tn { build_tlut(p) } else { []f32{} }
+		tl:     if use_tl { build_tlut(p) } else { []f32{} }
 		cp:     if use_cn { contrast_curve(2) } else { []f32{} }
 		cn:     if use_cn { contrast_curve(0.5) } else { []f32{} }
 	}
@@ -314,6 +369,125 @@ fn mask_weight(m &LocalMask, x f32, y f32) f32 {
 	return if m.invert { 1 - w } else { w }
 }
 
+// Цвет: насыщенность HSV, ниже которой пиксель в диапазон не входит
+// совсем, и выше которой - целиком (между - гладко): серое и почти серое
+// по оттенку не выбирается (шум даёт ему случайный оттенок)
+const range_sat_lo = f32(0.03)
+const range_sat_hi = f32(0.12)
+
+@[inline]
+fn smooth01(v f32) f32 {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 1 {
+		return 1
+	}
+	return v * v * (3 - 2 * v)
+}
+
+// range_weight - ограничение фильтра диапазоном в пикселе: tp - тоновая
+// позиция, cr, cg, cb - линейный RGB после ББ
+@[inline]
+fn range_weight(m &LocalMask, tp f32, cr f32, cg f32, cb f32) f32 {
+	mut w := f32(1)
+	if m.lum {
+		if tp < m.llo {
+			w = smooth01((tp - m.llo + m.lsf) / m.lsf)
+		} else if tp > m.lhi {
+			w = smooth01((m.lhi + m.lsf - tp) / m.lsf)
+		}
+		if w <= 0 {
+			return 0
+		}
+	}
+	if m.col {
+		h, sv := hue_sat(cr, cg, cb)
+		ws := smooth01((sv - range_sat_lo) / (range_sat_hi - range_sat_lo))
+		if ws <= 0 {
+			return 0
+		}
+		mut dh := h - m.hue
+		if dh < 0 {
+			dh = -dh
+		}
+		if dh > 3 {
+			dh = 6 - dh
+		}
+		// Полное действие до половины ширины, спад до нуля к ширине
+		w *= ws * smooth01((m.hw - dh) / (0.5 * m.hw))
+	}
+	return w
+}
+
+// hue_sat - оттенок (секстанты 0..6) и насыщенность HSV
+@[inline]
+fn hue_sat(r f32, g f32, b f32) (f32, f32) {
+	mx := if r > g {
+		if r > b { r } else { b }
+	} else {
+		if g > b { g } else { b }
+	}
+	mn := if r < g {
+		if r < b { r } else { b }
+	} else {
+		if g < b { g } else { b }
+	}
+	c := mx - mn
+	if c <= 0 || mx <= 0 {
+		return 0, 0
+	}
+	mut h := f32(0)
+	if mx == r {
+		h = (g - b) / c
+		if h < 0 {
+			h += 6
+		}
+	} else if mx == g {
+		h = (b - r) / c + 2
+	} else {
+		h = (r - g) / c + 4
+	}
+	return h, c / mx
+}
+
+// Probe - пипетка ограничения: оттенок (градусы), насыщенность HSV и
+// тоновая позиция (0..100) - как их видит фильтр
+pub struct Probe {
+pub:
+	hue  f32
+	sat  f32
+	tone f32
+}
+
+// probe - что фильтр «видит» в линейном цвете превью r, g, b (среднее
+// пятна, до ББ): ББ матрицей (как быстрый путь рендера, без дымки)
+pub fn probe(r f32, g f32, b f32, p &Params) Probe {
+	mut cr := r
+	mut cg := g
+	mut cb := b
+	if p.wb_on {
+		m := p.wb.m
+		cr = m[0] * r + m[1] * g + m[2] * b
+		cg = m[3] * r + m[4] * g + m[5] * b
+		cb = m[6] * r + m[7] * g + m[8] * b
+	}
+	h, sv := hue_sat(cr, cg, cb)
+	mut yl := (0.2126 * cr + 0.7152 * cg + 0.0722 * cb) / 65535 * math.powf(2, p.exposure)
+	yl = if yl < 0 {
+		0
+	} else if yl > 1 {
+		1
+	} else {
+		yl
+	}
+	return Probe{
+		hue:  h * 60
+		sat:  sv
+		tone: math.powf(yl, inv_gamma) * 100
+	}
+}
+
 // exp2f - 2^x без powf (локальные правки на пиксель): целая часть - в
 // показатель f32, дробная - ряд Тейлора 5-й степени (ошибка < 2e-4
 // относительной, ~3e-4 EV)
@@ -339,6 +513,7 @@ fn exp2f(x f32) f32 {
 struct LocalSum {
 mut:
 	any  bool
+	w    f32 // сумма весов (показ маски одного фильтра - его вес)
 	ev   f32
 	sh   f32
 	hi   f32
@@ -348,17 +523,27 @@ mut:
 	tint f32
 }
 
-// local_sum - правки всех фильтров в пикселе (x, y)
+// local_sum - правки всех фильтров в пикселе (x, y) буфера; yl - люма
+// u16 (для яркости - через таблицу tl), cr, cg, cb - линейный RGB после
+// ББ и дымки (для цвета)
 @[inline]
-fn local_sum(lc &LocalCtx, x f32, y f32) LocalSum {
+fn local_sum(lc &LocalCtx, x f32, y f32, yl int, cr f32, cg f32, cb f32) LocalSum {
 	mut s := LocalSum{}
 	for k in 0 .. lc.n {
 		m := unsafe { &lc.ms[k] }
-		w := mask_weight(m, x, y)
+		mut w := mask_weight(m, x, y)
 		if w <= 0 {
 			continue
 		}
+		if m.lum || m.col {
+			tp := if m.lum { unsafe { lc.tl[yl] } } else { f32(0) }
+			w *= range_weight(m, tp, cr, cg, cb)
+			if w <= 0 {
+				continue
+			}
+		}
 		s.any = true
+		s.w += w
 		s.ev += w * m.ev
 		s.sh += w * m.sh
 		s.hi += w * m.hi
@@ -410,25 +595,30 @@ fn local_contrast(lc &LocalCtx, con f32, v f32) f32 {
 // отображение mm (показ маски заливкой поверх снимка). Правки не нужны:
 // форма считается и у пустого фильтра.
 pub fn mask_weights(m Mask, mm MaskMap, w int, h int) []u8 {
-	mut tmp := m
-	tmp.on = true
-	tmp.exposure = 1 // любая правка: local_ctx пустые пропускает
-	lc := local_ctx(&Params{
-		masks: [tmp]
-		lmap:  MaskMap{
-			...mm
-			w: w
-		}
-	})
 	mut out := []u8{len: w * h}
-	if lc.n == 0 {
-		return out
-	}
-	lm := &lc.ms[0]
+	lm := compile_mask(m, mm) or { return out }
 	for j in 0 .. h {
 		for i in 0 .. w {
-			out[j * w + i] = u8(int(mask_weight(lm, f32(i), f32(j)) * 255 + 0.5))
+			out[j * w + i] = u8(int(mask_weight(&lm, f32(i), f32(j)) * 255 + 0.5))
 		}
 	}
+	return out
+}
+
+// mask_view - вес фильтра p.masks[idx] (0..255) на каждом пикселе кадра w
+// x h с ограничением диапазоном (показ маски): тот же проход, что рендер
+// (дымка, ББ, люма), но вместо снимка - вес. Форма считается и у
+// выключенного и пустого фильтра. haze - как в apply_image (nil - без
+// дымки).
+pub fn mask_view(src &u16, haze &HazeMap, w int, h int, p Params, idx int) []u8 {
+	mut out := []u8{len: w * h}
+	if idx < 0 || idx >= p.masks.len || p.lmap.w != w {
+		return out
+	}
+	lm := compile_mask(p.masks[idx], p.lmap) or { return out }
+	lc := ctx_of(&p, [lm], w)
+	mut none_ := []u8{}
+	render_ex(src, unsafe { nil }, haze, w * h, p, mut none_, 4, unsafe { nil }, &lc,
+		unsafe { &u8(out.data) })
 	return out
 }

@@ -906,6 +906,13 @@ const wb_sat_k = f32(1.0 / (0.018 * 65535.0))
 // иначе тоновые значения (0..255, ×256 в u16, без квантования и дизера)
 // в tone - для резкости, которая досчитает и запишет dst сама.
 fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16) {
+	lc := local_ctx(&p)
+	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, tone, &lc, unsafe { nil })
+}
+
+// render_ex - render с готовыми фильтрами lc; wout != nil - показ маски:
+// вместо снимка в wout (npix байт) сумма весов фильтров lc (mask_view)
+fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16, lc &LocalCtx, wout &u8) {
 	mlut := build_mlut(&p)
 	haze_on := p.haze != 0 && !isnil(haze) && haze.d.len == npix
 	hlut := if haze_on { build_hlut(&p) } else { []f32{} }
@@ -940,9 +947,9 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	wm := wx.m
 	wl := wx.lim
 	to_tone := !isnil(tone)
-	lc := local_ctx(&p)
 	ctx := RenderCtx{
-		lc:         &lc
+		lc:         unsafe { lc } // живёт до конца render_ex (потоки ждём здесь)
+		wout:       wout
 		src:        src
 		mask:       mask
 		dst:        unsafe { &u8(dst.data) }
@@ -1003,6 +1010,7 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 // выходы и готовые таблицы (общие для потоков, только чтение)
 struct RenderCtx {
 	lc         &LocalCtx = unsafe { nil } // градиентные фильтры (n == 0 - нет)
+	wout       &u8       = unsafe { nil } // показ маски: вес вместо снимка
 	src        &u16 = unsafe { nil }
 	mask       &u16 = unsafe { nil }
 	dst        &u8  = unsafe { nil }
@@ -1068,6 +1076,8 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	dither := rc.dither
 	lc := rc.lc
 	local := lc.n > 0
+	view := !isnil(rc.wout)
+	wo := rc.wout
 	// Пиксель (x, y) буфера - для веса фильтров
 	mut px := if local { i0 % lc.w } else { 0 }
 	mut py := if local { i0 / lc.w } else { 0 }
@@ -1170,29 +1180,36 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 					cb = 0
 				}
 			}
-			mut ls := LocalSum{}
-			if local {
-				ls = local_sum(lc, f32(px), f32(py))
-				px++
-				if px == lc.w {
-					px = 0
-					py++
-				}
-			}
-			loc_wb := ls.any && lc.use_wb && (ls.temp != 0 || ls.tint != 0)
-			if loc_wb {
-				// Температура и оттенок фильтров - множители каналов (люма та же)
-				gr, gg, gb := local_wb(&ls)
-				cr *= gr
-				cg *= gg
-				cb *= gb
-			}
-			if wb_on || haze_on || loc_wb {
+			if wb_on || haze_on {
 				yf := 0.2126 * cr + 0.7152 * cg + 0.0722 * cb
 				y = if yf >= 65535.0 { 65535 } else { int(yf) }
 			} else {
 				// Целочисленная люма BT.709: 54+183+19 = 256
 				y = (54 * int(s[0]) + 183 * int(s[1]) + 19 * int(s[2])) >> 8
+			}
+			mut ls := LocalSum{}
+			if local {
+				ls = local_sum(lc, f32(px), f32(py), y, cr, cg, cb)
+				px++
+				if px == lc.w {
+					px = 0
+					py++
+				}
+				if view {
+					// Показ маски: вес вместо снимка
+					wv := if ls.w > 1 { f32(1) } else { ls.w }
+					wo[i] = u8(int(wv * 255 + 0.5))
+					s += 3
+					continue
+				}
+				if ls.any && lc.use_wb && (ls.temp != 0 || ls.tint != 0) {
+					// Температура и оттенок фильтров - множители каналов (люма та
+					// же - y не меняется)
+					gr, gg, gb := local_wb(&ls)
+					cr *= gr
+					cg *= gg
+					cb *= gb
+				}
 			}
 			mut k := ml[y]
 			if use_sh {

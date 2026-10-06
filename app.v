@@ -241,6 +241,7 @@ mut:
 	mask_sel   int = -1
 	mask_show  bool
 	mask_drag  MaskDrag
+	mask_pick  bool // пипетка цвета фильтра (ограничение диапазоном)
 	mask_ui    &MaskUi = unsafe { nil }
 	// Копирование настроек и пресеты (presets.v): буфер настроек и его
 	// группы (пусто - ничего не скопировано), пункт «Вставить настройки»,
@@ -2450,6 +2451,8 @@ fn main() {
 			sync_crop_ui(mut st)
 		} else if st.crop_mode {
 			crop_cancel(mut st)
+		} else if st.mask_pick {
+			set_mask_pick(mut st, false) // пипетка цвета фильтра - отмена
 		} else if st.mask_sel >= 0 {
 			select_mask(mut st, -1) // градиентный фильтр: снять выделение
 		}

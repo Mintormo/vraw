@@ -99,6 +99,15 @@ struct SideMask {
 	angle      f32
 	feather    f32
 	invert     bool
+	// Ограничение диапазоном (в старых файлах нет: выключено, нули
+	// диапазона читаются как значения по умолчанию)
+	lum_on     bool
+	lum_lo     f32
+	lum_hi     f32
+	lum_soft   f32
+	col_on     bool
+	hue        f32
+	hue_w      f32
 	exposure   f32
 	contrast   f32
 	highlights f32
@@ -121,6 +130,13 @@ fn side_mask(m pipeline.Mask) SideMask {
 		angle:      m.angle
 		feather:    m.feather
 		invert:     m.invert
+		lum_on:     m.lum_on
+		lum_lo:     m.lum_lo
+		lum_hi:     m.lum_hi
+		lum_soft:   m.lum_soft
+		col_on:     m.col_on
+		hue:        m.hue
+		hue_w:      m.hue_w
 		exposure:   m.exposure
 		contrast:   m.contrast
 		highlights: m.highlights
@@ -129,6 +145,10 @@ fn side_mask(m pipeline.Mask) SideMask {
 		temp:       m.temp
 		tint:       m.tint
 	}
+}
+
+fn clamp_pct(v f32) f32 {
+	return if v < 0 { 0 } else if v > 100 { 100 } else { v }
 }
 
 // mask_of - фильтр из файла; значения правок - в пределах ползунков
@@ -148,6 +168,13 @@ fn mask_of(s SideMask) pipeline.Mask {
 		angle:      s.angle
 		feather:    c(s.feather, 100)
 		invert:     s.invert
+		lum_on:     s.lum_on
+		lum_lo:     if s.lum_on || s.lum_hi > 0 { clamp_pct(s.lum_lo) } else { f32(0) }
+		lum_hi:     if s.lum_on || s.lum_hi > 0 { clamp_pct(s.lum_hi) } else { f32(100) }
+		lum_soft:   if s.lum_on || s.lum_soft > 0 { c(s.lum_soft, 50) } else { f32(10) }
+		col_on:     s.col_on
+		hue:        if s.hue >= 0 && s.hue < 360 { s.hue } else { f32(0) }
+		hue_w:      if s.hue_w >= 5 { c(s.hue_w, 90) } else { f32(30) }
 		exposure:   c(s.exposure, 4)
 		contrast:   c(s.contrast, 100)
 		highlights: c(s.highlights, 100)

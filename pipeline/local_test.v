@@ -328,3 +328,81 @@ fn test_exp2f() {
 		assert math.abs(f64(exp2f(x)) / want - 1) < 3e-4
 	}
 }
+
+// Ограничение по яркости: фильтр на весь кадр действует только на
+// светлом; по цвету - только на синем, красное и серое не трогает
+fn test_local_range() {
+	// Строка: 0..63 - тёмно-серое, 64..127 - светло-серое, 128..191 -
+	// синее, 192..255 - красное (одинаковой яркости)
+	w, h := 256, 2
+	mut src := []u16{len: w * h * 3}
+	for j in 0 .. h {
+		for i in 0 .. w {
+			k := (j * w + i) * 3
+			c := if i < 64 {
+				[u16(2000), 2000, 2000]
+			} else if i < 128 {
+				[u16(30000), 30000, 30000]
+			} else if i < 192 {
+				[u16(3000), 6000, 30000]
+			} else {
+				[u16(30000), 6000, 3000]
+			}
+			src[k] = c[0]
+			src[k + 1] = c[1]
+			src[k + 2] = c[2]
+		}
+	}
+	mm := lt_map(w, h)
+	all := Mask{
+		kind:     .linear
+		ax:       0
+		ay:       2
+		bx:       0
+		by:       3
+		exposure: 1
+	}
+	base := lt_render(src, w, h, Params{ dither: false })
+	at := fn [w] (o []u8, x int) int {
+		return int(o[x * 3 + 1])
+	}
+	mut lm := all
+	lm.lum_on = true
+	lm.lum_lo = 50
+	lm.lum_hi = 100
+	lm.lum_soft = 5
+	lo := lt_render(src, w, h, Params{
+		masks:  [lm]
+		lmap:   mm
+		dither: false
+	})
+	assert at(lo, 30) == at(base, 30) // тёмное (тон ~0.2) - вне диапазона
+	assert at(lo, 100) > at(base, 100) + 20 // светлое (тон ~0.7) - внутри
+	mut cm := all
+	cm.col_on = true
+	cm.hue = 225 // (3000, 6000, 30000) - 233°: в полном действии (±15°)
+	cm.hue_w = 30
+	co := lt_render(src, w, h, Params{
+		masks:  [cm]
+		lmap:   mm
+		dither: false
+	})
+	assert at(co, 160) > at(base, 160) + 10
+	assert at(co, 220) == at(base, 220) // красное
+	assert at(co, 100) == at(base, 100) // серое
+	// Показ маски: вес по диапазону; без ограничения - вес формы
+	v := mask_view(unsafe { &u16(src.data) }, unsafe { nil }, w, h, Params{
+		masks: [cm]
+		lmap:  mm
+	}, 0)
+	assert v[160] == 255 && v[220] == 0 && v[100] == 0
+	g := mask_view(unsafe { &u16(src.data) }, unsafe { nil }, w, h, Params{
+		masks: [all]
+		lmap:  mm
+	}, 0)
+	assert g == mask_weights(all, mm, w, h)
+	// Пипетка: синий
+	pr := probe(3000, 6000, 30000, &Params{})
+	assert math.abs(pr.hue - 233.33) < 0.1 && pr.sat > 0.8
+	assert math.abs(probe(30000, 30000, 30000, &Params{}).tone - 100 * math.powf(30000.0 / 65535, 1 / 2.2)) < 0.1
+}

@@ -30,6 +30,13 @@ fn sample_masks() []pipeline.Mask {
 			shadows:    35
 			saturation: -10
 			tint:       5
+			lum_on:     true
+			lum_lo:     40
+			lum_hi:     90
+			lum_soft:   7
+			col_on:     true
+			hue:        215
+			hue_w:      25
 		},
 	]
 }
@@ -56,6 +63,15 @@ fn test_sidecar_masks() {
 		}]
 	}
 	assert edit_state(bad)!.params.masks[0].exposure == 4
+	// Файл до ограничения диапазоном: поля нулевые - значения по умолчанию
+	old := edit_state(SideState{
+		...bad
+		masks: [SideMask{
+			kind: 'linear'
+			by:   1
+		}]
+	})!.params.masks[0]
+	assert !old.lum_on && old.lum_hi == 100 && old.lum_soft == 10 && old.hue_w == 30
 }
 
 // Снимок истории не делит массив фильтров с живым состоянием; группа
