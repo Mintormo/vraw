@@ -2730,6 +2730,25 @@ fn main() {
 		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
 		record(mut st, 'reset', 'Сброс', false)
 	}
+	// «Автотон» (autotone.v): экспозиция, контраст, «Тени/Света», чёрные и
+	// белые по гистограмме кадра - одной записью истории, отменяется Ctrl+Z.
+	// Кнопка в секции «Экспозиция и тон» и «Правка - Автотон».
+	auto_tone_fn := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
+		if st.linear.len == 0 {
+			nm.show_warning('Сначала откройте RAW-файл')
+			return
+		}
+		// По кадру после кадрирования (glin), до первого apply - по всему
+		t := if st.glin.len == st.gw * st.gh * 3 && st.glin.len > 0 {
+			auto_tone(st.glin, st.gmask, st.gw * st.gh, st.edit.params)
+		} else {
+			auto_tone(st.linear, st.mask, st.pw * st.ph, st.edit.params)
+		}
+		mut e := st.edit.clone()
+		e.params = t.put(e.params)
+		restore_edit(mut st, e, mut cv, mut hist, mut nm, mut app)
+		record(mut st, 'autotone', 'Автотон', false)
+	}
 
 	// ── Меню вверху окна ──
 	// Сочетания клавиш пунктов обрабатывает само меню (MenuBar)
@@ -2757,6 +2776,9 @@ fn main() {
 	mut m_reset := vgui.menu_action('Сбросить тон')
 	m_reset.shortcut = 'Ctrl+Shift+R'
 	m_reset.on_click = reset_tone
+	mut m_autotone := vgui.menu_action('Автотон')
+	m_autotone.shortcut = 'Ctrl+U'
+	m_autotone.on_click = auto_tone_fn
 	mut m_settings := vgui.menu_action('Настройки...')
 	m_settings.shortcut = 'Ctrl+P'
 	m_settings.on_click = fn [mut st] () {
@@ -2798,7 +2820,7 @@ fn main() {
 		select_all_frames(mut st)
 	}
 	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
-		m_all, vgui.menu_separator(), m_crop, m_reset, vgui.menu_separator(), m_settings])
+		m_all, vgui.menu_separator(), m_crop, m_autotone, m_reset, vgui.menu_separator(), m_settings])
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {
@@ -3000,6 +3022,17 @@ fn main() {
 	exp_row.add(exp.vl, min: val_w)
 	exp_row.add(b_autoexp)
 	exp_row.add(b_expreset)
+	// Ряд «Автотон» - кнопка по своей ширине, слева
+	mut b_autotone := vgui.button('Автотон')
+	b_autotone.icon_name = 'wand-sparkles'
+	b_autotone.icon_size = 15
+	b_autotone.on_click = auto_tone_fn
+	mut at_tip := vgui.tooltip('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме (Ctrl+U)')
+	at_tip.attach(b_autotone)
+	st.tips << at_tip
+	mut at_row := vgui.create_hbox_fill()
+	at_row.add(b_autotone)
+	at_row.add(vgui.label(''), flex: 1)
 	mut sh_row := edit_row(mut st, mut sh, lbl_w, val_w)
 	mut con_row := edit_row(mut st, mut con, lbl_w, val_w)
 	mut vib_row := edit_row(mut st, mut vib, lbl_w, val_w)
@@ -3063,6 +3096,7 @@ fn main() {
 	acc.add_section('Кадрирование и поворот', section(crop_rows))
 	acc.add_section_expanded('Баланс белого', section(wb_rows))
 	acc.add_section_expanded('Экспозиция и тон', section([
+		SectionRow{at_row},
 		SectionRow{exp_row},
 		SectionRow{sh_row},
 		SectionRow{con_row},
