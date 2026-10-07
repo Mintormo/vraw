@@ -29,7 +29,7 @@ mut:
 	dev_linear   []u16 // превью прямо из LibRaw, без коррекции объектива
 	raw_linear   []u16 // превью после коррекции объектива, ДО шумодава
 	linear       []u16 // линейное 16-битное RGB-превью (half-size), сырьё пайплайна
-	mask         []u16 // размытая люма превью - маска «Тени/Света» (pipeline.blur_luma)
+	mask         []u16 // маска окрестности превью: «Тени/Света» и вес Clarity (pipeline.luma_masks)
 	pw           int   // размеры превью
 	ph           int
 	edit         EditState // все настройки правки кадра (history.v)
@@ -363,9 +363,9 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 		st.glin = own_new[u16](ow * oh * 3)
 		st.gw, st.gh = pipeline.geom_apply_into(unsafe { &u16(st.linear.data) }, st.pw,
 			st.ph, 3, key.geom, key.crop, mut st.glin)
-		if st.mask.len == st.pw * st.ph {
-			st.gmask = own_new[u16](ow * oh)
-			pipeline.geom_apply_into(unsafe { &u16(st.mask.data) }, st.pw, st.ph, 1,
+		if st.mask.len == st.pw * st.ph * pipeline.mask_ch {
+			st.gmask = own_new[u16](ow * oh * pipeline.mask_ch)
+			pipeline.geom_apply_into(unsafe { &u16(st.mask.data) }, st.pw, st.ph, pipeline.mask_ch,
 				key.geom, key.crop, mut st.gmask)
 		}
 		st.haze = pipeline.HazeMap{}
@@ -433,7 +433,11 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		} else {
 			pipeline.SharpView.off
 		}
-		mask := if st.gmask.len == npix { unsafe { &u16(st.gmask.data) } } else { unsafe { &u16(nil) } }
+		mask := if st.gmask.len == npix * pipeline.mask_ch {
+			unsafe { &u16(st.gmask.data) }
+		} else {
+			unsafe { &u16(nil) }
+		}
 		pipeline.apply_image_view(unsafe { &u16(st.glin.data) }, mask, &st.haze, st.gw,
 			st.gh, view_params(st, st.edit.params), preview_scale, view, mut cv.pixels, 4)
 	}
@@ -606,10 +610,11 @@ fn prep_compute(job PrepJob) PrepResult {
 	} else {
 		lin = share(cur)
 	}
-	// Маска «Тени/Света» зависит только от сырья (после коррекции
-	// объектива и шумодава!), поэтому считается здесь, а не на каждый ползунок.
-	mut mask := own_new[u16](job.w * job.h)
-	pipeline.blur_luma_into(buf, job.w, job.h, mut mask)
+	// Маска окрестности («Тени/Света», Clarity) зависит только от сырья
+	// (после коррекции объектива и шумодава!), поэтому считается здесь, а
+	// не на каждый ползунок.
+	mut mask := own_new[u16](job.w * job.h * pipeline.mask_ch)
+	pipeline.luma_masks_into(buf, job.w, job.h, mut mask)
 	drop(mut cur)
 	if !job.redo_lens {
 		drop(mut lensed)
@@ -1659,6 +1664,21 @@ fn main() {
 			e.params.contrast = v
 		}
 		fx:    tone_fx
+	})
+	// Чёткость (Clarity, pipeline/clarity.v) - локальный контраст средних
+	// деталей; минус смягчает
+	mut clr := edit_slider(mut st, SliderCfg{
+		label:  'Чёткость'
+		min:    -100
+		max:    100
+		digits: 0
+		get:    fn (e &EditState) f32 {
+			return e.params.clarity
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.clarity = v
+		}
+		fx:     tone_fx
 	})
 	// Сочность - бережная насыщенность (pipeline.vibrance_pixel): блёклые
 	// цвета сильнее насыщенных, тона кожи защищены
@@ -2874,6 +2894,7 @@ fn main() {
 	at_row.add(vgui.label(''), flex: 1)
 	mut sh_row := edit_row(mut st, mut sh, lbl_w, val_w)
 	mut con_row := edit_row(mut st, mut con, lbl_w, val_w)
+	mut clr_row := edit_row(mut st, mut clr, lbl_w, val_w)
 	mut vib_row := edit_row(mut st, mut vib, lbl_w, val_w)
 	mut sat_row := edit_row(mut st, mut sat, lbl_w, val_w)
 	mut hlt_row := edit_row(mut st, mut hlt, lbl_w, val_w)
@@ -2938,6 +2959,7 @@ fn main() {
 		SectionRow{exp_row},
 		SectionRow{sh_row},
 		SectionRow{con_row},
+		SectionRow{clr_row},
 		SectionRow{vib_row},
 		SectionRow{sat_row},
 	]))

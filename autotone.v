@@ -71,7 +71,7 @@ fn new_probe(src []u16, mask []u16, npix int) ToneProbe {
 	step := if npix > at_samples { npix / at_samples } else { 1 }
 	n := npix / step
 	mut s := []u16{len: n * 3}
-	mut m := []u16{len: if mask.len == npix { n } else { 0 }}
+	mut m := []u16{len: if mask.len == npix * pipeline.mask_ch { n * pipeline.mask_ch } else { 0 }}
 	mut c := []bool{len: n}
 	mut nu := 0
 	for i in 0 .. n {
@@ -79,7 +79,9 @@ fn new_probe(src []u16, mask []u16, npix int) ToneProbe {
 		r, g, b := src[j * 3], src[j * 3 + 1], src[j * 3 + 2]
 		s[i * 3], s[i * 3 + 1], s[i * 3 + 2] = r, g, b
 		if m.len > 0 {
-			m[i] = mask[j]
+			for k in 0 .. pipeline.mask_ch {
+				m[i * pipeline.mask_ch + k] = mask[j * pipeline.mask_ch + k]
+			}
 		}
 		c[i] = r >= at_clip || g >= at_clip || b >= at_clip
 		if !c[i] {

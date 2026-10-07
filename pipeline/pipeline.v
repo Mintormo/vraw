@@ -6,7 +6,7 @@ module pipeline
 // даёт 14 бит, так что запас есть). Порядок операций:
 //
 //   линейный RGB -> баланс белого (матрица, wb.v) -> экспозиция
-//     -> маска по люме (тени + тон-эквалайзер)
+//     -> маска по люме (тени + тон-эквалайзер, «Тени/Света», Clarity)
 //     -> гамма 1/2.2 + камерная кривая + контраст (S-кривая)
 //     -> тональные кривые (общая RGB, затем по каналу) -> насыщенность
 //     -> сочность -> HSL-эквалайзер -> резкость (sharpen.v, apply_image) -> 8 бит
@@ -26,7 +26,9 @@ module pipeline
 //         flut делится на две части: гамма и гамма + кривая (CamTone) и
 //         тон -> тон (контраст и тональные кривые, build_post);
 //   slut: размытая люма u16 -> множитель «Тени/Света» (см. build_slut) -
-//         маска по окрестности сохраняет локальный контраст.
+//         маска по окрестности сохраняет локальный контраст;
+//   clut: люма u16 -> сила Clarity по тону (build_clut), деталь - log2
+//         люмы пикселя к размытой (log2_lut).
 //   HSL: оттенок -> сдвиг оттенка / множители насыщенности и яркости
 //         (1024 корзины по кругу оттенков, build_hsl).
 // На пиксель остаются только умножения и выборки из таблиц (HSL добавляет
@@ -59,6 +61,10 @@ pub mut:
 	eq         [5]f32 // тон-эквалайзер, EV: чёрные, тени, средние, света, белые
 	sh_shadows    f32 // «Тени/Света»: подъём теней 0..100 (по размытой маске)
 	sh_highlights f32 // «Тени/Света»: приглушение светов 0..100 (по размытой маске)
+	// Clarity - локальный контраст -100..100 (минус - смягчение): деталь
+	// пикселя относительно размытой люмы окрестности (та же маска, что у
+	// «Тени/Света»), в основном в средних тонах; см. build_clut
+	clarity f32
 	// Тональная кривая «как камерный JPEG» (match_curve): 256 значений,
 	// тон 0..255 -> тон 0..255. Пустой массив - кривой нет (тождественная).
 	// Применяется после гаммы, до контраста, смесью по каналам и по люме
@@ -887,8 +893,9 @@ fn vibrance_pixel(r f32, g f32, b f32, a f32) (f32, f32, f32) {
 // apply прогоняет линейный 16-битный RGB (плотный, npix пикселей) через
 // пайплайн и пишет 8-битный результат: dst_stride 4 - RGBA для холста
 // (альфа 255), 3 - RGB для JPEG. dst должен вмещать npix * dst_stride байт.
-// mask - размытая люма кадра (blur_luma, npix значений) для «Тени/Света»;
-// nil допустим - тогда sh_shadows/sh_highlights игнорируются.
+// mask - маска окрестности кадра (luma_masks, npix * mask_ch значений:
+// размытая люма «Тени/Света» и вес Clarity); nil допустим - тогда
+// «Тени/Света» и Clarity не действуют.
 // Резкость apply не делает (ей нужны размеры кадра) - это apply_image.
 pub fn apply(src &u16, mask &u16, npix int, p Params, mut dst []u8, dst_stride int) {
 	render(src, mask, unsafe { nil }, npix, p, mut dst, dst_stride, unsafe { nil })
@@ -936,6 +943,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
+	use_cl := !isnil(mask) && p.clarity != 0
+	clut := if use_cl { build_clut(&p) } else { []f32{} }
 	sat := p.saturation * p.cam_sat
 	vib := p.vibrance / 100.0
 	wb_on := p.wb_on
@@ -980,6 +989,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 		csk:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hsat.data) } } else { unsafe { nil } }
 		use_sh:     use_sh
 		sl:         unsafe { &f32(slut.data) }
+		use_cl:     use_cl
+		cl:         unsafe { &f32(clut.data) }
 		sat:        sat
 		vib:        vib
 		wb_on:      wb_on
@@ -1041,6 +1052,8 @@ struct RenderCtx {
 	csk        &f32 = unsafe { nil }
 	use_sh     bool
 	sl         &f32 = unsafe { nil }
+	use_cl     bool
+	cl         &f32 = unsafe { nil }
 	sat        f32
 	vib        f32
 	wb_on      bool
@@ -1068,6 +1081,7 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	wm := rc.wm
 	wl := rc.wl
 	use_sh := rc.use_sh
+	use_cl := rc.use_cl
 	use_hsl := rc.use_hsl
 	sat := rc.sat
 	vib := rc.vib
@@ -1100,6 +1114,8 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 		cdh := rc.cdh
 		csk := rc.csk
 		sl := rc.sl
+		cl := rc.cl
+		lg := &f32(log2_lut.data)
 		mk := rc.mask
 		for i in i0 .. i1 {
 			mut cr := f32(s[0])
@@ -1213,7 +1229,23 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			}
 			mut k := ml[y]
 			if use_sh {
-				k *= sl[int(mk[i])]
+				k *= sl[int(mk[i * mask_ch])]
+			}
+			if use_cl {
+				// Clarity (clarity.v): деталь - сырая люма к размытой (маска
+				// - тоже по сырью, до ББ и дымки) с весом фактуры, сила - по
+				// тону люмы после них
+				yr := if wb_on || haze_on {
+					(54 * int(s[0]) + 183 * int(s[1]) + 19 * int(s[2])) >> 8
+				} else {
+					y
+				}
+				cs := cl[y]
+				if cs != 0 {
+					mp := mk + i * mask_ch
+					dl := (lg[yr] - lg[int(mp[0])]) * f32(mp[1]) * (1.0 / 65535.0)
+					k *= exp2f(clarity_ev(dl, cs))
+				}
 			}
 			if ls.any && lc.use_ev {
 				// Экспозиция фильтров и их тени/света (по тоновой позиции)

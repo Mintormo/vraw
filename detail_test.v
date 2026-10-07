@@ -151,11 +151,12 @@ fn test_detail_render_close_to_full() {
 		contrast:      0.2
 		sh_shadows:    60
 		sh_highlights: 40
+		clarity:       60
 		haze:          30
 		dither:        false
 	}
 	// Полный проход: маска и дымка по полному кадру
-	mask_full := pipeline.blur_luma(unsafe { &u16(full.data) }, ow, oh)
+	mask_full := pipeline.luma_masks(unsafe { &u16(full.data) }, ow, oh)
 	haze_full := pipeline.haze_map(unsafe { &u16(full.data) }, ow, oh)
 	mut ref := []u8{len: ow * oh * 4}
 	pipeline.apply_image(unsafe { &u16(full.data) }, unsafe { &u16(mask_full.data) }, &haze_full,
@@ -173,7 +174,7 @@ fn test_detail_render_close_to_full() {
 			}
 		}
 	}
-	gmask := pipeline.blur_luma(unsafe { &u16(small.data) }, gw, gh)
+	gmask := pipeline.luma_masks(unsafe { &u16(small.data) }, gw, gh)
 	ghaze := pipeline.haze_map(unsafe { &u16(small.data) }, gw, gh)
 	lin := pipeline.crop_region(unsafe { &u16(full.data) }, ow, 3, job.r)
 	got := detail_render(lin, job.r, ow, oh, gmask, gw, gh, &ghaze, p, .off)

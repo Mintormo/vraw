@@ -83,7 +83,7 @@ fn test_auto_tone_cr3() {
 	n := img.width * img.height
 	mut src := []u16{len: n * 3}
 	unsafe { vmemcpy(src.data, img.data_u16(), n * 6) }
-	mask := pipeline.blur_luma(unsafe { &u16(src.data) }, img.width, img.height)
+	mask := pipeline.luma_masks(unsafe { &u16(src.data) }, img.width, img.height)
 	sw := time.new_stopwatch()
 	t := auto_tone(src, mask, n, pipeline.Params{})
 	ms := sw.elapsed().milliseconds()

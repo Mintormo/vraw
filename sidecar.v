@@ -82,6 +82,8 @@ struct SideState {
 	// json2 при чтении пропускает: размер теперь - настройка экспорта
 	// Градиентные фильтры (в старых файлах нет - пусто)
 	masks []SideMask
+	// Clarity -100..100 (в старых файлах нет - 0)
+	clarity f32
 }
 
 // SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
@@ -278,6 +280,7 @@ fn side_state(e EditState) SideState {
 		crop_ah:       e.crop_ah
 		crop_portrait: e.crop_portrait
 		masks:         p.masks.map(side_mask(it))
+		clarity:       p.clarity
 	}
 }
 
@@ -294,6 +297,7 @@ fn edit_state(s SideState) !EditState {
 			vibrance:      s.vibrance
 			sh_shadows:    s.sh_shadows
 			sh_highlights: s.sh_highlights
+			clarity:       s.clarity
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			masks:         s.masks.map(mask_of(it))

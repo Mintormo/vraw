@@ -147,10 +147,10 @@ fn test_shadows_highlights() {
 			src[i + 2] = v
 		}
 	}
-	mask := blur_luma(unsafe { &u16(src.data) }, w, h)
-	assert mask.len == npix
+	mask := luma_masks(unsafe { &u16(src.data) }, w, h)
+	assert mask.len == npix * mask_ch
 	// Маска размыта: в глубине тёмной половины она темнее, чем в яркой
-	assert mask[(h / 2) * w + 8] < mask[(h / 2) * w + w - 8]
+	assert mask[((h / 2) * w + 8) * mask_ch] < mask[((h / 2) * w + w - 8) * mask_ch]
 
 	mut base := []u8{len: npix * 4}
 	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ dither: false }, mut base, 4)
@@ -524,20 +524,22 @@ fn test_render_threads_match() {
 	w, h := 700, 500 // 350 тыс. пикселей - больше порога потоков
 	npix := w * h
 	mut src := []u16{len: npix * 3}
-	mut mask := []u16{len: npix}
+	mut mask := []u16{len: npix * mask_ch}
 	mut s := u32(12345)
 	for i in 0 .. npix * 3 {
 		s = s * 1664525 + 1013904223
 		src[i] = u16(s >> 16)
 	}
 	for i in 0 .. npix {
-		mask[i] = src[i * 3 + 1]
+		mask[i * mask_ch] = src[i * 3 + 1]
+		mask[i * mask_ch + 1] = src[i * 3]
 	}
 	mut p := Params{
 		exposure:    0.5
 		contrast:    0.3
 		saturation:  1.2
 		sh_shadows:  30
+		clarity:     40
 		dither:      false
 		cam_hue:     []f32{len: cam_tab_n, init: 0.1}
 		cam_hsat:    []f32{len: cam_tab_n, init: 1.2}
@@ -548,7 +550,7 @@ fn test_render_threads_match() {
 	mut rows := []u8{len: npix * 4}
 	for y in 0 .. h {
 		mut row := []u8{len: w * 4}
-		apply(unsafe { &u16(src.data) + y * w * 3 }, unsafe { &u16(mask.data) + y * w }, w,
+		apply(unsafe { &u16(src.data) + y * w * 3 }, unsafe { &u16(mask.data) + y * w * mask_ch }, w,
 			p, mut row, 4)
 		unsafe { vmemcpy(&u8(rows.data) + y * w * 4, row.data, w * 4) }
 	}

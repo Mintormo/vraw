@@ -312,8 +312,8 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	}
 	// Маска «Тени/Света» - как в превью: по сырью после шумодава, до
 	// Capture-резкости
-	mask0 = bigbuf.new_u16(w * h)
-	pipeline.blur_luma_into(buf, w, h, mut mask0)
+	mask0 = bigbuf.new_u16(w * h * pipeline.mask_ch)
+	pipeline.luma_masks_into(buf, w, h, mut mask0)
 	mut src := unsafe { &u16(buf) }
 	if e.params.sharp.dc_amount > 0 {
 		if !progress.stage(.capture, 0, 0) {
@@ -340,8 +340,9 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		src = unsafe { &u16(glin.data) }
 		bigbuf.free(mut dc)
 		img.free()
-		gmask = bigbuf.new_u16(ow * oh)
-		pipeline.geom_apply_into(unsafe { &u16(mask0.data) }, w, h, 1, g, true, mut gmask)
+		gmask = bigbuf.new_u16(ow * oh * pipeline.mask_ch)
+		pipeline.geom_apply_into(unsafe { &u16(mask0.data) }, w, h, pipeline.mask_ch, g, true, mut
+			gmask)
 		mask = unsafe { &u16(gmask.data) }
 		bigbuf.free(mut mask0)
 	}

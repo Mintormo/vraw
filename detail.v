@@ -207,8 +207,8 @@ fn detail_render(lin []u16, r Region, ow int, oh int, gmask []u16, gw int, gh in
 	if lin.len != r.w * r.h * 3 {
 		return dst
 	}
-	mask := if gmask.len == gw * gh {
-		pipeline.upsample_region(gmask, gw, gh, 1, ow, oh, r)
+	mask := if gmask.len == gw * gh * pipeline.mask_ch {
+		pipeline.upsample_region(gmask, gw, gh, pipeline.mask_ch, ow, oh, r)
 	} else {
 		[]u16{}
 	}

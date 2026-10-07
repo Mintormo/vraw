@@ -60,7 +60,7 @@ fn test_prep_ownership() {
 						dc_amount: dc
 					}
 				})
-				assert res.linear.len == w * h * 3 && res.mask.len == w * h
+				assert res.linear.len == w * h * 3 && res.mask.len == w * h * pipeline.mask_ch
 				assert (res.raw_linear.len > 0) == redo
 				drop(mut res.raw_linear)
 				drop(mut res.linear)

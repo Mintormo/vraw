@@ -137,9 +137,9 @@ fn ba_ensure_raw(mut st State) {
 		st.ba_glin = own_new[u16](ow * oh * 3)
 		pipeline.geom_apply_into(unsafe { &u16(st.ba_lin.data) }, st.pw, st.ph, 3, gk.geom,
 			gk.crop, mut st.ba_glin)
-		if st.ba_mask.len == st.pw * st.ph {
-			st.ba_gmask = own_new[u16](ow * oh)
-			pipeline.geom_apply_into(unsafe { &u16(st.ba_mask.data) }, st.pw, st.ph, 1,
+		if st.ba_mask.len == st.pw * st.ph * pipeline.mask_ch {
+			st.ba_gmask = own_new[u16](ow * oh * pipeline.mask_ch)
+			pipeline.geom_apply_into(unsafe { &u16(st.ba_mask.data) }, st.pw, st.ph, pipeline.mask_ch,
 				gk.geom, gk.crop, mut st.ba_gmask)
 		}
 	}
@@ -260,7 +260,11 @@ fn ba_render(mut st State) {
 		}
 	}
 	st.ba_before = []u8{len: npix * 4}
-	mask := if gmask.len == npix { unsafe { &u16(gmask.data) } } else { unsafe { &u16(nil) } }
+	mask := if gmask.len == npix * pipeline.mask_ch {
+		unsafe { &u16(gmask.data) }
+	} else {
+		unsafe { &u16(nil) }
+	}
 	haze := if own { &st.ba_haze } else { &st.haze }
 	pipeline.apply_image(unsafe { &u16(glin.data) }, mask, haze, st.gw, st.gh, view_params(st,
 		before.params), preview_scale, mut st.ba_before, 4)
