@@ -119,3 +119,73 @@ fn test_clarity_no_halo() {
 	assert raw_d > 6, 'без веса ступень не даёт ореола: ${raw_d}'
 	assert worst <= 3, 'ореол ${worst} (без веса ${raw_d})'
 }
+
+fn ct_render_p(src []u16, mask []u16, p Params) []u8 {
+	mut out := []u8{len: ct_w * ct_h * 3}
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, ct_w * ct_h, Params{
+		...p
+		dither: false
+	}, mut out, 3)
+	return out
+}
+
+// ct_spread_rows - ct_spread по строкам y0..y1 левой половины
+fn ct_spread_rows(o []u8, y0 int, y1 int) f64 {
+	mut s := 0.0
+	mut n := 0
+	for y in y0 .. y1 {
+		for x in 40 .. 160 {
+			s += f64(o[(y * ct_w + x) * 3])
+			n++
+		}
+	}
+	mean := s / n
+	mut d := 0.0
+	for y in y0 .. y1 {
+		for x in 40 .. 160 {
+			d += math.abs(f64(o[(y * ct_w + x) * 3]) - mean)
+		}
+	}
+	return d / n
+}
+
+// Чёткость фильтра - добавка к Clarity кадра: на весь кадр - как у кадра,
+// только верх - меняется только верх, кадр +100 с фильтром -100 - как без
+// Clarity
+fn test_clarity_in_mask() {
+	src := ct_frame()
+	mask := luma_masks(unsafe { &u16(src.data) }, ct_w, ct_h)
+	mm := mask_map(Geom{}, ct_w, ct_h, true, ct_w, ct_h)
+	all := Mask{
+		kind:    .linear
+		ax:      0
+		ay:      2
+		bx:      0
+		by:      3 // весь кадр - до точки a
+		clarity: 100
+	}
+	glob := ct_render_p(src, mask, Params{ clarity: 100 })
+	assert ct_render_p(src, mask, Params{
+		masks: [all]
+		lmap:  mm
+	}) == glob
+	base := ct_render_p(src, mask, Params{})
+	mut top := all
+	top.ay = 0.45
+	top.by = 0.5
+	t := ct_render_p(src, mask, Params{
+		masks: [top]
+		lmap:  mm
+	})
+	assert ct_spread_rows(t, 20, 120) > ct_spread_rows(base, 20, 120) * 1.3
+	for i in (170 * ct_w) * 3 .. t.len {
+		assert t[i] == base[i]
+	}
+	mut minus := all
+	minus.clarity = -100
+	assert ct_render_p(src, mask, Params{
+		clarity: 100
+		masks:   [minus]
+		lmap:    mm
+	}) == base
+}

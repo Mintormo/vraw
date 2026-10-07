@@ -26,6 +26,7 @@ fn sample_masks() []pipeline.Mask {
 			feather:    80
 			invert:     true
 			contrast:   15
+			clarity:    -25
 			highlights: -40
 			shadows:    35
 			saturation: -10

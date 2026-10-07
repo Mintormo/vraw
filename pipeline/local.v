@@ -16,7 +16,9 @@ module pipeline
 //   экспозиция, тени, света - добавка в EV к общему множителю k
 //     (тени/света - по тоновой позиции пикселя, маски (1-t)² и t²);
 //   контраст - S-кривая тона (смесь с тождественной по силе);
-//   насыщенность - множитель к действующей насыщенности.
+//   насыщенность - множитель к действующей насыщенности;
+//   чёткость (Clarity) - добавка к силе Clarity кадра (clarity.v; нужна
+//     маска окрестности - без неё не действует).
 // Пиксели вне всех фильтров (сумма весов 0) не меняются - байт в байт
 // как без фильтров.
 import math
@@ -64,6 +66,7 @@ pub mut:
 	// Правки: экспозиция EV (-4..4), остальное -100..100
 	exposure   f32
 	contrast   f32
+	clarity    f32
 	highlights f32
 	shadows    f32
 	saturation f32
@@ -73,8 +76,8 @@ pub mut:
 
 // has_edits - у фильтра есть хоть одна правка (пустой не считается)
 pub fn (m Mask) has_edits() bool {
-	return m.exposure != 0 || m.contrast != 0 || m.highlights != 0 || m.shadows != 0
-		|| m.saturation != 0 || m.temp != 0 || m.tint != 0
+	return m.exposure != 0 || m.contrast != 0 || m.clarity != 0 || m.highlights != 0
+		|| m.shadows != 0 || m.saturation != 0 || m.temp != 0 || m.tint != 0
 }
 
 // MaskMap - пиксель (i, j) рендерного буфера -> точка кадра в единицах
@@ -143,6 +146,7 @@ struct LocalMask {
 	sh     f32 // -1..1
 	hi     f32
 	con    f32
+	cl     f32 // чёткость -1..1
 	sat    f32
 	temp   f32
 	tint   f32
@@ -168,6 +172,7 @@ struct LocalCtx {
 	use_tl bool  // нужна таблица тоновой позиции tl (тени/света, яркость)
 	use_ev bool  // есть экспозиция или тени/света
 	use_cn bool  // есть контраст
+	use_cl bool  // есть чёткость
 	use_st bool  // есть насыщенность
 	tl     []f32 // люма u16 -> тоновая позиция 0..1 после экспозиции
 	cp     []f32 // S-кривая контраста +1 (a = 2), 257 узлов тон -> тон
@@ -192,6 +197,7 @@ fn compile_mask(m Mask, mm MaskMap) ?LocalMask {
 		sh:     m.shadows / 100
 		hi:     m.highlights / 100
 		con:    m.contrast / 100
+		cl:     m.clarity / 100
 		sat:    m.saturation / 100
 		temp:   m.temp / 100
 		tint:   m.tint / 100
@@ -282,6 +288,7 @@ fn ctx_of(p &Params, ms []LocalMask, w int) LocalCtx {
 	mut use_tn := false
 	mut use_ev := false
 	mut use_cn := false
+	mut use_cl := false
 	mut use_st := false
 	mut use_lum := false
 	for lm in ms {
@@ -289,6 +296,7 @@ fn ctx_of(p &Params, ms []LocalMask, w int) LocalCtx {
 		use_tn = use_tn || lm.sh != 0 || lm.hi != 0
 		use_ev = use_ev || lm.ev != 0 || lm.sh != 0 || lm.hi != 0
 		use_cn = use_cn || lm.con != 0
+		use_cl = use_cl || lm.cl != 0
 		use_st = use_st || lm.sat != 0
 		use_lum = use_lum || lm.lum
 	}
@@ -302,6 +310,7 @@ fn ctx_of(p &Params, ms []LocalMask, w int) LocalCtx {
 		use_tl: use_tl
 		use_ev: use_ev
 		use_cn: use_cn
+		use_cl: use_cl
 		use_st: use_st
 		tl:     if use_tl { build_tlut(p) } else { []f32{} }
 		cp:     if use_cn { contrast_curve(2) } else { []f32{} }
@@ -518,6 +527,7 @@ mut:
 	sh   f32
 	hi   f32
 	con  f32
+	cl   f32
 	sat  f32
 	temp f32
 	tint f32
@@ -548,6 +558,7 @@ fn local_sum(lc &LocalCtx, x f32, y f32, yl int, cr f32, cg f32, cb f32) LocalSu
 		s.sh += w * m.sh
 		s.hi += w * m.hi
 		s.con += w * m.con
+		s.cl += w * m.cl
 		s.sat += w * m.sat
 		s.temp += w * m.temp
 		s.tint += w * m.tint

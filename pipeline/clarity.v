@@ -209,12 +209,11 @@ fn build_log2_lut() []f32 {
 	return l
 }
 
-// build_clut - сила Clarity по люме пикселя (u16, после экспозиции - тон
-// t): вес средних тонов 1 - |2t - 1|³ (в чёрном и белом - 0: локальный
+// build_cmid - вес Clarity по люме пикселя (u16, после экспозиции - тон
+// t): средние тона 1 - |2t - 1|³ (в чёрном и белом - 0: локальный
 // контраст не клипает тени и света)
-fn build_clut(p &Params) []f32 {
+fn build_cmid(p &Params) []f32 {
 	e := math.powf(2.0, p.exposure)
-	s := p.clarity / 100.0 * if p.clarity > 0 { cl_gain } else { cl_gain_neg }
 	mut m := []f32{len: 65536}
 	for y in 0 .. 65536 {
 		mut yl := f32(y) * (1.0 / 65535.0) * e
@@ -223,9 +222,20 @@ fn build_clut(p &Params) []f32 {
 		}
 		t := math.powf(yl, inv_gamma)
 		a := math.abs(2 * t - 1)
-		m[y] = s * (1 - a * a * a)
+		m[y] = 1 - a * a * a
 	}
 	return m
+}
+
+// clarity_gain - сила Clarity по сумме a (кадр + фильтры, 1 = 100 на
+// ползунке): плюс - ×cl_gain, минус - ×cl_gain_neg; сумма в -1..2 (ниже
+// -1 деталь перевернулась бы)
+@[inline]
+fn clarity_gain(a f32) f32 {
+	if a > 0 {
+		return (if a > 2 { f32(2) } else { a }) * cl_gain
+	}
+	return (if a < -1 { f32(-1) } else { a }) * cl_gain_neg
 }
 
 // clarity_ev - добавка Clarity в EV: деталь d (EV) с мягкими пределами

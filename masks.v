@@ -675,6 +675,7 @@ fn sync_mask_ui(mut st State) {
 enum MaskField {
 	exposure
 	contrast
+	clarity
 	highlights
 	shadows
 	saturation
@@ -692,6 +693,7 @@ fn mask_get(m pipeline.Mask, f MaskField) f32 {
 	return match f {
 		.exposure { m.exposure }
 		.contrast { m.contrast }
+		.clarity { m.clarity }
 		.highlights { m.highlights }
 		.shadows { m.shadows }
 		.saturation { m.saturation }
@@ -710,6 +712,7 @@ fn mask_set(mut m pipeline.Mask, f MaskField, v f32) {
 	match f {
 		.exposure { m.exposure = v }
 		.contrast { m.contrast = v }
+		.clarity { m.clarity = v }
 		.highlights { m.highlights = v }
 		.shadows { m.shadows = v }
 		.saturation { m.saturation = v }
@@ -845,6 +848,10 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		MaskSliderSpec{
 			label: 'Контраст'
 			f:     .contrast
+		},
+		MaskSliderSpec{
+			label: 'Чёткость'
+			f:     .clarity
 		},
 		MaskSliderSpec{
 			label: 'Света'

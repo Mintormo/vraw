@@ -116,6 +116,7 @@ struct SideMask {
 	saturation f32
 	temp       f32
 	tint       f32
+	clarity    f32 // в старых файлах нет - 0
 }
 
 fn side_mask(m pipeline.Mask) SideMask {
@@ -145,6 +146,7 @@ fn side_mask(m pipeline.Mask) SideMask {
 		saturation: m.saturation
 		temp:       m.temp
 		tint:       m.tint
+		clarity:    m.clarity
 	}
 }
 
@@ -183,6 +185,7 @@ fn mask_of(s SideMask) pipeline.Mask {
 		saturation: c(s.saturation, 100)
 		temp:       c(s.temp, 100)
 		tint:       c(s.tint, 100)
+		clarity:    c(s.clarity, 100)
 	}
 }
 
