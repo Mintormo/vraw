@@ -425,6 +425,30 @@ fn delete_preset(p Preset) ! {
 	os.rm(p.path)!
 }
 
+// rename_preset - пресет p под новым именем name в той же папке: файл
+// переименовывается, поле name в нём обновляется (настройки как есть).
+// Имя занято другим пресетом - ошибка. Результат - новый путь.
+fn rename_preset(p Preset, name string) !string {
+	file := preset_file_name(name)
+	if file.len == 0 {
+		return error('пустое имя')
+	}
+	load_preset(p.path)! // чужой файл или новая версия - не трогаем
+	mut f := json2.decode[PresetFile](os.read_file(p.path)!)!
+	f.name = name.trim_space()
+	path := os.join_path(os.dir(p.path), file)
+	// То же имя без учёта регистра - тот же файл (Windows, macOS)
+	same := path.to_lower() == p.path.to_lower()
+	if !same && os.exists(path) {
+		return error('пресет «${file.all_before_last('.json')}» уже есть')
+	}
+	if path != p.path {
+		os.mv(p.path, path)!
+	}
+	write_atomic(path, preset_json(f))!
+	return path
+}
+
 fn preset_json(f PresetFile) string {
 	return json2.encode(f, prettify: true, indent_string: '  ')
 }
@@ -444,7 +468,8 @@ fn apply_preset(mut st State, p Preset) {
 }
 
 // rebuild_presets_menu - меню «Пресеты»: список пресетов, «Сохранить
-// пресет...», импорт, экспорт, удаление, «Обновить список» (файлы можно положить и удалить руками)
+// пресет...», «Управление пресетами...»; открытое окно управления
+// получает тот же список
 fn rebuild_presets_menu(mut st State) {
 	if isnil(st.bar) || st.presets_menu < 0 {
 		return
@@ -471,57 +496,18 @@ fn rebuild_presets_menu(mut st State) {
 		}
 	}
 	items << m_save
-	// Импорт и экспорт - файлы .json пресетов (системные диалоги - в main)
-	items << vgui.menu_separator()
-	mut m_import := vgui.menu_action('Импорт пресетов...')
-	m_import.on_click = fn [mut st] () {
-		if !isnil(st.import_presets) {
-			st.import_presets()
+	mut m_manage := vgui.menu_action('Управление пресетами...')
+	m_manage.on_click = fn [mut st] () {
+		if !isnil(st.show_presets) {
+			st.show_presets()
 		}
 	}
-	items << m_import
-	mut m_export := vgui.menu_submenu('Экспорт пресета')
-	for p in presets {
-		mut it := vgui.menu_action(p.name)
-		it.on_click = fn [mut st, p] () {
-			if !isnil(st.export_presets) {
-				st.export_presets(p)
-			}
-		}
-		m_export.add(it)
-	}
-	m_export.enabled = presets.len > 0
-	items << m_export
-	mut m_export_all := vgui.menu_action('Экспорт всех пресетов...')
-	m_export_all.enabled = presets.len > 0
-	m_export_all.on_click = fn [mut st] () {
-		if !isnil(st.export_presets) {
-			st.export_presets(Preset{})
-		}
-	}
-	items << m_export_all
-	// Удаление - с подтверждением (окно вопроса - в main)
-	items << vgui.menu_separator()
-	mut m_delete := vgui.menu_submenu('Удалить пресет')
-	for p in presets {
-		mut it := vgui.menu_action(p.name)
-		it.on_click = fn [mut st, p] () {
-			if !isnil(st.delete_preset) {
-				st.delete_preset(p)
-			}
-		}
-		m_delete.add(it)
-	}
-	m_delete.enabled = presets.len > 0
-	items << m_delete
-	items << vgui.menu_separator()
-	mut m_reload := vgui.menu_action('Обновить список')
-	m_reload.on_click = fn [mut st] () {
-		rebuild_presets_menu(mut st)
-	}
-	items << m_reload
+	items << m_manage
 	mut bar := st.bar
 	bar.set_items(st.presets_menu, items)
+	if !isnil(st.presets_ui) {
+		fill_presets_ui(mut st, presets)
+	}
 }
 
 // ── Окно групп: копирование и сохранение пресета ──
@@ -723,4 +709,259 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	dlg.add_widget(body)
 	app.add_dialog(dlg)
 	st.groups_ui = u
+}
+
+// ── Окно «Управление пресетами» ──
+
+@[heap]
+struct PresetsUi {
+mut:
+	dlg      &vgui.Dialog    = unsafe { nil }
+	app      &vgui.App       = unsafe { nil }
+	list     &vgui.ListBox   = unsafe { nil }
+	name     &vgui.TextInput = unsafe { nil }
+	b_rename &vgui.Button    = unsafe { nil }
+	b_delete &vgui.Button    = unsafe { nil }
+	b_export &vgui.Button    = unsafe { nil }
+	b_all    &vgui.Button    = unsafe { nil }
+	presets  []Preset // строки списка
+}
+
+// show_presets - окно управления: папка пресетов перечитывается при
+// каждом открытии (файлы можно положить и удалить руками), меню - тоже
+fn show_presets(mut st State, mut app vgui.App, parent &vgui.Window) {
+	if isnil(st.presets_ui) {
+		build_presets_ui(mut st, mut app, parent) or {
+			if !isnil(st.nm) {
+				mut nm := st.nm
+				nm.show_error('Не удалось открыть окно: ${err.msg()}')
+			}
+			return
+		}
+	}
+	rebuild_presets_menu(mut st)
+	mut u := st.presets_ui
+	mut d := u.dlg
+	if !d.is_open() {
+		d.show_scaled(parent)
+	}
+}
+
+// fill_presets_ui - список окна; выбор остаётся на пресете с тем же
+// именем, иначе - на той же строке (после удаления - соседний)
+fn fill_presets_ui(mut st State, presets []Preset) {
+	mut u := st.presets_ui
+	mut list := u.list
+	old := list.selected
+	old_name := if old >= 0 && old < u.presets.len { u.presets[old].name } else { '' }
+	u.presets = presets.clone()
+	list.set_items(presets.map(it.name))
+	mut sel := -1
+	for i, p in presets {
+		if p.name == old_name {
+			sel = i
+		}
+	}
+	if sel < 0 && old >= 0 && presets.len > 0 {
+		sel = if old < presets.len { old } else { presets.len - 1 }
+	}
+	select_preset_row(mut u, sel)
+}
+
+// select_preset_row - строка i выбрана: имя в поле, кнопки по выбору
+fn select_preset_row(mut u PresetsUi, i int) {
+	mut list := u.list
+	list.set_selected(i)
+	has := i >= 0 && i < u.presets.len
+	mut name := u.name
+	name.set_text(if has { u.presets[i].name } else { '' })
+	name.enabled = has
+	mut buttons := [u.b_rename, u.b_delete, u.b_export]
+	for mut b in buttons {
+		b.enabled = has
+	}
+	mut all := u.b_all
+	all.enabled = u.presets.len > 0
+}
+
+fn selected_preset(u &PresetsUi) ?Preset {
+	i := u.list.selected
+	if i < 0 || i >= u.presets.len {
+		return none
+	}
+	return u.presets[i]
+}
+
+// presets_rename - «Переименовать» и Enter в поле имени: занятое или
+// пустое имя - предупреждение, пресет не трогается
+fn presets_rename(mut st State) {
+	mut u := st.presets_ui
+	old := selected_preset(u) or { return }
+	mut nm := st.nm
+	name := u.name.get_text().trim_space()
+	if preset_file_name(name).len == 0 {
+		nm.show_warning('Введите имя пресета')
+		return
+	}
+	if name == old.name {
+		return
+	}
+	path := rename_preset(old, name) or {
+		nm.show_warning('Пресет не переименован: ${err.msg()}')
+		return
+	}
+	new_name := os.file_name(path).all_before_last('.json')
+	// Выбор переходит на новое имя (fill_presets_ui ищет старое)
+	mut list := u.list
+	list.set_selected(-1)
+	rebuild_presets_menu(mut st)
+	for i, p in u.presets {
+		if p.name == new_name {
+			select_preset_row(mut u, i)
+		}
+	}
+	nm.show_success('Пресет «${old.name}» переименован в «${new_name}»')
+}
+
+// presets_delete - «Удалить» с подтверждением
+fn presets_delete(mut st State) {
+	mut u := st.presets_ui
+	p := selected_preset(u) or { return }
+	mut app := u.app
+	answer := vgui.message_box(u.dlg.win, mut app, vgui.MessageBoxConfig{
+		title:          'Удалить пресет'
+		message:        'Удалить пресет «${p.name}»? Файл пресета будет удалён.'
+		kind:           .warning
+		buttons:        ['Удалить', 'Отмена']
+		default_button: 1
+		cancel_button:  1
+	})
+	if answer != 0 {
+		return
+	}
+	mut nm := st.nm
+	delete_preset(p) or {
+		nm.show_error('Пресет «${p.name}» не удалён: ${err.msg()}')
+		return
+	}
+	rebuild_presets_menu(mut st)
+	nm.show_success('Пресет «${p.name}» удалён')
+}
+
+fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
+	mut u := &PresetsUi{
+		app: unsafe { &app }
+	}
+	mut dlg := vgui.create_dialog(
+		title:     'Управление пресетами'
+		parent:    unsafe { parent }
+		theme:     parent.ctx.theme
+		font_path: parent.config.font_path
+		mono_path: parent.config.mono_path
+		font_data: parent.config.font_data
+		mono_data: parent.config.mono_data
+		font_size: parent.config.font_size
+		mono_size: parent.config.mono_size
+		ui_scale:  parent.ctx.ui_scale
+		width:     560
+		height:    400
+	)!
+	u.dlg = dlg
+
+	mut list := vgui.list_box()
+	list.on_select = fn [mut u] (i int, s string) {
+		select_preset_row(mut u, i)
+	}
+	// Двойной щелчок - к полю имени (переименование)
+	list.on_dbl_click = fn [mut u] (i int, s string) {
+		mut d := u.dlg
+		d.win.set_default_focus_text_input(u.name)
+	}
+	u.list = list
+
+	mut b_delete := vgui.button('Удалить')
+	b_delete.style = .outline
+	b_delete.on_click = fn [mut st] () {
+		presets_delete(mut st)
+	}
+	u.b_delete = b_delete
+	mut b_export := vgui.button('Экспорт...')
+	b_export.style = .outline
+	b_export.on_click = fn [mut st, mut u] () {
+		p := selected_preset(u) or { return }
+		if !isnil(st.export_presets) {
+			st.export_presets(p)
+		}
+	}
+	u.b_export = b_export
+	mut b_import := vgui.button('Импорт...')
+	b_import.style = .outline
+	b_import.on_click = fn [mut st] () {
+		if !isnil(st.import_presets) {
+			st.import_presets()
+		}
+	}
+	mut b_all := vgui.button('Экспорт всех...')
+	b_all.style = .outline
+	b_all.on_click = fn [mut st] () {
+		if !isnil(st.export_presets) {
+			st.export_presets(Preset{})
+		}
+	}
+	u.b_all = b_all
+	mut side := vgui.create_vbox_fill()
+	side.set_spacing(6)
+	side.set_padding(0)
+	side.add(b_delete)
+	side.add(b_export)
+	side.add(b_import)
+	side.add(b_all)
+	side.add(vgui.create_spacer(), flex: 1)
+
+	mut top := vgui.create_hbox_fill()
+	top.set_spacing(10)
+	top.set_padding(0)
+	top.add(list, flex: 1)
+	top.add(side, min: 150)
+
+	// Переименование: имя выбранного пресета в поле, Enter - переименовать
+	mut name_l := vgui.label('Имя')
+	mut name := vgui.text_input('Имя пресета')
+	name.on_submit = fn [mut st] (s string) {
+		presets_rename(mut st)
+	}
+	u.name = name
+	mut b_rename := vgui.button('Переименовать')
+	b_rename.style = .outline
+	b_rename.on_click = fn [mut st] () {
+		presets_rename(mut st)
+	}
+	u.b_rename = b_rename
+	mut name_row := vgui.create_hbox_fill()
+	name_row.set_spacing(8)
+	name_row.set_padding(0)
+	name_row.add(name_l)
+	name_row.add(name, flex: 1)
+	name_row.add(b_rename, min: 150)
+
+	mut b_close := vgui.button('Закрыть')
+	b_close.style = .accent
+	b_close.on_click = fn [mut dlg] () {
+		dlg.close_with_result(0)
+	}
+	mut btn_row := vgui.create_hbox_fill()
+	btn_row.set_padding(0)
+	btn_row.add(vgui.create_spacer(), flex: 1)
+	btn_row.add(b_close, min: 100)
+
+	mut body := vgui.create_vbox_fill()
+	body.set_padding(16)
+	body.set_spacing(10)
+	body.add(top, flex: 1)
+	body.add(name_row)
+	body.add(btn_row)
+
+	dlg.add_widget(body)
+	app.add_dialog(dlg)
+	st.presets_ui = u
 }

@@ -272,8 +272,9 @@ mut:
 	// (Preset{} - всех в папку); создаются в main - им нужны окно и App
 	import_presets fn ()       = unsafe { nil }
 	export_presets fn (Preset) = unsafe { nil }
-	delete_preset  fn (Preset) = unsafe { nil } // с подтверждением
+	show_presets   fn ()       = unsafe { nil } // окно управления
 	groups_ui    &GroupsUi       = unsafe { nil }
+	presets_ui   &PresetsUi      = unsafe { nil }
 	// Показ пересветов и провалов (clipping.v) - вид, не правка; пункт меню
 	clip_hi    bool
 	clip_lo    bool
@@ -2768,24 +2769,8 @@ fn main() {
 		}
 		nm.show_success('Экспортировано пресетов: ${n} в ${os.file_name(dir)}')
 	}
-	st.delete_preset = fn [mut st, mut app, win, mut nm] (p Preset) {
-		answer := vgui.message_box(win, mut app, vgui.MessageBoxConfig{
-			title:          'Удалить пресет'
-			message:        'Удалить пресет «${p.name}»? Файл пресета будет удалён.'
-			kind:           .warning
-			buttons:        ['Удалить', 'Отмена']
-			default_button: 1
-			cancel_button:  1
-		})
-		if answer != 0 {
-			return
-		}
-		delete_preset(p) or {
-			nm.show_error('Пресет «${p.name}» не удалён: ${err.msg()}')
-			return
-		}
-		rebuild_presets_menu(mut st)
-		nm.show_success('Пресет «${p.name}» удалён')
+	st.show_presets = fn [mut st, mut app, win] () {
+		show_presets(mut st, mut app, win)
 	}
 	st.presets_menu = bar.entries.len
 	bar.add_menu('Пресеты', []&vgui.MenuItem{})

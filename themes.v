@@ -144,6 +144,10 @@ fn apply_theme(mut st State, mut app vgui.App, idx int) {
 		mut d := st.groups_ui.dlg
 		d.set_theme(th)
 	}
+	if !isnil(st.presets_ui) {
+		mut d := st.presets_ui.dlg
+		d.set_theme(th)
+	}
 }
 
 // paint_ui - свои цвета vraw по текущей палитре (при старте и смене темы)

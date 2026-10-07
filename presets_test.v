@@ -196,3 +196,44 @@ fn test_presets_import_export() {
 		assert false
 	}
 }
+
+fn test_rename_preset() {
+	dir := os.join_path(os.temp_dir(), 'vraw_rename_${os.getpid()}')
+	os.rmdir_all(dir) or {}
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	mut e := neutral_edit()
+	e.params.exposure = 0.7
+	save_preset(dir, 'Старое', e, ['tone'])!
+	save_preset(dir, 'Другой', neutral_edit(), ['hsl'])!
+	old := list_presets(dir).filter(it.name == 'Старое')[0]
+	// Новое имя: файл переименован, поле name обновлено, настройки те же
+	path := rename_preset(old, ' Новое: имя ')!
+	assert os.file_name(path) == 'Новое_ имя.json'
+	assert !os.exists(old.path)
+	assert preset_display_name(path) == 'Новое: имя'
+	e2, g := load_preset(path)!
+	assert g == ['tone'] && e2.params.exposure == 0.7
+	assert list_presets(dir).map(it.name) == ['Другой', 'Новое_ имя']
+	p := list_presets(dir)[1]
+	// Занятое имя и пустое - ошибка, файлы не тронуты
+	if _ := rename_preset(p, 'Другой') {
+		assert false
+	}
+	if _ := rename_preset(p, '  ') {
+		assert false
+	}
+	assert list_presets(dir).len == 2 && os.exists(p.path)
+	// Смена регистра - тот же пресет, не «занято»
+	p2 := rename_preset(p, 'НОВОЕ_ ИМЯ')!
+	assert list_presets(dir).map(it.name) == ['Другой', 'НОВОЕ_ ИМЯ']
+	assert preset_display_name(p2) == 'НОВОЕ_ ИМЯ'
+	// Чужой файл не переименовывается
+	bad := os.join_path(dir, 'bad.json')
+	os.write_file(bad, '{"app": "other"}')!
+	if _ := rename_preset(Preset{ name: 'bad', path: bad }, 'Хороший') {
+		assert false
+	}
+	assert os.exists(bad)
+}
