@@ -420,6 +420,11 @@ fn export_presets(presets []Preset, dir string) !int {
 	return n
 }
 
+// delete_preset - удалить файл пресета p (подтверждение - в main)
+fn delete_preset(p Preset) ! {
+	os.rm(p.path)!
+}
+
 fn preset_json(f PresetFile) string {
 	return json2.encode(f, prettify: true, indent_string: '  ')
 }
@@ -439,7 +444,7 @@ fn apply_preset(mut st State, p Preset) {
 }
 
 // rebuild_presets_menu - меню «Пресеты»: список пресетов, «Сохранить
-// пресет...», «Обновить список» (файлы можно положить и удалить руками)
+// пресет...», импорт, экспорт, удаление, «Обновить список» (файлы можно положить и удалить руками)
 fn rebuild_presets_menu(mut st State) {
 	if isnil(st.bar) || st.presets_menu < 0 {
 		return
@@ -495,6 +500,20 @@ fn rebuild_presets_menu(mut st State) {
 		}
 	}
 	items << m_export_all
+	// Удаление - с подтверждением (окно вопроса - в main)
+	items << vgui.menu_separator()
+	mut m_delete := vgui.menu_submenu('Удалить пресет')
+	for p in presets {
+		mut it := vgui.menu_action(p.name)
+		it.on_click = fn [mut st, p] () {
+			if !isnil(st.delete_preset) {
+				st.delete_preset(p)
+			}
+		}
+		m_delete.add(it)
+	}
+	m_delete.enabled = presets.len > 0
+	items << m_delete
 	items << vgui.menu_separator()
 	mut m_reload := vgui.menu_action('Обновить список')
 	m_reload.on_click = fn [mut st] () {

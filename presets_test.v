@@ -189,4 +189,10 @@ fn test_presets_import_export() {
 	export_preset(list_presets(lib)[0], dst)!
 	_, g3 := load_preset(dst)!
 	assert g3 == ['tone', 'hsl']
+	// Удаление: файл пропадает из списка, остальные на месте
+	delete_preset(list_presets(lib)[0])!
+	assert list_presets(lib).map(it.name) == ['Пейзаж (2)']
+	if _ := delete_preset(Preset{ name: 'нет', path: os.join_path(lib, 'нет.json') }) {
+		assert false
+	}
 }
