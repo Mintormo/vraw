@@ -603,4 +603,40 @@ fn test_local_brush_auto() {
 	mut bad := auto
 	bad.cols = [f32(1), 2, 3]
 	assert lt_render(src, w, h, mk(bad)) == p
+	// Точка пути с цветом леса (центр кисти заехал на лес) не делает дыру
+	// в небе рядом: небо похоже на соседние точки, чьи круги до него
+	// достают (раньше - сравнение только с ближайшей точкой)
+	// Путь плотный, как при рисовании (точки через четверть радиуса), по
+	// небу на высоте 0.4; одна точка посередине - цвет леса
+	mut dip := Stroke{
+		...auto
+		pts:  []f32{}
+		cols: []f32{}
+	}
+	for k in 0 .. 40 {
+		dip.pts << [f32(0.1 + 0.02 * k), 0.4]
+		if k == 20 {
+			dip.cols << [f32(2500), 5000, 2000]
+		} else {
+			dip.cols << [f32(20000), 30000, 45000]
+		}
+	}
+	d := lt_render(src, w, h, mk(dip))
+	near := (80 * w + 100) * 3 // небо у «лесной» точки (0.5, 0.4)
+	assert d[near] > base[near] + 20, 'дыра в небе: ${base[near]} -> ${d[near]}'
+	// Автомаска формы (не мазка): то же, что у мазка
+	mut shp := Mask{
+		kind:     .brush
+		auto:     true
+		strokes:  [Stroke{
+			...auto
+			auto: false
+		}]
+		exposure: 2
+	}
+	assert lt_render(src, w, h, Params{
+		masks:  [shp]
+		lmap:   mm
+		dither: false
+	}) == a
 }

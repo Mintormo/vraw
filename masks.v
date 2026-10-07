@@ -744,8 +744,7 @@ fn brush_begin(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
 		radius:  brush_radius(st)
 		feather: st.brush_feather
 		flow:    st.brush_flow / 100
-		auto:    st.brush_auto
-		cols:    if st.brush_auto { brush_color(st, fx, fy) } else { []f32{} }
+		cols:    brush_color(st, fx, fy)
 	}
 	st.edit.params.masks[st.mask_sel].set_shape(st.mask_part, sh)
 	st.brush_paint = true
@@ -757,24 +756,24 @@ fn brush_begin(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
 // ломаной, путь и так гладкий; меньше точек - быстрее растеризация)
 fn brush_extend(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
 	x, y := buf_to_m(mm, fx, fy)
-	px := f32(x / mm.ar)
-	py := f32(y)
+	nx := f32(x / mm.ar)
+	ny := f32(y)
 	mut sh := st.edit.params.masks[st.mask_sel].shape(st.mask_part)
 	if sh.strokes.len == 0 {
 		return
 	}
 	k := sh.strokes.len - 1
 	n := sh.strokes[k].pts.len
-	dx := (px - sh.strokes[k].pts[n - 2]) * f32(mm.ar)
-	dy := py - sh.strokes[k].pts[n - 1]
+	dx := (nx - sh.strokes[k].pts[n - 2]) * f32(mm.ar)
+	dy := ny - sh.strokes[k].pts[n - 1]
 	step := sh.strokes[k].radius * 0.25
 	if dx * dx + dy * dy < step * step {
 		mask_redraw(st)
 		return
 	}
-	sh.strokes[k].pts << px
-	sh.strokes[k].pts << py
-	if sh.strokes[k].auto {
+	sh.strokes[k].pts << nx
+	sh.strokes[k].pts << ny
+	if sh.strokes[k].cols.len == n / 2 * 3 {
 		sh.strokes[k].cols << brush_color(st, fx, fy)
 	}
 	st.edit.params.masks[st.mask_sel].set_shape(st.mask_part, sh)
@@ -846,10 +845,14 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 	ix1, iy1 := cv.buf_to_screen(f32(st.gw), f32(st.gh))
 	ctx.push_clip(vgui.Rect{ix0, iy0, ix1 - ix0, iy1 - iy0})
 	if m.kind == .brush {
-		// Пути мазков - тонко; круг кисти под курсором: размер и граница
-		// растушёвки
-		draw_strokes(mut ctx, st, mm, m, vgui.Color{255, 255, 255, 90})
-		if st.brush_hover || st.brush_paint {
+		// Круг кисти под курсором: размер и граница мягкости (путей мазков
+		// не рисуем - мешают смотреть; покрытие видно на снимке и заливкой)
+		// Только пока мышь над снимком: leave приходит не всегда (уход на
+		// панель), поэтому - по hovered холста и положению мыши
+		mx := ctx.mouse_x
+		my := ctx.mouse_y
+		over := cv.hovered && mx >= ix0 && mx < ix1 && my >= iy0 && my < iy1
+		if st.brush_paint || (st.brush_hover && over) {
 			cx, cy := cv.buf_to_screen(st.brush_hx, st.brush_hy)
 			bx, by := buf_to_m(mm, st.brush_hx, st.brush_hy)
 			ex, ey := m_to_screen(st, mm, bx + f64(brush_radius(st)), by)
@@ -912,9 +915,7 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 			.radial {
 				draw_ellipse(mut ctx, st, mm, op, 1.0, ca, false)
 			}
-			.brush {
-				draw_strokes(mut ctx, st, mm, o, ca)
-			}
+			.brush {} // только метка
 			.linear {
 				ax, ay := m_to_screen(st, mm, op.ax, op.ay)
 				bx, by := m_to_screen(st, mm, op.bx, op.by)
@@ -943,23 +944,6 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 		ctx.draw_circle(qx, qy, 4, mask_line)
 	}
 	ctx.pop_clip()
-}
-
-// draw_strokes - пути мазков кисти ломаными на экране
-fn draw_strokes(mut ctx vgui.RenderContext, st &State, mm pipeline.MaskMap, o pipeline.MaskPart, c vgui.Color) {
-	for t in o.strokes {
-		n := t.pts.len / 2
-		mut qx := f32(0)
-		mut qy := f32(0)
-		for i in 0 .. n {
-			sx, sy := m_to_screen(st, mm, f64(t.pts[2 * i]) * mm.ar, f64(t.pts[2 * i + 1]))
-			if i > 0 {
-				ctx.draw_line(qx, qy, sx, sy, c)
-			}
-			qx = sx
-			qy = sy
-		}
-	}
 }
 
 // draw_ellipse - эллипс фильтра (масштаб k от полуосей) ломаной на экране
@@ -1090,6 +1074,10 @@ fn sync_mask_ui(mut st State) {
 	}
 	if !isnil(u.auto_cb) {
 		u.auto_cb.enabled = brush
+		was1 := st.suppress
+		st.suppress = true
+		u.auto_cb.set_checked(brush && st.edit.params.masks[st.mask_sel].shape(st.mask_part).auto)
+		st.suppress = was1
 	}
 	// Растушёвка и действие снаружи - у выделенной формы (радиальной)
 	sh := if valid { st.edit.params.masks[st.mask_sel].shape(st.mask_part) } else { pipeline.MaskPart{} }
@@ -1345,11 +1333,22 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	for i, lbl in ['Размер', 'Мягкость', 'Сила'] {
 		rows << SectionRow{brush_slider(mut st, lbl, i, lbl_w, val_w)}
 	}
-	// Автомаска - только по цвету под центром кисти (не правка)
+	// Автомаска выделенной кисти - правка (история): все её мазки красят
+	// только похожий цвет (цвета под кистью записаны у каждого мазка)
 	mut auto_cb := vgui.checkbox('Автомаска: только похожий цвет')
-	auto_cb.set_checked(st.brush_auto)
 	auto_cb.on_change = fn [mut st] (v bool) {
-		st.brush_auto = v
+		if st.suppress || !mask_valid(st) {
+			return
+		}
+		mut sh := st.edit.params.masks[st.mask_sel].shape(st.mask_part)
+		if sh.kind != .brush || sh.auto == v {
+			return
+		}
+		sh.auto = v
+		mut m := st.edit.params.masks[st.mask_sel].copy()
+		m.set_shape(st.mask_part, sh)
+		st.edit.params.masks[st.mask_sel] = m
+		mask_changed(mut st, 'mask_auto', '${shape_label(st)}: автомаска ${on_off(v)}')
 	}
 	u.auto_cb = auto_cb
 	rows << SectionRow{auto_cb}

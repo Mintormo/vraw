@@ -63,6 +63,7 @@ fn sample_masks() []pipeline.Mask {
 		},
 		pipeline.Mask{
 			kind:       .brush
+			auto:       true
 			saturation: 30
 			strokes:    [
 				pipeline.Stroke{
@@ -82,7 +83,9 @@ fn sample_masks() []pipeline.Mask {
 				pipeline.MaskPart{
 					kind:    .brush
 					op:      .subtract
+					auto:    true
 					strokes: [pipeline.Stroke{
+						cols:    [f32(100), 200, 300, 400, 500, 600]
 						pts:     [f32(0.2), 0.22, 0.25, 0.24]
 						radius:  0.02
 						feather: 10

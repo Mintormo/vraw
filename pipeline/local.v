@@ -38,10 +38,12 @@ pub enum MaskKind {
 // доля радиуса со спадом до нуля, сила 0..1. Мазки складываются как
 // объединение с силой: w + f·c - w·f·c (c - покрытие мазка)
 //
-// Автомаска (auto): мазок закрашивает только похожее на цвет под центром
-// кисти - cols, по 3 значения на точку пути (сырьё буфера до ББ и дымки,
-// u16-шкала, среднее пятна). Похожесть - по расстоянию в log2 RGB до
-// цвета ближайшей точки пути: до auto_t0 EV - полная, к auto_t1 - ноль.
+// cols - цвет под центром кисти, по 3 значения на точку пути (сырьё
+// буфера до ББ и дымки, u16-шкала, среднее пятна); пишется всегда.
+// Автомаска (auto у мазка или у формы-кисти): мазок закрашивает только
+// похожее на цвет своих точек - каждая точка красит в своём круге
+// пиксели, похожие на её цвет (по расстоянию в log2 RGB: до auto_t0 EV -
+// полностью, к auto_t1 - ноль), мазок - объединение точек.
 pub struct Stroke {
 pub mut:
 	pts     []f32
@@ -74,8 +76,9 @@ pub mut:
 	angle   f32
 	feather f32 = 50
 	invert  bool
-	// Кисть: мазки (kind == .brush)
+	// Кисть: мазки (kind == .brush); auto - автомаска всех мазков формы
 	strokes []Stroke
+	auto    bool
 	// Части фильтра (сложение масок): формы с операцией над весом -
 	// добавить, вычесть, пересечь; применяются по порядку после основы
 	parts []MaskPart
@@ -128,6 +131,7 @@ pub mut:
 	feather f32 = 50
 	invert  bool
 	strokes []Stroke
+	auto    bool // кисть: автомаска всех мазков
 }
 
 // copy - глубокая копия мазков
@@ -164,6 +168,7 @@ pub fn (m Mask) shape(i int) MaskPart {
 		feather: m.feather
 		invert:  m.invert
 		strokes: m.strokes
+		auto:    m.auto
 	}
 }
 
@@ -184,6 +189,7 @@ pub fn (mut m Mask) set_shape(i int, s MaskPart) {
 	m.feather = s.feather
 	m.invert = s.invert
 	m.strokes = s.strokes
+	m.auto = s.auto
 }
 
 // copy - глубокая копия (части - свой массив: снимки истории не должны
@@ -260,11 +266,13 @@ struct LocalShape {
 	grid   []u8 // кисть: вес 0..255 на сетке gw x gh (bigbuf, free_ctx)
 	gw     int
 	gh     int
-	// Автомаска: покрытие автомазков (как grid) и цвета точек пути (log2,
-	// по 3 на клетку) на грубой сетке rw x rh (клетка - auto_cell клеток
-	// grid); пусто - автомазков нет
+	// Автомаска: покрытие автомазков (как grid) и цвета точек пути на
+	// грубой сетке rw x rh (клетка - auto_cell клеток grid): до auto_k
+	// разных цветов (log2, по 3) точек, чьи круги накрывают клетку, число
+	// - в rn; пусто - автомазков нет
 	agrid []u8
 	rgrid []f32
+	rn    []u8
 	rw    int
 	rh    int
 	bw    int // ширина буфера (соседи пикселя в строке для автомаски)
@@ -382,15 +390,22 @@ fn compile_shape(m MaskPart, mm MaskMap) ?LocalShape {
 		gw, gh := brush_dims(mm.ar)
 		kx := f64(gw) / mm.ar
 		ky := f64(gh)
-		plain := m.strokes.filter(!it.auto || it.cols.len != it.pts.len / 2 * 3)
-		autos := m.strokes.filter(it.auto && it.cols.len == it.pts.len / 2 * 3)
+		sa := m.auto
+		plain := m.strokes.filter(!((it.auto || sa) && it.cols.len == it.pts.len / 2 * 3))
+		autos := m.strokes.filter((it.auto || sa) && it.cols.len == it.pts.len / 2 * 3)
 		rw := (gw + auto_cell - 1) / auto_cell
 		rh := (gh + auto_cell - 1) / auto_cell
+		rg, rn := if autos.len > 0 {
+			raster_refs(autos, gw, gh, rw, rh)
+		} else {
+			[]f32{}, []u8{}
+		}
 		return LocalShape{
 			brush: true
 			grid:  if plain.len > 0 { raster_strokes(plain, gw, gh) } else { []u8{} }
 			agrid: if autos.len > 0 { raster_strokes(autos, gw, gh) } else { []u8{} }
-			rgrid: if autos.len > 0 { raster_refs(autos, gw, gh, rw, rh) } else { []f32{} }
+			rgrid: rg
+			rn:    rn
 			rw:    rw
 			rh:    rh
 			bw:    mm.w
@@ -1091,6 +1106,10 @@ fn free_shape(sh &LocalShape) {
 		mut g := unsafe { sh.rgrid }
 		bigbuf.free(mut g)
 	}
+	if sh.rn.len > 0 {
+		mut g := unsafe { sh.rn }
+		bigbuf.free(mut g)
+	}
 }
 
 // free_mask - сетки кисти фильтра
@@ -1110,7 +1129,9 @@ fn free_ctx(lc &LocalCtx) {
 
 // ── Автомаска ──
 
-const auto_cell = 4 // клетка сетки цветов - auto_cell x auto_cell клеток кисти
+const auto_cell = 8 // клетка сетки цветов - auto_cell x auto_cell клеток кисти
+const auto_k = 6 // разных цветов на клетку (точки, чьи круги её накрывают)
+const auto_merge = f32(0.12) // EV: цвета ближе - один (наибольшая разница каналов)
 const auto_t0 = f32(0.25) // EV: до этого расстояния цвет «тот же»
 const auto_t1 = f32(0.8) // EV: дальше - другой, не закрашивается
 const auto_off = 128 // добавка к сырью перед log2 - шум теней не раздувает разницу
@@ -1126,16 +1147,14 @@ fn build_auto_lut() []f32 {
 	return l
 }
 
-// raster_refs - цвета автомазков на грубой сетке rw x rh (bigbuf, по 3
-// log2 на клетку): цвет ближайшей точки пути (на отрезке - между цветами
-// концов), с запасом в две клетки за край мазка - выборка у края всегда
-// попадает в заполненную клетку. Ближайший мазок - тот, что ближе
-fn raster_refs(strokes []Stroke, gw int, gh int, rw int, rh int) []f32 {
-	mut ref := bigbuf.new_f32(rw * rh * 3)
-	mut best := bigbuf.new_f32(rw * rh)
-	for i in 0 .. best.len {
-		best[i] = f32(1e30)
-	}
+// raster_refs - цвета автомазков на грубой сетке rw x rh: в клетке - до
+// auto_k разных цветов (log2, по 3; число - во втором результате) точек
+// пути, чьи круги (с запасом в клетку) накрывают клетку; на отрезке - цвет
+// между концами. Близкие (auto_merge) сливаются, лишние - не берутся:
+// клетка уже знает auto_k разных цветов вокруг
+fn raster_refs(strokes []Stroke, gw int, gh int, rw int, rh int) ([]f32, []u8) {
+	mut ref := bigbuf.new_f32(rw * rh * 3 * auto_k)
+	mut cnt := bigbuf.new_u8(rw * rh)
 	cell := f64(auto_cell)
 	fw := f64(gw) / cell // точка пути (доля) -> клетки грубой сетки
 	fh := f64(gh) / cell
@@ -1144,7 +1163,7 @@ fn raster_refs(strokes []Stroke, gw int, gh int, rw int, rh int) []f32 {
 		if n == 0 {
 			continue
 		}
-		r := f64(st.radius) * f64(gh) / cell + 2
+		r := f64(st.radius) * f64(gh) / cell + 1
 		r2 := r * r
 		last := if n > 1 { n - 1 } else { 1 }
 		for k in 0 .. last {
@@ -1175,21 +1194,37 @@ fn raster_refs(strokes []Stroke, gw int, gh int, rw int, rh int) []f32 {
 					t = if t < 0 { 0.0 } else if t > 1 { 1.0 } else { t }
 					ex := cx - t * dx
 					ey := cy - t * dy
-					d2 := ex * ex + ey * ey
+					if ex * ex + ey * ey >= r2 {
+						continue
+					}
+					ft := f32(t)
+					c0 := ca[0] + (cb[0] - ca[0]) * ft
+					c1 := ca[1] + (cb[1] - ca[1]) * ft
+					c2 := ca[2] + (cb[2] - ca[2]) * ft
 					i := y * rw + x
-					if d2 < r2 && f32(d2) < best[i] {
-						best[i] = f32(d2)
-						ft := f32(t)
-						for c in 0 .. 3 {
-							ref[3 * i + c] = ca[c] + (cb[c] - ca[c]) * ft
+					m := int(cnt[i])
+					base := i * 3 * auto_k
+					mut seen := false
+					for j in 0 .. m {
+						q := base + 3 * j
+						if math.abs(ref[q] - c0) < auto_merge && math.abs(ref[q + 1] - c1) < auto_merge
+							&& math.abs(ref[q + 2] - c2) < auto_merge {
+							seen = true
+							break
 						}
+					}
+					if !seen && m < auto_k {
+						q := base + 3 * m
+						ref[q] = c0
+						ref[q + 1] = c1
+						ref[q + 2] = c2
+						cnt[i] = u8(m + 1)
 					}
 				}
 			}
 		}
 	}
-	bigbuf.free(mut best)
-	return ref
+	return ref, cnt
 }
 
 // auto_sim - похожесть сырья пикселя px (x - его столбец в буфере) на
@@ -1206,8 +1241,12 @@ fn auto_sim(m &LocalShape, gx f32, gy f32, px &u16, x int) f32 {
 	mut ry := int((gy + 0.5) / f32(auto_cell))
 	rx = if rx < 0 { 0 } else if rx >= m.rw { m.rw - 1 } else { rx }
 	ry = if ry < 0 { 0 } else if ry >= m.rh { m.rh - 1 } else { ry }
+	ci := ry * m.rw + rx
+	nc := int(m.rn[ci])
+	if nc == 0 {
+		return 0
+	}
 	unsafe {
-		r := &f32(m.rgrid.data) + 3 * (ry * m.rw + rx)
 		l := &f32(auto_lut.data)
 		x0 := if x >= 2 { -2 } else { -x }
 		x1 := if m.bw > 0 && x + 2 >= m.bw { m.bw - 1 - x } else { 2 }
@@ -1221,10 +1260,22 @@ fn auto_sim(m &LocalShape, gx f32, gy f32, px &u16, x int) f32 {
 			c2 += int(q[2])
 		}
 		cnt := x1 - x0 + 1
-		d0 := l[c0 / cnt] - r[0]
-		d1 := l[c1 / cnt] - r[1]
-		d2 := l[c2 / cnt] - r[2]
-		d := math.sqrtf((d0 * d0 + d1 * d1 + d2 * d2) * (1.0 / 3))
+		p0 := l[c0 / cnt]
+		p1 := l[c1 / cnt]
+		p2 := l[c2 / cnt]
+		// Ближайший из цветов клетки - похожесть на него
+		mut best := f32(1e30)
+		r := &f32(m.rgrid.data) + ci * 3 * auto_k
+		for j in 0 .. nc {
+			d0 := p0 - r[3 * j]
+			d1 := p1 - r[3 * j + 1]
+			d2 := p2 - r[3 * j + 2]
+			dd := d0 * d0 + d1 * d1 + d2 * d2
+			if dd < best {
+				best = dd
+			}
+		}
+		d := math.sqrtf(best * (1.0 / 3))
 		return 1 - smooth01((d - auto_t0) / (auto_t1 - auto_t0))
 	}
 }

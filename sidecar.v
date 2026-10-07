@@ -121,8 +121,9 @@ struct SideMask {
 	// Части (сложение масок; в старых файлах нет - пусто): вид и
 	// операция строками
 	parts []SidePart
-	// Кисть: мазки основы (в старых файлах нет - пусто)
+	// Кисть: мазки основы и автомаска (в старых файлах нет - пусто, выкл)
 	strokes []SideStroke
+	auto    bool
 }
 
 // SidePart - часть фильтра в файле (pipeline.MaskPart)
@@ -139,6 +140,7 @@ struct SidePart {
 	feather f32
 	invert  bool
 	strokes []SideStroke
+	auto    bool
 }
 
 fn side_part(p pipeline.MaskPart) SidePart {
@@ -159,6 +161,7 @@ fn side_part(p pipeline.MaskPart) SidePart {
 		feather: p.feather
 		invert:  p.invert
 		strokes: p.strokes.map(side_stroke(it))
+		auto:    p.auto
 	}
 }
 
@@ -184,6 +187,7 @@ fn part_of(s SidePart) pipeline.MaskPart {
 		feather: lim(s.feather, 100)
 		invert:  s.invert
 		strokes: s.strokes.map(stroke_of(it))
+		auto:    s.auto
 	}
 }
 
@@ -226,13 +230,14 @@ fn side_stroke(t pipeline.Stroke) SideStroke {
 }
 
 // stroke_of - мазок из файла: нечётная точка отбрасывается, значения - в
-// пределах ползунков; автомаска без цвета на каждую точку - обычный мазок
+// пределах ползунков; цвета не на каждую точку отбрасываются (автомаска
+// без них - обычный мазок)
 fn stroke_of(s SideStroke) pipeline.Stroke {
 	n := s.pts.len / 2 * 2
-	auto := s.auto && s.cols.len == n / 2 * 3
+	ok := s.cols.len == n / 2 * 3
 	return pipeline.Stroke{
-		auto:    auto
-		cols:    if auto { s.cols.clone() } else { []f32{} }
+		auto:    s.auto && ok
+		cols:    if ok { s.cols.clone() } else { []f32{} }
 		pts:     s.pts[..n].clone()
 		radius:  if s.radius < 0 { f32(0) } else if s.radius > 1 { f32(1) } else { s.radius }
 		feather: clamp_pct(s.feather)
@@ -271,6 +276,7 @@ fn side_mask(m pipeline.Mask) SideMask {
 		sharpness:  m.sharpness
 		parts:      m.parts.map(side_part(it))
 		strokes:    m.strokes.map(side_stroke(it))
+		auto:       m.auto
 	}
 }
 
@@ -313,6 +319,7 @@ fn mask_of(s SideMask) pipeline.Mask {
 		sharpness:  c(s.sharpness, 100)
 		parts:      s.parts.map(part_of(it))
 		strokes:    s.strokes.map(stroke_of(it))
+		auto:       s.auto
 	}
 }
 
