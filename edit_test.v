@@ -433,6 +433,15 @@ fn test_sidecar_wb_sharp_fields() {
 	st.edit.params.vibrance = 35
 	st.edit.params.clarity = -40
 	st.edit.params.texture = 55
+	st.edit.params.fx = pipeline.Effects{
+		vig_amount:  -30
+		vig_mid:     0
+		vig_round:   20
+		vig_feather: 70
+		grain:       15
+		grain_size:  40
+		grain_rough: 0
+	}
 	st.edit.params.sharp = pipeline.Sharpen{
 		amount:      60
 		radius:      1.5
@@ -454,12 +463,15 @@ fn test_sidecar_wb_sharp_fields() {
 	assert e.params.vibrance == 35
 	assert e.params.clarity == -40
 	assert e.params.texture == 55
+	// Нули формы включённого эффекта сохраняются (не подменяются умолчанием)
+	assert e.params.fx == st.edit.params.fx
 	assert e.params.sharp.rgb && e.params.sharp.dc_amount == 70
 	assert e.params.sharp.dc_radius == f32(1.1) && e.params.sharp.dc_contrast == 0
 	// Старый файл: полей нет (чужие ключи json2 пропускает)
 	mut old := text
 	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
-		'sharp_masking', 'haze', 'haze_depth', 'vibrance', 'clarity', 'texture', 'sharp_rgb', 'dc_amount', 'dc_radius',
+		'sharp_masking', 'haze', 'haze_depth', 'vibrance', 'clarity', 'texture', 'vig_amount', 'vig_mid', 'vig_round', 'vig_feather', 'grain',
+		'grain_size', 'grain_rough', 'sharp_rgb', 'dc_amount', 'dc_radius',
 		'dc_contrast'] {
 		old = old.replace('"${key}"', '"old_${key}"')
 	}
@@ -472,6 +484,7 @@ fn test_sidecar_wb_sharp_fields() {
 	assert o.params.vibrance == 0
 	assert o.params.clarity == 0
 	assert o.params.texture == 0
+	assert o.params.fx == pipeline.Effects{}
 }
 
 // Режим «как снято» - без матрицы; другой режим - матрица по цвету камеры

@@ -2084,6 +2084,128 @@ fn main() {
 	st.hint_labels << hz_hint
 	hz_hint.font_size = 12
 
+	// ── Эффекты (pipeline/effects.v): виньетка после кадрирования и
+	// плёночное зерно - по тону в конце проявки, живые (apply)
+	mut vig_caption := vgui.label('Виньетка')
+	vig_caption.font_style = .bold
+	mut grain_caption := vgui.label('Зерно')
+	grain_caption.font_style = .bold
+	mut vig_amt := edit_slider(mut st, SliderCfg{
+		label:  'Величина'
+		hname:  'Виньетка'
+		min:    -100
+		max:    100
+		def:    0
+		digits: 0
+		signed: true
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.vig_amount
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.vig_amount = v
+		}
+		fx:     tone_fx
+	})
+	mut vig_mid := edit_slider(mut st, SliderCfg{
+		label:  'Средняя точка'
+		hname:  'Виньетка: средняя точка'
+		min:    0
+		max:    100
+		def:    50
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.vig_mid
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.vig_mid = v
+		}
+		fx:     tone_fx
+	})
+	mut vig_rnd := edit_slider(mut st, SliderCfg{
+		label:  'Округлость'
+		hname:  'Виньетка: округлость'
+		min:    -100
+		max:    100
+		def:    0
+		digits: 0
+		signed: true
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.vig_round
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.vig_round = v
+		}
+		fx:     tone_fx
+	})
+	mut vig_fth := edit_slider(mut st, SliderCfg{
+		label:  'Растушёвка'
+		hname:  'Виньетка: растушёвка'
+		min:    0
+		max:    100
+		def:    50
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.vig_feather
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.vig_feather = v
+		}
+		fx:     tone_fx
+	})
+	mut grn_amt := edit_slider(mut st, SliderCfg{
+		label:  'Величина'
+		hname:  'Зерно'
+		min:    0
+		max:    100
+		def:    0
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.grain
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.grain = v
+		}
+		fx:     tone_fx
+	})
+	mut grn_size := edit_slider(mut st, SliderCfg{
+		label:  'Размер'
+		hname:  'Зерно: размер'
+		min:    0
+		max:    100
+		def:    25
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.grain_size
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.grain_size = v
+		}
+		fx:     tone_fx
+	})
+	mut grn_rough := edit_slider(mut st, SliderCfg{
+		label:  'Грубость'
+		hname:  'Зерно: грубость'
+		min:    0
+		max:    100
+		def:    50
+		digits: 0
+		signed: false
+		get:    fn (e &EditState) f32 {
+			return e.params.fx.grain_rough
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.fx.grain_rough = v
+		}
+		fx:     tone_fx
+	})
+	mut fx_hint := vgui.label('Минус - тёмные края, плюс - светлые; зерно точно видно на 1:1')
+	st.hint_labels << fx_hint
+	fx_hint.font_size = 12
+
 	// Баланс белого: режим, пипетка, температура, оттенок (wb_ui.v)
 	wb_rows := build_wb_section(mut st, lbl_w, val_w)
 	// Кадрирование и поворот (crop.v)
@@ -2657,10 +2779,11 @@ fn main() {
 	// отменяется Ctrl+Z. Пункт меню «Правка - Сбросить тон».
 	reset_tone := fn [mut st, mut cv, mut hist, mut app] () {
 		mut e := st.edit.clone()
-		// Баланс белого (в EditState, не в params) и резкость - не тон,
-		// «Сброс» их не трогает, как шумодав
+		// Баланс белого (в EditState, не в params), резкость и эффекты -
+		// не тон, «Сброс» их не трогает, как шумодав
 		e.params = pipeline.Params{
 			sharp: st.edit.params.sharp
+			fx:    st.edit.params.fx
 		}
 		e.curve_pts = neutral_edit().curve_pts
 		restore_edit(mut st, e, mut cv, mut hist, mut app)
@@ -3105,6 +3228,19 @@ fn main() {
 		SectionRow{sh_rgb_cb},
 		SectionRow{sh_show_cb},
 		SectionRow{sharp_hint},
+	]))
+	acc.add_section('Эффекты', section([
+		SectionRow{vig_caption},
+		SectionRow{edit_row(mut st, mut vig_amt, lbl_w, val_w)},
+		SectionRow{edit_row(mut st, mut vig_mid, lbl_w, val_w)},
+		SectionRow{edit_row(mut st, mut vig_rnd, lbl_w, val_w)},
+		SectionRow{edit_row(mut st, mut vig_fth, lbl_w, val_w)},
+		SectionRow{vgui.separator()},
+		SectionRow{grain_caption},
+		SectionRow{edit_row(mut st, mut grn_amt, lbl_w, val_w)},
+		SectionRow{edit_row(mut st, mut grn_size, lbl_w, val_w)},
+		SectionRow{edit_row(mut st, mut grn_rough, lbl_w, val_w)},
+		SectionRow{fx_hint},
 	]))
 	// История - последней секцией, открыта: 8 строк списка и подсказка
 	acc.add_section_expanded('История', section([

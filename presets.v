@@ -20,11 +20,11 @@ import json2
 import vgui
 
 // Группы настроек: ключи (settings.json, файлы пресетов) и названия в окне
-const copy_groups = ['tone', 'color', 'curves', 'hsl', 'nr', 'sharp', 'haze', 'lens', 'crop',
-	'masks']
+const copy_groups = ['tone', 'color', 'curves', 'hsl', 'nr', 'sharp', 'haze', 'fx', 'lens',
+	'crop', 'masks']
 const copy_group_names = ['Экспозиция и тон', 'Баланс белого и цвет',
 	'Кривые', 'HSL', 'Шумодав и ореолы (и AI)', 'Резкость',
-	'Удаление дымки', 'Коррекция объектива', 'Кадрирование и поворот',
+	'Удаление дымки', 'Эффекты (виньетка, зерно)', 'Коррекция объектива', 'Кадрирование и поворот',
 	'Градиентные фильтры']
 
 // Группы по умолчанию (нет выбора в settings.json) - все, кроме
@@ -43,6 +43,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop' && it != 'masks')
 //   hsl    - HSL-эквалайзер
 //   nr     - классический шумодав и ореолы, AI-шумодав (сила и модель)
 //   sharp, haze, lens - резкость, удаление дымки, коррекция объектива
+//   fx     - эффекты: виньетка и зерно
 //   crop   - кадрирование и поворот (геометрия, пропорция)
 //   masks  - градиентные фильтры (заменяют фильтры кадра целиком)
 fn merge_groups(dst EditState, src EditState, groups []string) EditState {
@@ -90,6 +91,9 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 			'haze' {
 				e.params.haze = s.params.haze
 				e.params.haze_depth = s.params.haze_depth
+			}
+			'fx' {
+				e.params.fx = s.params.fx
 			}
 			'lens' {
 				e.lens_corr = s.lens_corr

@@ -674,13 +674,26 @@ fn render_side(st &State, side int, view pipeline.SharpView) []u8 {
 	// Градиентные фильтры: пиксель фрагмента - пиксель полного выхода
 	mm := pipeline.mask_map(out_geom(&st.edit), st.pw, st.ph, true, fr.ow, fr.oh).region(fr.r.x,
 		fr.r.y, fr.r.w)
+	// Эффекты (виньетка, зерно): место фрагмента в полном кадре
+	fm := pipeline.FxMap{fr.r.x, fr.r.y, fr.ow, fr.oh}
 	if side == side_before {
 		gmask, haze := ba_maps(st)
-		return detail_render(fr.lin, fr.r, fr.ow, fr.oh, gmask, st.gw, st.gh, haze, with_lmap(ba_state(st).params,
-			mm), view)
+		return detail_render(fr.lin, fr.r, fr.ow, fr.oh, gmask, st.gw, st.gh, haze, with_fxmap(with_lmap(ba_state(st).params,
+			mm), fm), view)
 	}
 	return detail_render(fr.lin, fr.r, fr.ow, fr.oh, st.gmask, st.gw, st.gh, &st.haze,
-		with_lmap(st.edit.params, mm), view)
+		with_fxmap(with_lmap(st.edit.params, mm), fm), view)
+}
+
+// with_fxmap - параметры с местом буфера в кадре для эффектов (копия, как
+// with_lmap)
+fn with_fxmap(p pipeline.Params, fm pipeline.FxMap) pipeline.Params {
+	if !p.fx.active() {
+		return p
+	}
+	mut q := p
+	q.fxmap = fm
+	return q
 }
 
 // set_frag_layer - фрагмент pix (на месте фрагмента стороны side) - слоем

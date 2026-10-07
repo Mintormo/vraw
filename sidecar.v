@@ -89,6 +89,15 @@ struct SideState {
 	clarity f32
 	// Текстура -100..100 (в старых файлах нет - 0)
 	texture f32
+	// Эффекты (pipeline.Effects; в старых файлах нет - выключены, нули
+	// формы читаются как значения по умолчанию)
+	vig_amount  f32
+	vig_mid     f32
+	vig_round   f32
+	vig_feather f32
+	grain       f32
+	grain_size  f32
+	grain_rough f32
 }
 
 // SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
@@ -438,6 +447,30 @@ fn side_state(e EditState) SideState {
 		masks:         p.masks.map(side_mask(it))
 		clarity:       p.clarity
 		texture:       p.texture
+		vig_amount:    p.fx.vig_amount
+		vig_mid:       p.fx.vig_mid
+		vig_round:     p.fx.vig_round
+		vig_feather:   p.fx.vig_feather
+		grain:         p.fx.grain
+		grain_size:    p.fx.grain_size
+		grain_rough:   p.fx.grain_rough
+	}
+}
+
+// side_fx - эффекты из файла: в старом файле полей нет (нули) - форма по
+// умолчанию; у выключенного эффекта нулевая форма - тоже по умолчанию
+fn side_fx(s SideState) pipeline.Effects {
+	d := pipeline.Effects{}
+	vig := s.vig_amount != 0
+	gr := s.grain != 0
+	return pipeline.Effects{
+		vig_amount:  s.vig_amount
+		vig_mid:     if vig || s.vig_mid > 0 { s.vig_mid } else { d.vig_mid }
+		vig_round:   s.vig_round
+		vig_feather: if vig || s.vig_feather > 0 { s.vig_feather } else { d.vig_feather }
+		grain:       s.grain
+		grain_size:  if gr || s.grain_size > 0 { s.grain_size } else { d.grain_size }
+		grain_rough: if gr || s.grain_rough > 0 { s.grain_rough } else { d.grain_rough }
 	}
 }
 
@@ -456,6 +489,7 @@ fn edit_state(s SideState) !EditState {
 			sh_highlights: s.sh_highlights
 			clarity:       s.clarity
 			texture:       s.texture
+			fx:            side_fx(s)
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			masks:         s.masks.map(mask_of(it))

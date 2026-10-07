@@ -52,7 +52,8 @@ pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Para
 	defer {
 		free_ctx(&lc) // сетки кисти фильтров
 	}
-	if (p.sharp.amount <= 0 && p.texture == 0 && !lc.use_sp && view == .off) || w < 3 || h < 3 {
+	if (p.sharp.amount <= 0 && p.texture == 0 && !p.fx.active() && !lc.use_sp && view == .off)
+		|| w < 3 || h < 3 {
 		render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil }, &lc,
 			unsafe { nil }, unsafe { nil })
 		return
@@ -69,15 +70,41 @@ pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Para
 	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) }, &lc,
 		unsafe { nil }, spp)
 	texture_tone(mut tone, w, h, p.texture, scale) // текстура - до резкости (texture.v)
-	sharpen_tone(tone, spp, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
+	// Эффекты (effects.v): виньетка - по тону до резкости, зерно - полем,
+	// которое sharpen_tone добавит к выходу
+	mut grain := if p.fx.has_grain() { bigbuf.new_u8(npix) } else { []u8{} }
+	defer {
+		if grain.len > 0 {
+			bigbuf.free(mut grain)
+		}
+	}
+	fx_tone(mut tone, mut grain, w, h, p.fx, p.fxmap, scale)
+	gr := FxGrain{
+		field: if grain.len > 0 { unsafe { &u8(grain.data) } } else { unsafe { &u8(nil) } }
+		amp:   grain_amp(p.fx, scale)
+	}
+	sharpen_tone(tone, spp, gr, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
+}
+
+// FxGrain - поле зерна для sharpen_tone (field nil - зерна нет) и его пик
+// в уровнях
+struct FxGrain {
+	field &u8 = unsafe { nil }
+	amp   f32
 }
 
 // sharpen_tone - резкость по тоновому буферу (×256) и запись 8 бит в dst.
 // Маска краёв - всегда по размытой люме; добавка - одна на все каналы
 // (по люме) или своя у каждого канала (s.rgb). sp - резкость фильтров на
-// пиксель (sp_enc, npix байт) или nil.
-fn sharpen_tone(tone []u16, sp &u8, w int, h int, s Sharpen, scale f32, dither bool, view SharpView, mut dst []u8, dst_stride int) {
+// пиксель (sp_enc, npix байт) или nil; gr - зерно (effects.v), к выходу
+// перед квантованием.
+fn sharpen_tone(tone []u16, sp &u8, gr FxGrain, w int, h int, s Sharpen, scale f32, dither bool, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
+	if s.amount <= 0 && isnil(sp) && view == .off {
+		// Резкости нет (только текстура или эффекты) - без размытия люмы
+		tone_out(tone, gr, npix, dither, mut dst, dst_stride)
+		return
+	}
 	mut l := bigbuf.new_f32(npix)
 	for i in 0 .. npix {
 		l[i] = (0.2126 * f32(tone[3 * i]) + 0.7152 * f32(tone[3 * i + 1]) +
@@ -170,6 +197,12 @@ fn sharpen_tone(tone []u16, sp &u8, w int, h int, s Sharpen, scale f32, dither b
 						ab = add
 					}
 				}
+				if !isnil(gr.field) && view == .off {
+					g := gr.amp * f32(int(gr.field[i]) - 128) * f32(1.0 / 127.0) * grain_weight(pl[i])
+					ar += g
+					ag += g
+					ab += g
+				}
 				match view {
 					.off {
 						put_px(d, i, clamp255(vr0 + ar), clamp255(vg0 + ag), clamp255(vb0 + ab),
@@ -186,6 +219,55 @@ fn sharpen_tone(tone []u16, sp &u8, w int, h int, s Sharpen, scale f32, dither b
 				}
 				d += dst_stride
 			}
+		}
+	}
+}
+
+// ToneOut - входы прохода tone_out_rows (каждый поток пишет свои пиксели)
+struct ToneOut {
+	tone   &u16 = unsafe { nil }
+	gr     FxGrain
+	dither bool
+	dst    &u8 = unsafe { nil }
+	stride int
+}
+
+// tone_out - тоновый буфер (×256) с зерном gr в 8 бит dst, полосами в
+// потоках (дизер - по номеру пикселя, как у однопоточного)
+fn tone_out(tone []u16, gr FxGrain, npix int, dither bool, mut dst []u8, dst_stride int) {
+	c := ToneOut{
+		tone:   unsafe { &u16(tone.data) }
+		gr:     gr
+		dither: dither
+		dst:    unsafe { &u8(dst.data) }
+		stride: dst_stride
+	}
+	nt := bands(npix, 1)
+	step := (npix + nt - 1) / nt
+	mut ts := []thread{}
+	for a := 0; a < npix; a += step {
+		ts << spawn tone_out_rows(&c, a, imin(npix, a + step))
+	}
+	ts.wait()
+}
+
+fn tone_out_rows(c &ToneOut, i0 int, i1 int) {
+	unsafe {
+		pt := c.tone
+		for i in i0 .. i1 {
+			j := 3 * i
+			mut vr := f32(pt[j]) * f32(1.0 / 256.0)
+			mut vg := f32(pt[j + 1]) * f32(1.0 / 256.0)
+			mut vb := f32(pt[j + 2]) * f32(1.0 / 256.0)
+			if !isnil(c.gr.field) {
+				l := 0.2126 * vr + 0.7152 * vg + 0.0722 * vb
+				g := c.gr.amp * f32(int(c.gr.field[i]) - 128) * f32(1.0 / 127.0) * grain_weight(l)
+				vr += g
+				vg += g
+				vb += g
+			}
+			put_px(c.dst + i * c.stride, i, clamp255(vr), clamp255(vg), clamp255(vb), c.dither,
+				c.stride)
 		}
 	}
 }

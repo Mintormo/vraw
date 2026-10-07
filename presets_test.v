@@ -18,6 +18,7 @@ fn sample_edit() EditState {
 	e.params.exposure = 1.5
 	e.params.eq[2] = 0.5
 	e.params.texture = 40
+	e.params.fx.vig_amount = -25
 	e.use_curve = false
 	e.wb_mode = 'cloudy'
 	e.wb_temp = 6500
@@ -41,6 +42,8 @@ fn test_merge_groups() {
 	// Только тон: экспозиция, эквалайзер, камерная кривая
 	t := merge_groups(dst, src, ['tone'])
 	assert t.params.exposure == 1.5 && t.params.eq[2] == 0.5 && t.params.texture == 40
+	assert t.params.fx.vig_amount == 0 // эффекты - своя группа
+	assert merge_groups(dst, src, ['fx']).params.fx.vig_amount == -25
 	assert !t.use_curve
 	assert t.wb_mode == '' && t.params.vibrance == 0 && t.curve_pts == dst.curve_pts
 	assert t.nr == dst.nr && t.lens_corr
@@ -148,7 +151,7 @@ fn test_plural() {
 	assert plural(3, 'кадр', 'кадра', 'кадров') == 'кадра'
 	assert plural(11, 'кадр', 'кадра', 'кадров') == 'кадров'
 	assert plural(22, 'кадр', 'кадра', 'кадров') == 'кадра'
-	assert groups_text(8) == '8 групп из 10'
+	assert groups_text(8) == '8 групп из 11'
 }
 
 // Импорт и экспорт: чужой файл отвергается, одноимённый пресет с другими
