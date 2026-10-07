@@ -210,6 +210,8 @@ struct SideStroke {
 	radius  f32
 	feather f32
 	flow    f32
+	auto    bool  // автомаска (в старых файлах нет - обычный мазок)
+	cols    []f32 // автомаска: цвет под кистью, по 3 на точку
 }
 
 fn side_stroke(t pipeline.Stroke) SideStroke {
@@ -218,14 +220,19 @@ fn side_stroke(t pipeline.Stroke) SideStroke {
 		radius:  t.radius
 		feather: t.feather
 		flow:    t.flow
+		auto:    t.auto
+		cols:    t.cols.clone()
 	}
 }
 
 // stroke_of - мазок из файла: нечётная точка отбрасывается, значения - в
-// пределах ползунков
+// пределах ползунков; автомаска без цвета на каждую точку - обычный мазок
 fn stroke_of(s SideStroke) pipeline.Stroke {
 	n := s.pts.len / 2 * 2
+	auto := s.auto && s.cols.len == n / 2 * 3
 	return pipeline.Stroke{
+		auto:    auto
+		cols:    if auto { s.cols.clone() } else { []f32{} }
 		pts:     s.pts[..n].clone()
 		radius:  if s.radius < 0 { f32(0) } else if s.radius > 1 { f32(1) } else { s.radius }
 		feather: clamp_pct(s.feather)

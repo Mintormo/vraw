@@ -544,3 +544,63 @@ fn test_local_brush() {
 		lmap:  mm
 	}) == lt_render(src, w, h, Params{})
 }
+
+// Автомаска: мазок через границу «небо / лес» с цветом неба закрашивает
+// небо и не трогает лес; обычный мазок - обе стороны; без снимка (вес
+// формы для показа) - как обычный
+fn test_local_brush_auto() {
+	w, h := 200, 200
+	mut src := []u16{len: w * h * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			i := (y * w + x) * 3
+			// Небо голубое светлое, лес тёмно-зелёный
+			c := if y < 100 { [u16(20000), 30000, 45000] } else { [u16(2500), 5000, 2000] }
+			src[i] = c[0]
+			src[i + 1] = c[1]
+			src[i + 2] = c[2]
+		}
+	}
+	mm := lt_map(w, h)
+	pts := [f32(0.2), 0.4, 0.4, 0.5, 0.6, 0.6, 0.8, 0.5]
+	mut cols := []f32{}
+	for _ in 0 .. 4 {
+		cols << [f32(20000), 30000, 45000] // кисть ведут по небу
+	}
+	auto := Stroke{
+		pts:     pts
+		radius:  0.15
+		feather: 10
+		auto:    true
+		cols:    cols
+	}
+	mk := fn [mm] (st Stroke) Params {
+		return Params{
+			masks:  [Mask{
+				kind:     .brush
+				strokes:  [st]
+				exposure: 2
+			}]
+			lmap:   mm
+			dither: false
+		}
+	}
+	base := lt_render(src, w, h, Params{ dither: false })
+	a := lt_render(src, w, h, mk(auto))
+	p := lt_render(src, w, h, mk(Stroke{
+		...auto
+		auto: false
+	}))
+	sky := (90 * w + 100) * 3 // небо у границы, под мазком
+	forest := (110 * w + 100) * 3 // лес у границы, под мазком
+	assert a[sky] > base[sky] + 20, 'небо: ${base[sky]} -> ${a[sky]}'
+	assert a[forest] == base[forest], 'лес: ${base[forest]} -> ${a[forest]}'
+	assert p[forest] > base[forest] + 10 // обычная кисть красит и лес
+	// Вес формы без снимка - покрытие кистью целиком
+	wt := mask_weights(mk(auto).masks[0], mm, w, h)
+	assert wt[110 * w + 100] > 200
+	// Цвета не по числу точек - мазок обычный
+	mut bad := auto
+	bad.cols = [f32(1), 2, 3]
+	assert lt_render(src, w, h, mk(bad)) == p
+}

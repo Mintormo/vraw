@@ -1215,7 +1215,7 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			}
 			mut ls := LocalSum{}
 			if local {
-				ls = local_sum(lc, f32(px), f32(py), y, cr, cg, cb)
+				ls = local_sum(lc, f32(px), f32(py), y, cr, cg, cb, s)
 				if !isnil(so) {
 					so[i] = sp_enc(if ls.any { ls.sp } else { f32(0) })
 				}

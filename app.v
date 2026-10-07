@@ -247,6 +247,7 @@ mut:
 	brush_size    f32 = 35
 	brush_feather f32 = 50
 	brush_flow    f32 = 100
+	brush_auto    bool // автомаска: новые мазки - только по похожему цвету
 	brush_paint   bool
 	brush_hover   bool
 	brush_hx      f32

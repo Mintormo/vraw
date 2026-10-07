@@ -61,6 +61,7 @@ mut:
 	padd_cb  &vgui.ComboBox = unsafe { nil }
 	op_cb    &vgui.ComboBox = unsafe { nil }
 	brush_sl []&vgui.Slider // настройки кисти (включены, когда выделена кисть)
+	auto_cb  &vgui.CheckBox = unsafe { nil } // автомаска кисти
 	on_btn   &vgui.Button   = unsafe { nil }
 	del_btn  &vgui.Button   = unsafe { nil }
 	done_btn &vgui.Button   = unsafe { nil }
@@ -707,6 +708,33 @@ fn brush_radius(st &State) f32 {
 	return 0.003 + 0.25 * k * k
 }
 
+// brush_color - цвет под центром кисти для автомаски: среднее пятна 5x5
+// сырья холста (glin - тот же буфер, что видит рендер, до ББ и дымки)
+fn brush_color(st &State, fx f32, fy f32) []f32 {
+	mut sum := [f64(0), 0, 0]
+	mut n := 0
+	if st.glin.len == st.gw * st.gh * 3 {
+		cx := int(fx)
+		cy := int(fy)
+		for y in cy - 2 .. cy + 3 {
+			for x in cx - 2 .. cx + 3 {
+				if x < 0 || y < 0 || x >= st.gw || y >= st.gh {
+					continue
+				}
+				i := (y * st.gw + x) * 3
+				for c in 0 .. 3 {
+					sum[c] += f64(st.glin[i + c])
+				}
+				n++
+			}
+		}
+	}
+	if n == 0 {
+		return [f32(0), 0, 0]
+	}
+	return [f32(sum[0] / n), f32(sum[1] / n), f32(sum[2] / n)]
+}
+
 // brush_begin - новый мазок выделенной кисти в точке (fx, fy) буфера
 fn brush_begin(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
 	x, y := buf_to_m(mm, fx, fy)
@@ -716,6 +744,8 @@ fn brush_begin(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
 		radius:  brush_radius(st)
 		feather: st.brush_feather
 		flow:    st.brush_flow / 100
+		auto:    st.brush_auto
+		cols:    if st.brush_auto { brush_color(st, fx, fy) } else { []f32{} }
 	}
 	st.edit.params.masks[st.mask_sel].set_shape(st.mask_part, sh)
 	st.brush_paint = true
@@ -744,6 +774,9 @@ fn brush_extend(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
 	}
 	sh.strokes[k].pts << px
 	sh.strokes[k].pts << py
+	if sh.strokes[k].auto {
+		sh.strokes[k].cols << brush_color(st, fx, fy)
+	}
 	st.edit.params.masks[st.mask_sel].set_shape(st.mask_part, sh)
 	defer_fx(mut st, st.tone_fx)
 }
@@ -1055,6 +1088,9 @@ fn sync_mask_ui(mut st State) {
 	for mut bsl in u.brush_sl {
 		bsl.enabled = brush
 	}
+	if !isnil(u.auto_cb) {
+		u.auto_cb.enabled = brush
+	}
 	// Растушёвка и действие снаружи - у выделенной формы (радиальной)
 	sh := if valid { st.edit.params.masks[st.mask_sel].shape(st.mask_part) } else { pipeline.MaskPart{} }
 	radial := valid && sh.kind == .radial
@@ -1309,6 +1345,14 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	for i, lbl in ['Размер', 'Мягкость', 'Сила'] {
 		rows << SectionRow{brush_slider(mut st, lbl, i, lbl_w, val_w)}
 	}
+	// Автомаска - только по цвету под центром кисти (не правка)
+	mut auto_cb := vgui.checkbox('Автомаска: только похожий цвет')
+	auto_cb.set_checked(st.brush_auto)
+	auto_cb.on_change = fn [mut st] (v bool) {
+		st.brush_auto = v
+	}
+	u.auto_cb = auto_cb
+	rows << SectionRow{auto_cb}
 	for spec in [
 		MaskSliderSpec{
 			label:  'Экспозиция'

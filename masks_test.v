@@ -74,6 +74,8 @@ fn sample_masks() []pipeline.Mask {
 				pipeline.Stroke{
 					pts:    [f32(0.6), 0.6]
 					radius: 0.1
+					auto:   true
+					cols:   [f32(1200), 3400, 5600]
 				},
 			]
 			parts:      [
