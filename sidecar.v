@@ -124,6 +124,9 @@ struct SideMask {
 	// Кисть: мазки основы и автомаска (в старых файлах нет - пусто, выкл)
 	strokes []SideStroke
 	auto    bool
+	// Расширить / сузить и имя (в старых файлах нет - 0 и по виду)
+	grow f32
+	name string
 }
 
 // SidePart - часть фильтра в файле (pipeline.MaskPart)
@@ -277,6 +280,8 @@ fn side_mask(m pipeline.Mask) SideMask {
 		parts:      m.parts.map(side_part(it))
 		strokes:    m.strokes.map(side_stroke(it))
 		auto:       m.auto
+		grow:       m.grow
+		name:       m.name
 	}
 }
 
@@ -320,6 +325,8 @@ fn mask_of(s SideMask) pipeline.Mask {
 		parts:      s.parts.map(part_of(it))
 		strokes:    s.strokes.map(stroke_of(it))
 		auto:       s.auto
+		grow:       c(s.grow, 100)
+		name:       clean_mask_name(s.name)
 	}
 }
 

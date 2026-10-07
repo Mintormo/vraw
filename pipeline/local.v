@@ -82,6 +82,12 @@ pub mut:
 	// Части фильтра (сложение масок): формы с операцией над весом -
 	// добавить, вычесть, пересечь; применяются по порядку после основы
 	parts []MaskPart
+	// Расширить / сузить (-100..100): край всей формы (основа с частями,
+	// до ограничения диапазоном) сдвигается наружу / внутрь на
+	// grow_max·(grow/100)² высоты кадра
+	grow f32
+	// Имя в списке фильтров (пусто - по виду: «Линейный»)
+	name string
 	// Ограничение диапазоном (умножает вес формы). По яркости - тоновая
 	// позиция пикселя (0..100: гамма-шкала люмы после экспозиции, как у
 	// теней/светов) от lum_lo до lum_hi, края спадают на lum_soft. По
@@ -338,7 +344,7 @@ const local_feather_min = f32(0.01)
 // вырождена (точки линейного совпали, нулевой радиус); вырожденная часть
 // пропускается
 fn compile_mask(m Mask, mm MaskMap, img &ImgRef) ?LocalMask {
-	form := compile_shape(m.shape(-1), mm, img)?
+	mut form := compile_shape(m.shape(-1), mm, img)?
 	mut parts := []LocalPart{}
 	for pt in m.parts {
 		pf := compile_shape(pt, mm, img) or { continue }
@@ -346,6 +352,12 @@ fn compile_mask(m Mask, mm MaskMap, img &ImgRef) ?LocalMask {
 			form: pf
 			op:   pt.op
 		}
+	}
+	if m.grow != 0 {
+		// Расширение - по весу всей формы: она растеризуется в сетку кадра
+		// и дальше берётся из неё (как кисть), частей больше нет
+		form = grow_shape(LocalMask{ form: form, parts: parts }, mm, m.grow)
+		parts = []LocalPart{}
 	}
 	return LocalMask{
 		form:  form
@@ -384,11 +396,7 @@ fn compile_shape(m MaskPart, mm MaskMap, img &ImgRef) ?LocalShape {
 		if m.strokes.len == 0 {
 			return none
 		}
-		// Сетка в долях кадра: gx = X / ar · gw - 0.5, gy = Y · gh - 0.5
-		// (центры клеток), X, Y - единицы кадра (mm)
 		gw, gh := brush_dims(mm.ar)
-		kx := f64(gw) / mm.ar
-		ky := f64(gh)
 		// Автомаска: сетка цветов снимка (в рамке автомазков) - мазки
 		// красят по похожести клетки на цвет своих точек
 		has_img := !isnil(img) && !isnil(img.src) && img.w > 0 && img.h > 0
@@ -402,18 +410,7 @@ fn compile_shape(m MaskPart, mm MaskMap, img &ImgRef) ?LocalShape {
 		if cg.len > 0 {
 			bigbuf.free(mut cg)
 		}
-		return LocalShape{
-			brush: true
-			grid:  grid
-			gw:    gw
-			gh:    gh
-			ua:    f32(mm.a * kx)
-			ub:    f32(mm.b * kx)
-			uc:    f32(mm.c * kx - 0.5)
-			va:    f32(mm.d * ky)
-			vb:    f32(mm.e * ky)
-			vc:    f32(mm.f * ky - 0.5)
-		}
+		return grid_shape(grid, gw, gh, mm)
 	}
 	ax := f64(m.ax) * mm.ar
 	ay := f64(m.ay)
@@ -456,6 +453,26 @@ fn compile_shape(m MaskPart, mm MaskMap, img &ImgRef) ?LocalShape {
 		va:     f32((-mm.a * sn + mm.d * cs) / ry)
 		vb:     f32((-mm.b * sn + mm.e * cs) / ry)
 		vc:     f32((-(mm.c - ax) * sn + (mm.f - ay) * cs) / ry)
+	}
+}
+
+// grid_shape - форма, вес которой берётся из сетки кадра gw x gh (кисть,
+// расширенная маска). Сетка в долях кадра: gx = X / ar · gw - 0.5,
+// gy = Y · gh - 0.5 (центры клеток), X, Y - единицы кадра (mm)
+fn grid_shape(grid []u8, gw int, gh int, mm MaskMap) LocalShape {
+	kx := f64(gw) / mm.ar
+	ky := f64(gh)
+	return LocalShape{
+		brush: true
+		grid:  grid
+		gw:    gw
+		gh:    gh
+		ua:    f32(mm.a * kx)
+		ub:    f32(mm.b * kx)
+		uc:    f32(mm.c * kx - 0.5)
+		va:    f32(mm.d * ky)
+		vb:    f32(mm.e * ky)
+		vc:    f32(mm.f * ky - 0.5)
 	}
 }
 
@@ -1342,4 +1359,216 @@ fn color_rows(c &ColorCtx, y0 int, y1 int) {
 			}
 		}
 	}
+}
+
+// ── Расширить / сузить ──
+//
+// Вес всей формы фильтра (основа с частями) растеризуется в сетку кадра
+// (та же, что у кисти: доли кадра S, поэтому превью, 1:1 и экспорт
+// совпадают), затем сетка расширяется (максимум по окрестности) или
+// сужается (минимум). Окрестность - правильный восьмиугольник (почти
+// круг): сумма отрезков по горизонтали и вертикали (полудлина h) и по
+// двум диагоналям (d шагов), h = √2·d, радиус h + 2d. Каждый отрезок -
+// проход van Herk / Gil-Werman: O(1) на клетку при любом радиусе. Мягкий
+// край сдвигается целиком, с той же шириной перехода. За краем кадра -
+// нейтраль (сужение не съедает маску у края кадра).
+
+// grow_max - сдвиг края при ±100, доля высоты кадра
+const grow_max = 0.1
+
+// grow_cells - сдвиг края в клетках сетки высотой gh (не меньше 1)
+fn grow_cells(grow f32, gh int) int {
+	g := f64(grow) / 100
+	r := int(grow_max * g * g * f64(gh) + 0.5)
+	return if r < 1 { 1 } else { r }
+}
+
+// grow_shape - форма lm (основа с частями), расширенная (grow > 0) или
+// суженная, сеткой кадра; сетки исходных форм освобождаются
+fn grow_shape(lm LocalMask, mm MaskMap, grow f32) LocalShape {
+	gw, gh := brush_dims(mm.ar)
+	mut g := bigbuf.new_u8(gw * gh)
+	// Клетка (gx, gy) -> пиксель буфера: кадр X = (gx + 0.5)·ar / gw,
+	// Y = (gy + 0.5) / gh, пиксель - обратное к mm (аффинное)
+	det := mm.a * mm.e - mm.b * mm.d
+	if math.abs(det) < 1e-18 {
+		free_mask(&lm)
+		return grid_shape(g, gw, gh, mm)
+	}
+	sx := mm.ar / f64(gw)
+	sy := 1.0 / f64(gh)
+	// x = (e·(X - c) - b·(Y - f)) / det, y = (-d·(X - c) + a·(Y - f)) / det
+	xc0 := 0.5 * sx - mm.c
+	yc0 := 0.5 * sy - mm.f
+	rc := GrowCtx{
+		m:  &lm
+		g:  unsafe { &u8(g.data) }
+		gw: gw
+		xa: f32(mm.e * sx / det)
+		xb: f32(-mm.b * sy / det)
+		xc: f32((mm.e * xc0 - mm.b * yc0) / det)
+		ya: f32(-mm.d * sx / det)
+		yb: f32(mm.a * sy / det)
+		yc: f32((-mm.d * xc0 + mm.a * yc0) / det)
+	}
+	nt := bands(gw, gh)
+	step := (gh + nt - 1) / nt
+	mut ts := []thread{}
+	for y0 := 0; y0 < gh; y0 += step {
+		ts << spawn grow_raster(&rc, y0, imin(gh, y0 + step))
+	}
+	ts.wait()
+	free_mask(&lm)
+	r := grow_cells(if grow < 0 { -grow } else { grow }, gh)
+	d := int(f64(r) / (2 + math.sqrt2) + 0.5)
+	h := r - 2 * d
+	mx := grow > 0
+	mut tmp := bigbuf.new_u8(gw * gh)
+	// Проходы попеременно g -> tmp и tmp -> g; in_g - результат в g
+	mut in_g := true
+	for dir in 0 .. 4 {
+		k := if dir < 2 { h } else { d }
+		if k <= 0 {
+			continue
+		}
+		pg := unsafe { &u8(g.data) }
+		pt := unsafe { &u8(tmp.data) }
+		if in_g {
+			morph_dir(pg, pt, gw, gh, dir, k, mx)
+		} else {
+			morph_dir(pt, pg, gw, gh, dir, k, mx)
+		}
+		in_g = !in_g
+	}
+	if in_g {
+		bigbuf.free(mut tmp)
+		return grid_shape(g, gw, gh, mm)
+	}
+	bigbuf.free(mut g)
+	return grid_shape(tmp, gw, gh, mm)
+}
+
+// GrowCtx - растеризация веса формы в сетку (общий для потоков, строки -
+// свои у каждого)
+struct GrowCtx {
+	m  &LocalMask = unsafe { nil }
+	g  &u8        = unsafe { nil }
+	gw int
+	xa f32 // клетка -> пиксель буфера: x = xa·gx + xb·gy + xc
+	xb f32
+	xc f32
+	ya f32
+	yb f32
+	yc f32
+}
+
+fn grow_raster(rc &GrowCtx, y0 int, y1 int) {
+	for gy in y0 .. y1 {
+		row := gy * rc.gw
+		for gx in 0 .. rc.gw {
+			x := rc.xa * f32(gx) + rc.xb * f32(gy) + rc.xc
+			y := rc.ya * f32(gx) + rc.yb * f32(gy) + rc.yc
+			w := mask_weight(rc.m, x, y)
+			unsafe {
+				rc.g[row + gx] = u8(int(w * 255 + 0.5))
+			}
+		}
+	}
+}
+
+// line_count - число линий направления dir (0 - строки, 1 - столбцы,
+// 2 - диагонали вниз-вправо, 3 - вниз-влево) сетки w x h
+fn line_count(dir int, w int, h int) int {
+	return match dir {
+		0 { h }
+		1 { w }
+		else { w + h - 1 }
+	}
+}
+
+// line_of - линия l направления dir: первая клетка, шаг, длина
+fn line_of(dir int, l int, w int, h int) (int, int, int) {
+	match dir {
+		0 {
+			return l * w, 1, w
+		}
+		1 {
+			return l, w, h
+		}
+		2 {
+			// Начала: верхняя строка (x = l), затем левый столбец
+			x, y := if l < w { l, 0 } else { 0, l - w + 1 }
+			return y * w + x, w + 1, imin(w - x, h - y)
+		}
+		else {
+			// Начала: верхняя строка (x = l), затем правый столбец
+			x, y := if l < w { l, 0 } else { w - 1, l - w + 1 }
+			return y * w + x, w - 1, imin(x + 1, h - y)
+		}
+	}
+}
+
+// morph_dir - максимум (mx) или минимум по отрезку ±k клеток вдоль линий
+// направления dir: src -> dst
+fn morph_dir(src &u8, dst &u8, w int, h int, dir int, k int, mx bool) {
+	n := line_count(dir, w, h)
+	nt := bands(w, h)
+	if nt <= 1 {
+		morph_lines(src, dst, w, h, dir, k, mx, 0, n)
+		return
+	}
+	step := (n + nt - 1) / nt
+	mut ts := []thread{}
+	for l0 := 0; l0 < n; l0 += step {
+		ts << spawn morph_lines(src, dst, w, h, dir, k, mx, l0, imin(n, l0 + step))
+	}
+	ts.wait()
+}
+
+// morph_lines - линии l0..l1 (van Herk / Gil-Werman): линия, дополненная k
+// нейтральными с краёв, режется на блоки по 2k + 1; в блоке - накопленный
+// экстремум слева направо (f) и справа налево (b); экстремум окна с
+// началом i - op(b[i], f[i + 2k])
+fn morph_lines(src &u8, dst &u8, w int, h int, dir int, k int, mx bool, l0 int, l1 int) {
+	ww := 2 * k + 1
+	cap := imax(w, h) + 2 * k + ww
+	neutral := if mx { u8(0) } else { u8(255) }
+	mut e := []u8{len: cap}
+	mut f := []u8{len: cap}
+	mut b := []u8{len: cap}
+	for l in l0 .. l1 {
+		start, st, n := line_of(dir, l, w, h)
+		// Дополненная линия длиной m (кратно ww)
+		m := ((n + 2 * k + ww - 1) / ww) * ww
+		for i in 0 .. m {
+			j := i - k
+			e[i] = if j >= 0 && j < n { unsafe { src[start + j * st] } } else { neutral }
+		}
+		for b0 := 0; b0 < m; b0 += ww {
+			f[b0] = e[b0]
+			for i in b0 + 1 .. b0 + ww {
+				f[i] = if mx { u8_max(f[i - 1], e[i]) } else { u8_min(f[i - 1], e[i]) }
+			}
+			b[b0 + ww - 1] = e[b0 + ww - 1]
+			for i := b0 + ww - 2; i >= b0; i-- {
+				b[i] = if mx { u8_max(b[i + 1], e[i]) } else { u8_min(b[i + 1], e[i]) }
+			}
+		}
+		for i in 0 .. n {
+			v := if mx { u8_max(b[i], f[i + 2 * k]) } else { u8_min(b[i], f[i + 2 * k]) }
+			unsafe {
+				dst[start + i * st] = v
+			}
+		}
+	}
+}
+
+@[inline]
+fn u8_max(a u8, b u8) u8 {
+	return if a > b { a } else { b }
+}
+
+@[inline]
+fn u8_min(a u8, b u8) u8 {
+	return if a < b { a } else { b }
 }

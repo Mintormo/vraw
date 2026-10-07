@@ -3001,6 +3001,17 @@ fn main() {
 		SectionRow{hsl_tabs},
 	]))
 	acc.add_section('Градиентные фильтры', section(mask_rows))
+	// Раскрытая секция показывает метки всех фильтров на снимке
+	if !isnil(st.mask_ui) {
+		mut mu := st.mask_ui
+		mu.acc = acc
+		mu.acc_idx = acc.get_section_count() - 1
+	}
+	acc.on_change = fn [mut st] (idx int, open bool) {
+		if !isnil(st.mask_ui) && idx == st.mask_ui.acc_idx {
+			mask_redraw(st)
+		}
+	}
 	acc.add_section('Шумодав и ореолы', section([
 		SectionRow{ai_caption},
 		SectionRow{ai_block},

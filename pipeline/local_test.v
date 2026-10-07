@@ -712,3 +712,103 @@ fn max_jump(wt []u8, w int, h int) int {
 	}
 	return jump
 }
+
+// Расширить / сузить: край круга сдвигается на 0.1 высоты при ±100 (по
+// осям и диагонали), 0 - как без него, сужение у края кадра не съедает
+// маску, буфер вдвое больше - тот же вес в тех же точках кадра
+fn test_local_grow() {
+	w, h := 600, 400
+	mm := lt_map(w, h)
+	disk := Mask{
+		kind:     .radial
+		ax:       0.5
+		ay:       0.5
+		rx:       0.2
+		ry:       0.2
+		feather:  1
+		exposure: 1
+	}
+	// Точка на расстоянии r (доли высоты) от центра под углом 0 / 45°
+	at := fn [w, h] (wt []u8, r f64, diag bool) int {
+		k := if diag { r / math.sqrt2 } else { r }
+		x := int(f64(w) / 2 + k * f64(h))
+		y := int(f64(h) / 2 + (if diag { k } else { 0.0 }) * f64(h))
+		return int(wt[y * w + x])
+	}
+	base := mask_weights(disk, mm, w, h)
+	assert at(base, 0.25, false) == 0 && at(base, 0.15, false) == 255
+	mut g0 := disk.copy()
+	g0.grow = 0
+	assert mask_weights(g0, mm, w, h) == base
+	mut gp := disk.copy()
+	gp.grow = 100
+	wp := mask_weights(gp, mm, w, h)
+	for diag in [false, true] {
+		assert at(wp, 0.27, diag) == 255
+		assert at(wp, 0.33, diag) == 0
+	}
+	mut gn := disk.copy()
+	gn.grow = -100
+	wn := mask_weights(gn, mm, w, h)
+	for diag in [false, true] {
+		assert at(wn, 0.07, diag) == 255
+		assert at(wn, 0.13, diag) == 0
+	}
+	// Половина силы - четверть сдвига (0.025 высоты)
+	mut gh := disk.copy()
+	gh.grow = 50
+	wh := mask_weights(gh, mm, w, h)
+	assert at(wh, 0.215, false) == 255 && at(wh, 0.24, false) == 0
+	// Маска на весь кадр: сужение не трогает край кадра
+	mut all := Mask{
+		kind:     .linear
+		ax:       0
+		ay:       2
+		bx:       0
+		by:       3
+		exposure: 1
+		grow:     -100
+	}
+	wa := mask_weights(all, mm, w, h)
+	assert wa[0] == 255 && wa[w * h - 1] == 255 && wa[(h / 2) * w + w / 2] == 255
+	all.grow = 0
+	// Части тоже расширяются: круг минус круг поменьше - кольцо, при
+	// расширении дырка сужается
+	mut ring := disk.copy()
+	ring.parts << MaskPart{
+		kind:    .radial
+		op:      .subtract
+		ax:      0.5
+		ay:      0.5
+		rx:      0.1
+		ry:      0.1
+		feather: 1
+	}
+	wr := mask_weights(ring, mm, w, h)
+	assert at(wr, 0.0, false) == 0 && at(wr, 0.15, false) == 255
+	ring.grow = 70 // сдвиг 0.049
+	wr2 := mask_weights(ring, mm, w, h)
+	assert at(wr2, 0.07, false) == 255 && at(wr2, 0.02, false) == 0
+	assert at(wr2, 0.23, false) == 255
+	// Буфер вдвое больше - тот же вес в тех же точках (мягкий край: у
+	// жёсткого пиксель вдвое большего буфера - среднее четырёх, это
+	// сглаживание, а не расхождение)
+	mut soft := gp.copy()
+	soft.feather = 60
+	wp1 := mask_weights(soft, mm, w, h)
+	w2, h2 := 2 * w, 2 * h
+	wb := mask_weights(soft, lt_map(w2, h2), w2, h2)
+	mut worst := 0
+	for j := 0; j < h; j += 7 {
+		for i := 0; i < w; i += 7 {
+			a := int(wp1[j * w + i])
+			b := (int(wb[(2 * j) * w2 + 2 * i]) + int(wb[(2 * j) * w2 + 2 * i + 1]) +
+				int(wb[(2 * j + 1) * w2 + 2 * i]) + int(wb[(2 * j + 1) * w2 + 2 * i + 1])) / 4
+			d := if a > b { a - b } else { b - a }
+			if d > worst {
+				worst = d
+			}
+		}
+	}
+	assert worst <= 3, 'расхождение ${worst}'
+}

@@ -76,6 +76,11 @@ mut:
 	col_sl   []&vgui.Slider
 	pick_btn &vgui.Button   = unsafe { nil }
 	m_show   &vgui.MenuItem = unsafe { nil }
+	name_in  &vgui.TextInput = unsafe { nil } // имя выделенного (Enter)
+	// Аккордеон панели и индекс секции «Градиентные фильтры»: раскрытая
+	// секция показывает метки фильтров и без выделения
+	acc     &vgui.Accordion = unsafe { nil }
+	acc_idx int = -1
 }
 
 // ── Отображение холст <-> кадр ──
@@ -160,15 +165,37 @@ fn mask_valid(st &State) bool {
 // mask_active - ручки на холсте: есть выделенный фильтр, кадр проявлен,
 // не кадрирование и не JPEG камеры
 fn mask_active(st &State) bool {
-	return mask_valid(st) && !st.crop_mode && st.linear.len > 0 && !jpeg_active(st)
-		&& !isnil(st.cv)
+	return mask_valid(st) && mask_canvas(st)
 }
 
+// mask_canvas - на холсте можно показывать фильтры: кадр проявлен, не
+// кадрирование и не JPEG камеры
+fn mask_canvas(st &State) bool {
+	return !st.crop_mode && st.linear.len > 0 && !jpeg_active(st) && !isnil(st.cv)
+}
+
+// mask_pins_only - фильтр не выделен, но секция «Градиентные фильтры»
+// раскрыта: на снимке метки всех фильтров, щелчок по метке выделяет
+fn mask_pins_only(st &State) bool {
+	if mask_valid(st) || st.edit.params.masks.len == 0 || !mask_canvas(st)
+		|| isnil(st.mask_ui) {
+		return false
+	}
+	u := st.mask_ui
+	return !isnil(u.acc) && u.acc.is_expanded(u.acc_idx)
+}
+
+// mask_name - строка списка фильтров: имя (или вид), число частей,
+// «выкл»
 fn mask_name(m pipeline.Mask, i int) string {
-	kind := match m.kind {
-		.radial { 'Радиальный' }
-		.brush { 'Кисть' }
-		.linear { 'Линейный' }
+	kind := if m.name != '' {
+		m.name
+	} else {
+		match m.kind {
+			.radial { 'Радиальный' }
+			.brush { 'Кисть' }
+			.linear { 'Линейный' }
+		}
 	}
 	off := if m.on { '' } else { '  (выкл)' }
 	parts := if m.parts.len > 0 { ' +${m.parts.len}' } else { '' }
@@ -405,6 +432,35 @@ fn delete_mask(mut st State) {
 	mask_changed(mut st, 'mask_del', 'Фильтр: удалён')
 }
 
+// mask_name_max - длина имени фильтра, символов
+const mask_name_max = 40
+
+// clean_mask_name - имя фильтра без переводов строк и пробелов по краям,
+// не длиннее mask_name_max
+fn clean_mask_name(s string) string {
+	mut r := s.replace_each(['\r', ' ', '\n', ' ', '\t', ' ']).trim_space().runes()
+	if r.len > mask_name_max {
+		r = r[..mask_name_max].clone()
+	}
+	return r.string().trim_space()
+}
+
+// rename_mask - имя выделенного фильтра (пусто - снова по виду)
+fn rename_mask(mut st State, text string) {
+	if !mask_valid(st) {
+		return
+	}
+	i := st.mask_sel
+	name := clean_mask_name(text)
+	if name == st.edit.params.masks[i].name {
+		sync_mask_ui(mut st)
+		return
+	}
+	st.edit.params.masks[i].name = name
+	what := if name == '' { 'имя по виду' } else { 'имя «${name}»' }
+	mask_changed(mut st, 'mask_name', 'Фильтр ${i + 1}: ${what}')
+}
+
 fn toggle_mask(mut st State) {
 	if !mask_valid(st) {
 		return
@@ -575,6 +631,9 @@ fn pin_hit(st &State, mm pipeline.MaskMap, sx f32, sy f32) int {
 
 // mask_input - мышь на холсте при выделенном фильтре; true - обработано
 fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
+	if mask_pins_only(st) {
+		return pins_input(mut st, ev)
+	}
 	if !mask_active(st) {
 		return false
 	}
@@ -697,6 +756,50 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 		else {}
 	}
 	return false
+}
+
+// pins_input - мышь на холсте, когда видны только метки фильтров:
+// указатель-рука над меткой, щелчок выделяет фильтр
+fn pins_input(mut st State, ev &vgui.CanvasInputEvent) bool {
+	cv := st.cv
+	mm := view_map(st)
+	sx, sy := cv.buf_to_screen(ev.fx, ev.fy)
+	match ev.kind {
+		.hover {
+			vgui.set_cursor(if pin_hit(st, mm, sx, sy) >= 0 {
+				vgui.sdl_system_cursor_hand
+			} else {
+				vgui.sdl_system_cursor_default
+			})
+		}
+		.pointer_down {
+			if ev.button == 1 {
+				pin := pin_hit(st, mm, sx, sy)
+				if pin >= 0 {
+					select_mask(mut st, pin)
+					return true
+				}
+			}
+		}
+		else {}
+	}
+	return false
+}
+
+// draw_pins - метки фильтров (кроме выделенного): кружок в начале основы
+fn draw_pins(mut ctx vgui.RenderContext, st &State, mm pipeline.MaskMap) {
+	for i, o in st.edit.params.masks {
+		if i == st.mask_sel {
+			continue
+		}
+		ox, oy, ok := shape_anchor(o.shape(-1), mm.ar)
+		if !ok {
+			continue
+		}
+		qx, qy := m_to_screen(st, mm, ox, oy)
+		ctx.fill_circle(qx, qy, 5.5, mask_dark)
+		ctx.draw_circle(qx, qy, 4, mask_line)
+	}
 }
 
 // ── Кисть ──
@@ -830,7 +933,8 @@ fn drag_mask(d MaskDrag, x f64, y f64, ar f64) pipeline.MaskPart {
 // mask_overlay - ручки выделенного фильтра и метки остальных (поверх
 // снимка, без пересчёта)
 fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
-	if !mask_active(st) {
+	pins_only := mask_pins_only(st)
+	if !pins_only && !mask_active(st) {
 		return
 	}
 	cv := st.cv
@@ -838,6 +942,14 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 		return // превью ещё не пересчитано
 	}
 	mm := view_map(st)
+	if pins_only {
+		ix0, iy0 := cv.buf_to_screen(0, 0)
+		ix1, iy1 := cv.buf_to_screen(f32(st.gw), f32(st.gh))
+		ctx.push_clip(vgui.Rect{ix0, iy0, ix1 - ix0, iy1 - iy0})
+		draw_pins(mut ctx, st, mm)
+		ctx.pop_clip()
+		return
+	}
 	full := st.edit.params.masks[st.mask_sel]
 	m := full.shape(st.mask_part)
 	p := mask_pts(m, mm.ar)
@@ -931,18 +1043,7 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 		ctx.fill_circle(qx, qy, 4.5, c)
 	}
 	// Метки остальных фильтров - щелчок выделяет
-	for i, o in st.edit.params.masks {
-		if i == st.mask_sel {
-			continue
-		}
-		ox, oy, ok := shape_anchor(o.shape(-1), mm.ar)
-		if !ok {
-			continue
-		}
-		qx, qy := m_to_screen(st, mm, ox, oy)
-		ctx.fill_circle(qx, qy, 5.5, mask_dark)
-		ctx.draw_circle(qx, qy, 4, mask_line)
-	}
+	draw_pins(mut ctx, st, mm)
 	ctx.pop_clip()
 }
 
@@ -1020,7 +1121,7 @@ fn sync_mask_ui(mut st State) {
 		mut names := [if st.edit.params.masks.len == 0 {
 			'Фильтров нет'
 		} else {
-			'Не выбран'
+			'Выберите фильтр'
 		}]
 		for i, m in st.edit.params.masks {
 			names << mask_name(m, i)
@@ -1098,6 +1199,14 @@ fn sync_mask_ui(mut st State) {
 	if !isnil(u.done_btn) {
 		u.done_btn.enabled = valid
 	}
+	// Имя: поле в фокусе (человек печатает) не трогаем
+	if !isnil(u.name_in) {
+		mut ni := u.name_in
+		ni.enabled = valid
+		if !ni.focused {
+			ni.set_text(if valid { st.edit.params.masks[st.mask_sel].name } else { '' })
+		}
+	}
 	if !isnil(u.on_btn) {
 		on := valid && st.edit.params.masks[st.mask_sel].on
 		u.on_btn.icon_name = if on || !valid { 'eye' } else { 'eye-off' }
@@ -1115,6 +1224,7 @@ enum MaskField {
 	saturation
 	temp
 	tint
+	grow
 	feather
 	lum_lo
 	lum_hi
@@ -1135,6 +1245,7 @@ fn mask_get(m pipeline.Mask, f MaskField, part int) f32 {
 		.saturation { m.saturation }
 		.temp { m.temp }
 		.tint { m.tint }
+		.grow { m.grow }
 		.feather { m.shape(part).feather }
 		.lum_lo { m.lum_lo }
 		.lum_hi { m.lum_hi }
@@ -1155,6 +1266,7 @@ fn mask_set(mut m pipeline.Mask, f MaskField, v f32, part int) {
 		.saturation { m.saturation = v }
 		.temp { m.temp = v }
 		.tint { m.tint = v }
+		.grow { m.grow = v }
 		.feather {
 			mut sh := m.shape(part)
 			sh.feather = v
@@ -1266,6 +1378,20 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	sel_row.add(sel_cb, flex: 1)
 	sel_row.add(on_b)
 	sel_row.add(del_b)
+	// Имя фильтра в списке: Enter - применить, пусто - по виду
+	mut name_in := vgui.text_input('По виду: «Линейный»')
+	name_in.max_len = mask_name_max
+	name_in.on_submit = fn [mut st] (s string) {
+		rename_mask(mut st, s)
+	}
+	u.name_in = name_in
+	mut name_tip := vgui.tooltip('Имя фильтра в списке: введите и нажмите Enter')
+	name_tip.attach(name_in)
+	st.tips << name_tip
+	mut name_row := vgui.create_hbox_fill()
+	name_row.set_spacing(6)
+	name_row.add(vgui.label('Имя'), min: lbl_w)
+	name_row.add(name_in, flex: 1)
 
 	mut done_b := icon_button(mut st, 'check', 'Готово: снять выделение (Esc)')
 	done_b.on_click = fn [mut st] () {
@@ -1327,7 +1453,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	part_row.add(padd_cb, flex: 3)
 	part_row.add(op_cb, flex: 2)
 
-	mut rows := [SectionRow{add_row}, SectionRow{sel_row}, SectionRow{form_row},
+	mut rows := [SectionRow{add_row}, SectionRow{sel_row}, SectionRow{name_row}, SectionRow{form_row},
 		SectionRow{part_row}, SectionRow{tools}]
 	// Кисть: размер, растушёвка, сила - для новых мазков (не правка)
 	for i, lbl in ['Размер', 'Мягкость', 'Сила'] {
@@ -1397,6 +1523,12 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w)}
 	}
 	rows << SectionRow{vgui.separator()}
+	// Расширить / сузить - вся форма фильтра (минус - сузить)
+	mut gr := mask_slider(mut st, MaskSliderSpec{
+		label: 'Расширить'
+		f:     .grow
+	})
+	rows << SectionRow{edit_row(mut st, mut gr, lbl_w, val_w)}
 	mut fe := mask_slider(mut st, MaskSliderSpec{
 		label:  'Растушёвка'
 		f:      .feather

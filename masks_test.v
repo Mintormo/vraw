@@ -127,6 +127,29 @@ fn test_sidecar_masks() {
 		}]
 	})!.params.masks[0]
 	assert !old.lum_on && old.lum_hi == 100 && old.lum_soft == 10 && old.hue_w == 30
+	assert old.grow == 0 && old.name == ''
+	// Расширение и имя: через JSON - те же; чужое - в пределах, имя в одну
+	// строку и не длиннее mask_name_max
+	mut named := e.params.masks[0].copy()
+	named.grow = -35
+	named.name = 'Небо «закат»'
+	mut en := neutral_edit()
+	en.params.masks = [named]
+	nb := edit_state(json2.decode[SideState](json2.encode(side_state(en)))!)!.params.masks[0]
+	assert nb.grow == -35 && nb.name == 'Небо «закат»'
+	long := edit_state(SideState{
+		...bad
+		masks: [SideMask{
+			kind: 'linear'
+			by:   1
+			grow: 500
+			name: '  два\nслова ' + 'я'.repeat(60)
+		}]
+	})!.params.masks[0]
+	assert long.grow == 100 && !long.name.contains('\n') && long.name.starts_with('два слова')
+	assert long.name.runes().len == mask_name_max
+	assert mask_name(nb, 2) == '3. Небо «закат»'
+	assert mask_name(old, 0) == '1. Линейный  (выкл)'
 }
 
 // Снимок истории не делит массив фильтров с живым состоянием; группа
