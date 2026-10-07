@@ -61,15 +61,20 @@ pub fn geom_source_box(g Geom, w int, h int, crop bool, r Region) Region {
 	}
 	ow, oh := g.out_size(w, h, crop)
 	m := geom_affine(g, w, h, crop, ow, oh)
+	pp := if g.has_persp() { geom_proj(g, w, h, crop, ow, oh) } else { Proj{} }
 	mut sx0 := math.max_f64
 	mut sy0 := math.max_f64
 	mut sx1 := -math.max_f64
 	mut sy1 := -math.max_f64
-	// Отображение аффинное - крайние точки у углов прямоугольника
+	// Отображение аффинное или проективное (прямые - в прямые) - крайние
+	// точки у углов прямоугольника
 	for c in [[r.x, r.y], [r.x + r.w - 1, r.y], [r.x, r.y + r.h - 1],
 		[r.x + r.w - 1, r.y + r.h - 1]] {
-		sx := m.a * c[0] + m.b * c[1] + m.c
-		sy := m.d * c[0] + m.e * c[1] + m.f
+		mut sx := m.a * c[0] + m.b * c[1] + m.c
+		mut sy := m.d * c[0] + m.e * c[1] + m.f
+		if g.has_persp() {
+			sx, sy = pp.at(f64(c[0]), f64(c[1]))
+		}
 		sx0 = math.min(sx0, sx)
 		sy0 = math.min(sy0, sy)
 		sx1 = math.max(sx1, sx)
@@ -85,7 +90,7 @@ pub fn geom_source_box(g Geom, w int, h int, crop bool, r Region) Region {
 
 // geom_is_copy - геометрия выдаёт кадр как есть (geom_apply - копия)
 fn geom_is_copy(g Geom, crop bool) bool {
-	return g.is_identity() || (!crop && g.rot90 % 4 == 0 && !g.flip_h && !g.flip_v && g.angle == 0)
+	return g.is_noop(crop)
 }
 
 fn clamp_i(v int, lo int, hi int) int {
@@ -115,62 +120,23 @@ pub fn geom_apply_region(src &u16, sb Region, w int, h int, ch int, g Geom, crop
 		return out
 	}
 	ow, oh := g.out_size(w, h, crop)
+	if g.has_persp() || g.angle != 0 {
+		persp_apply(src, sb, w, h, ch, geom_proj(g, w, h, crop, ow, oh), r, unsafe { &u16(out.data) })
+		return out
+	}
+	// Без поворота - ближайший пиксель, как у geom_apply
 	m := geom_affine(g, w, h, crop, ow, oh)
 	unsafe {
 		mut d := &u16(out.data)
-		if g.angle == 0 {
-			for j in r.y .. r.y + r.h {
-				for i in r.x .. r.x + r.w {
-					sx := clamp_i(int(math.floor(m.a * i + m.b * j + m.c)), 0, w - 1)
-					sy := clamp_i(int(math.floor(m.d * i + m.e * j + m.f)), 0, h - 1)
-					s := at(sx, sy)
-					for c in 0 .. ch {
-						d[c] = s[c]
-					}
-					d += ch
-				}
-			}
-			return out
-		}
-		// Тот же шаг, что у geom_apply: начало строки и приращение m.a/m.d
-		// (накопленная сумма - побитовое совпадение с полным проходом)
 		for j in r.y .. r.y + r.h {
-			mut sx := m.a * 0 + m.b * j + m.c - 0.5
-			mut sy := m.d * 0 + m.e * j + m.f - 0.5
-			for _ in 0 .. r.x {
-				sx += m.a
-				sy += m.d
-			}
-			for _ in 0 .. r.w {
-				if sx < -0.5 || sy < -0.5 || sx > f64(w) - 0.5 || sy > f64(h) - 0.5 {
-					for c in 0 .. ch {
-						d[c] = 0
-					}
-				} else {
-					mut x0 := int(math.floor(sx))
-					mut y0 := int(math.floor(sy))
-					fx := f32(sx - f64(x0))
-					fy := f32(sy - f64(y0))
-					mut x1 := x0 + 1
-					mut y1 := y0 + 1
-					x0 = if x0 < 0 { 0 } else { x0 }
-					y0 = if y0 < 0 { 0 } else { y0 }
-					x1 = if x1 >= w { w - 1 } else { x1 }
-					y1 = if y1 >= h { h - 1 } else { y1 }
-					p00 := at(x0, y0)
-					p10 := at(x1, y0)
-					p01 := at(x0, y1)
-					p11 := at(x1, y1)
-					for c in 0 .. ch {
-						top := f32(p00[c]) + (f32(p10[c]) - f32(p00[c])) * fx
-						bot := f32(p01[c]) + (f32(p11[c]) - f32(p01[c])) * fx
-						v := top + (bot - top) * fy
-						d[c] = u16(if v < 0 { f32(0) } else if v > 65535 { f32(65535) } else { v + 0.5 })
-					}
+			for i in r.x .. r.x + r.w {
+				sx := clamp_i(int(math.floor(m.a * i + m.b * j + m.c)), 0, w - 1)
+				sy := clamp_i(int(math.floor(m.d * i + m.e * j + m.f)), 0, h - 1)
+				s := at(sx, sy)
+				for c in 0 .. ch {
+					d[c] = s[c]
 				}
 				d += ch
-				sx += m.a
-				sy += m.d
 			}
 		}
 	}

@@ -39,6 +39,7 @@ enum CropDragKind {
 	move
 	handle
 	horizon
+	persp  // линия для перспективы (инструмент «по двум линиям»)
 	rotate // поворот кадра перетаскиванием снаружи рамки
 }
 
@@ -70,7 +71,10 @@ mut:
 	total       &vgui.Label    = unsafe { nil }
 	grid_cb     &vgui.ComboBox = unsafe { nil }
 	horizon_btn &vgui.Button   = unsafe { nil }
+	persp_btn   &vgui.Button   = unsafe { nil } // перспектива по двум линиям
 	angle_sl    &vgui.Slider   = unsafe { nil }
+	pv_sl       &vgui.Slider   = unsafe { nil } // перспектива: вертикаль
+	ph_sl       &vgui.Slider   = unsafe { nil } // и горизонталь
 	angle_in    &vgui.TextInput = unsafe { nil } // угол вручную (Enter)
 	m_crop      &vgui.MenuItem = unsafe { nil }
 }
@@ -268,6 +272,7 @@ fn set_crop_mode(mut st State, on bool) {
 		}
 	} else {
 		st.horizon = false
+	st.persp_tool = false
 		vgui.set_cursor(vgui.sdl_system_cursor_default)
 	}
 	st.tone_fx()
@@ -289,6 +294,7 @@ fn crop_cancel(mut st State) {
 	st.edit.crop_portrait = b.crop_portrait
 	st.crop_mode = false
 	st.horizon = false
+	st.persp_tool = false
 	st.crop_drag = CropDrag{}
 	vgui.set_cursor(vgui.sdl_system_cursor_default)
 	set_edit(mut st, st.edit)
@@ -303,8 +309,44 @@ fn crop_cancel(mut st State) {
 fn crop_leave(mut st State) {
 	st.crop_mode = false
 	st.horizon = false
+	st.persp_tool = false
 	st.crop_drag = CropDrag{}
 	sync_crop_ui(mut st)
+}
+
+// persp_line_done - проведена линия перспективы: первая запоминается,
+// после второй - перспектива и наклон, при которых линии станут
+// вертикальными или горизонтальными (pipeline.persp_lines), рамка
+// подгоняется как при смене угла
+fn persp_line_done(mut st State, d CropDrag) {
+	if math.hypot(d.cx - d.px, d.cy - d.py) < 10 {
+		return // щелчок без линии
+	}
+	iw0, ih0 := crop_frame(st)
+	w0 := f64(iw0)
+	h0 := f64(ih0)
+	g := st.edit.geom
+	// Точки R -> V' (снять наклон) -> V (снимок без перспективы)
+	to_v := fn [g, w0, h0] (x f64, y f64) (f64, f64) {
+		qx, qy := g.r_to_v(x, y, w0, h0)
+		return pipeline.persp_to_v(g, w0, h0, qx, qy)
+	}
+	ax, ay := to_v(d.px, d.py)
+	bx, by := to_v(d.cx, d.cy)
+	line := [ax, ay, bx, by]
+	if st.persp_l1.len != 4 {
+		st.persp_l1 = [d.px, d.py, d.cx, d.cy]
+		st.persp_v1 = line
+		return
+	}
+	fit := pipeline.persp_lines([st.persp_v1, line], w0, h0, g)
+	st.persp_tool = false
+	st.persp_l1 = []f64{}
+	mut ng := geom_with_angle(st, fit.angle)
+	ng.pv = fit.pv
+	ng.ph = fit.ph
+	crop_apply(mut st, ng, 'persp_lines', 'Перспектива по линиям: ${int(fit.pv)}, ${int(fit.ph)}, ${angle_text(fit.angle)}',
+		false)
 }
 
 // ── Мышь в режиме кадрирования ──
@@ -419,7 +461,8 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 	my := f64(ev.fy)
 	match ev.kind {
 		.hover {
-			vgui.set_cursor(hit_cursor(crop_hit(st, sx, sy), st.horizon, ev.ctrl))
+			vgui.set_cursor(hit_cursor(crop_hit(st, sx, sy), st.horizon || st.persp_tool,
+				ev.ctrl))
 		}
 		.leave {
 			vgui.set_cursor(vgui.sdl_system_cursor_default)
@@ -428,9 +471,9 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			if ev.button != 1 {
 				return false
 			}
-			if st.horizon {
+			if st.horizon || st.persp_tool {
 				st.crop_drag = CropDrag{
-					kind: .horizon
+					kind: if st.persp_tool { CropDragKind.persp } else { CropDragKind.horizon }
 					px:   mx
 					py:   my
 					cx:   mx
@@ -504,7 +547,7 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				.none {
 					return false
 				}
-				.horizon {
+				.horizon, .persp {
 					st.crop_drag.cx = mx
 					st.crop_drag.cy = my
 					return true
@@ -585,8 +628,12 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			d := st.crop_drag
 			st.crop_drag = CropDrag{}
 			match d.kind {
+				.persp {
+					persp_line_done(mut st, d)
+				}
 				.horizon {
 					st.horizon = false
+	st.persp_tool = false
 					corr := pipeline.horizon_angle(d.px, d.py, d.cx, d.cy)
 					if corr != 0 {
 						ng := geom_with_angle(st, st.edit.geom.angle + corr)
@@ -705,7 +752,7 @@ fn crop_overlay(mut st State, mut ctx vgui.RenderContext) {
 	bh := by1 - by0
 	// Мелкая сетка, пока крутят угол или ведут линию горизонта
 	rotating := (!isnil(st.crop_ui) && !isnil(st.crop_ui.angle_sl) && st.crop_ui.angle_sl.dragging)
-		|| st.horizon || st.crop_drag.kind == .rotate
+		|| st.horizon || st.persp_tool || st.crop_drag.kind == .rotate
 	if rotating {
 		step := f32(40)
 		mut x := bx0 + step
@@ -763,10 +810,16 @@ fn crop_overlay(mut st State, mut ctx vgui.RenderContext) {
 		ctx.fill_rect(vgui.Rect{bx0 + (bw - aw) / 2, by0 + 4, aw, 20}, vgui.Color{0, 0, 0, 170})
 		ctx.draw_text(at, bx0 + (bw - aw) / 2 + 6, by0 + 6, crop_line)
 	}
-	// Линия горизонта
-	if d.kind == .horizon {
+	// Линия горизонта и линии перспективы (первая - уже проведена)
+	if d.kind == .horizon || d.kind == .persp {
 		ax, ay := cv.buf_to_screen(f32(d.px), f32(d.py))
 		cx, cy := cv.buf_to_screen(f32(d.cx), f32(d.cy))
+		ctx.draw_line_thick(ax, ay, cx, cy, 2, crop_horizon)
+	}
+	if st.persp_tool && st.persp_l1.len == 4 {
+		l := st.persp_l1
+		ax, ay := cv.buf_to_screen(f32(l[0]), f32(l[1]))
+		cx, cy := cv.buf_to_screen(f32(l[2]), f32(l[3]))
 		ctx.draw_line_thick(ax, ay, cx, cy, 2, crop_horizon)
 	}
 }
@@ -820,6 +873,15 @@ fn sync_crop_ui(mut st State) {
 		mut asl := u.angle_sl
 		asl.set_value(e.geom.angle) // под suppress: подпись и снимок, без пересчёта
 	}
+	// Перспектива (меняется и инструментом «по двум линиям»)
+	if !isnil(u.pv_sl) && !u.pv_sl.dragging {
+		mut s := u.pv_sl
+		s.set_value(e.geom.pv)
+	}
+	if !isnil(u.ph_sl) && !u.ph_sl.dragging {
+		mut s := u.ph_sl
+		s.set_value(e.geom.ph)
+	}
 	// Поле угла - текущий угол, если в нём не набирают
 	if !isnil(u.angle_in) && !u.angle_in.focused {
 		mut ai := u.angle_in
@@ -828,6 +890,10 @@ fn sync_crop_ui(mut st State) {
 	st.suppress = was
 	mut hb := u.horizon_btn
 	hb.style = if st.horizon { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.flat }
+	if !isnil(u.persp_btn) {
+		mut pb := u.persp_btn
+		pb.style = if st.persp_tool { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.flat }
+	}
 	if !isnil(u.m_crop) {
 		mut m := u.m_crop
 		m.checked = st.crop_mode
@@ -981,6 +1047,44 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	})
 	u.angle_sl = angle.sl
 	mut angle_row := edit_row(mut st, mut angle, lbl_w, val_w)
+	// Перспектива: живые ползунки, как угол (кадр сам увеличивается -
+	// пустых углов нет, рамка остаётся годной)
+	mut pv := edit_slider(mut st, SliderCfg{
+		label:  'Вертикаль'
+		min:    -100
+		max:    100
+		digits: 0
+		live:   true
+		get:    fn (e &EditState) f32 {
+			return e.geom.pv
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.geom.pv = v
+		}
+		fx:     fn [mut st] () {
+			st.tone_fx()
+		}
+	})
+	u.pv_sl = pv.sl
+	mut pv_row := edit_row(mut st, mut pv, lbl_w, val_w)
+	mut ph := edit_slider(mut st, SliderCfg{
+		label:  'Горизонталь'
+		min:    -100
+		max:    100
+		digits: 0
+		live:   true
+		get:    fn (e &EditState) f32 {
+			return e.geom.ph
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.geom.ph = v
+		}
+		fx:     fn [mut st] () {
+			st.tone_fx()
+		}
+	})
+	u.ph_sl = ph.sl
+	mut ph_row := edit_row(mut st, mut ph, lbl_w, val_w)
 
 	// Поворот на 90°, отражения, линия горизонта
 	mut r_ccw := icon_button(mut st, 'rotate-ccw-square', 'Повернуть на 90° против часовой')
@@ -1003,6 +1107,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	hz.on_click = fn [mut st] () {
 		if st.horizon {
 			st.horizon = false
+	st.persp_tool = false
 			sync_crop_ui(mut st)
 			return
 		}
@@ -1013,6 +1118,23 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		}
 	}
 	u.horizon_btn = hz
+	mut pl := icon_button(mut st, 'columns-2',
+		'Перспектива по двум линиям: проведите по двум вертикалям (или горизонталям) на снимке')
+	pl.on_click = fn [mut st] () {
+		if st.persp_tool {
+			st.persp_tool = false
+			sync_crop_ui(mut st)
+			return
+		}
+		set_crop_mode(mut st, true)
+		if st.crop_mode {
+			st.horizon = false
+			st.persp_tool = true
+			st.persp_l1 = []f64{}
+			sync_crop_ui(mut st)
+		}
+	}
+	u.persp_btn = pl
 	// Угол вручную: Enter - применить
 	mut ain := vgui.text_input('0.0')
 	ain.max_len = 8
@@ -1031,6 +1153,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	tools.add(f_h)
 	tools.add(f_v)
 	tools.add(hz)
+	tools.add(pl)
 	tools.add(vgui.label(''), flex: 1)
 	tools.add(ain)
 	tools.add(vgui.label('°'))
@@ -1059,6 +1182,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	st.hint_labels << hint
 	return [SectionRow{mode_row}, SectionRow{a_row}, SectionRow{c_row},
 		SectionRow{total},
-		SectionRow{angle_row}, SectionRow{tools}, SectionRow{g_row},
+		SectionRow{angle_row}, SectionRow{pv_row}, SectionRow{ph_row}, SectionRow{tools},
+		SectionRow{g_row},
 		SectionRow{hint}]
 }

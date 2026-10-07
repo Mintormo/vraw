@@ -75,6 +75,9 @@ struct SideState {
 	angle         f32
 	crop          []f32 // x0, y0, x1, y1 в долях; пусто - весь кадр
 	crop_aspect   string
+	// Перспектива -100..100 (в старых файлах нет - 0)
+	persp_v       f32
+	persp_h       f32
 	crop_aw       int
 	crop_ah       int
 	crop_portrait bool
@@ -285,6 +288,11 @@ fn side_mask(m pipeline.Mask) SideMask {
 	}
 }
 
+// clamp_persp - перспектива в пределах ползунка (-100..100)
+fn clamp_persp(v f32) f32 {
+	return if v < -100 { -100 } else if v > 100 { 100 } else { v }
+}
+
 fn clamp_pct(v f32) f32 {
 	return if v < 0 { 0 } else if v > 100 { 100 } else { v }
 }
@@ -419,6 +427,8 @@ fn side_state(e EditState) SideState {
 		flip_v:        e.geom.flip_v
 		angle:         e.geom.angle
 		crop:          [e.geom.x0, e.geom.y0, e.geom.x1, e.geom.y1]
+		persp_v:       e.geom.pv
+		persp_h:       e.geom.ph
 		crop_aspect:   e.crop_aspect
 		crop_aw:       e.crop_aw
 		crop_ah:       e.crop_ah
@@ -476,6 +486,8 @@ fn edit_state(s SideState) !EditState {
 			y0:     if s.crop.len == 4 { clamp01f(s.crop[1]) } else { f32(0) }
 			x1:     if s.crop.len == 4 { clamp01f(s.crop[2]) } else { f32(1) }
 			y1:     if s.crop.len == 4 { clamp01f(s.crop[3]) } else { f32(1) }
+			pv:     clamp_persp(s.persp_v)
+			ph:     clamp_persp(s.persp_h)
 		}
 		crop_aspect:   if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
 		crop_aw:       if s.crop_aw > 0 { s.crop_aw } else { 3 }

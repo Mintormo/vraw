@@ -81,6 +81,14 @@ mut:
 	// секция показывает метки фильтров и без выделения
 	acc     &vgui.Accordion = unsafe { nil }
 	acc_idx int = -1
+	// Настройки выделенной формы - свой контейнер, пересобирается по виду
+	// (у vgui VBox/HBox нет visible): кисть - размер, мягкость, сила,
+	// автомаска; радиальная - размер, поворот, растушёвка, снаружи;
+	// линейная и без выделения - пусто
+	shape_box   &vgui.VBox = unsafe { nil }
+	brush_rows  []&vgui.Widget
+	radial_rows []&vgui.Widget
+	shape_shown int = -2 // показанный набор: -1 - пусто, 0 - кисть, 1 - радиальная
 }
 
 // ── Отображение холст <-> кадр ──
@@ -185,18 +193,19 @@ fn mask_pins_only(st &State) bool {
 	return !isnil(u.acc) && u.acc.is_expanded(u.acc_idx)
 }
 
+// kind_name - вид фильтра для списка: «Линейный», «Радиальный», «Кисть»
+fn kind_name(k pipeline.MaskKind) string {
+	return match k {
+		.radial { 'Радиальный' }
+		.brush { 'Кисть' }
+		.linear { 'Линейный' }
+	}
+}
+
 // mask_name - строка списка фильтров: имя (или вид), число частей,
 // «выкл»
 fn mask_name(m pipeline.Mask, i int) string {
-	kind := if m.name != '' {
-		m.name
-	} else {
-		match m.kind {
-			.radial { 'Радиальный' }
-			.brush { 'Кисть' }
-			.linear { 'Линейный' }
-		}
-	}
+	kind := if m.name != '' { m.name } else { kind_name(m.kind) }
 	off := if m.on { '' } else { '  (выкл)' }
 	parts := if m.parts.len > 0 { ' +${m.parts.len}' } else { '' }
 	return '${i + 1}. ${kind}${parts}${off}'
@@ -1180,6 +1189,31 @@ fn sync_mask_ui(mut st State) {
 		u.auto_cb.set_checked(brush && st.edit.params.masks[st.mask_sel].shape(st.mask_part).auto)
 		st.suppress = was1
 	}
+	// Настройки формы: ряды по её виду
+	want := if !valid {
+		-1
+	} else {
+		match st.edit.params.masks[st.mask_sel].shape(st.mask_part).kind {
+			.brush { 0 }
+			.radial { 1 }
+			.linear { -1 }
+		}
+	}
+	if !isnil(u.shape_box) && want != u.shape_shown {
+		mut sb := u.shape_box
+		sb.clear()
+		rows := if want == 0 {
+			u.brush_rows
+		} else if want == 1 {
+			u.radial_rows
+		} else {
+			[]&vgui.Widget{}
+		}
+		for r in rows {
+			sb.add(r)
+		}
+		u.shape_shown = want
+	}
 	// Растушёвка и действие снаружи - у выделенной формы (радиальной)
 	sh := if valid { st.edit.params.masks[st.mask_sel].shape(st.mask_part) } else { pipeline.MaskPart{} }
 	radial := valid && sh.kind == .radial
@@ -1203,6 +1237,11 @@ fn sync_mask_ui(mut st State) {
 	if !isnil(u.name_in) {
 		mut ni := u.name_in
 		ni.enabled = valid
+		ni.placeholder = 'По виду: «${if valid {
+			kind_name(st.edit.params.masks[st.mask_sel].kind)
+		} else {
+			'Линейный'
+		}}»'
 		if !ni.focused {
 			ni.set_text(if valid { st.edit.params.masks[st.mask_sel].name } else { '' })
 		}
@@ -1225,6 +1264,8 @@ enum MaskField {
 	temp
 	tint
 	grow
+	size
+	angle
 	feather
 	lum_lo
 	lum_hi
@@ -1246,6 +1287,8 @@ fn mask_get(m pipeline.Mask, f MaskField, part int) f32 {
 		.temp { m.temp }
 		.tint { m.tint }
 		.grow { m.grow }
+		.size { f32(math.max(m.shape(part).rx, m.shape(part).ry)) * 100 }
+		.angle { ellipse_angle(m.shape(part).angle) }
 		.feather { m.shape(part).feather }
 		.lum_lo { m.lum_lo }
 		.lum_hi { m.lum_hi }
@@ -1267,6 +1310,22 @@ fn mask_set(mut m pipeline.Mask, f MaskField, v f32, part int) {
 		.temp { m.temp = v }
 		.tint { m.tint = v }
 		.grow { m.grow = v }
+		.size {
+			// Большая полуось - v% высоты кадра, пропорции эллипса те же
+			mut sh := m.shape(part)
+			big := math.max(sh.rx, sh.ry)
+			if big > 1e-6 && v > 0 {
+				k := v / 100 / big
+				sh.rx *= k
+				sh.ry *= k
+				m.set_shape(part, sh)
+			}
+		}
+		.angle {
+			mut sh := m.shape(part)
+			sh.angle = v
+			m.set_shape(part, sh)
+		}
 		.feather {
 			mut sh := m.shape(part)
 			sh.feather = v
@@ -1278,6 +1337,18 @@ fn mask_set(mut m pipeline.Mask, f MaskField, v f32, part int) {
 		.hue { m.hue = v }
 		.hue_w { m.hue_w = v }
 	}
+}
+
+// ellipse_angle - поворот эллипса в -90..90 (поворот на 180° - тот же
+// эллипс)
+fn ellipse_angle(a f32) f32 {
+	mut r := f32(math.fmod(f64(a), 180))
+	if r > 90 {
+		r -= 180
+	} else if r <= -90 {
+		r += 180
+	}
+	return r
 }
 
 // mask_slider - ползунок правки выделенного фильтра (edit_slider: история,
@@ -1455,9 +1526,14 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 
 	mut rows := [SectionRow{add_row}, SectionRow{sel_row}, SectionRow{name_row}, SectionRow{form_row},
 		SectionRow{part_row}, SectionRow{tools}]
-	// Кисть: размер, растушёвка, сила - для новых мазков (не правка)
+	// Настройки выделенной формы (shape_box, ряды - по её виду). Кисть:
+	// размер, растушёвка, сила - для новых мазков (не правка)
+	mut sbox := vgui.create_vbox_fill()
+	sbox.set_spacing(6)
+	u.shape_box = sbox
+	rows << SectionRow{sbox}
 	for i, lbl in ['Размер', 'Мягкость', 'Сила'] {
-		rows << SectionRow{brush_slider(mut st, lbl, i, lbl_w, val_w)}
+		u.brush_rows << brush_slider(mut st, lbl, i, lbl_w, val_w)
 	}
 	// Автомаска выделенной кисти - правка (история): все её мазки красят
 	// только похожий цвет (цвета под кистью записаны у каждого мазка)
@@ -1477,7 +1553,25 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		mask_changed(mut st, 'mask_auto', '${shape_label(st)}: автомаска ${on_off(v)}')
 	}
 	u.auto_cb = auto_cb
-	rows << SectionRow{auto_cb}
+	u.brush_rows << auto_cb
+	// Радиальная: размер (большая полуось, % высоты кадра) и поворот -
+	// то же, что ручки на снимке
+	mut rs := mask_slider(mut st, MaskSliderSpec{
+		label:  'Размер'
+		f:      .size
+		min:    1
+		max:    150
+		def:    35
+		signed: false
+	})
+	u.radial_rows << edit_row(mut st, mut rs, lbl_w, val_w)
+	mut ra := mask_slider(mut st, MaskSliderSpec{
+		label: 'Поворот'
+		f:     .angle
+		min:   -90
+		max:   90
+	})
+	u.radial_rows << edit_row(mut st, mut ra, lbl_w, val_w)
 	for spec in [
 		MaskSliderSpec{
 			label:  'Экспозиция'
@@ -1536,7 +1630,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		def:    50
 		signed: false
 	})
-	rows << SectionRow{edit_row(mut st, mut fe, lbl_w, val_w)}
+	u.radial_rows << edit_row(mut st, mut fe, lbl_w, val_w)
 	mut inv_cb := vgui.checkbox('Действие снаружи эллипса')
 	// (растушёвка и «снаружи» - у выделенной формы: основы или части)
 	inv_cb.on_change = fn [mut st] (v bool) {
@@ -1554,7 +1648,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		mask_changed(mut st, 'mask_inv', '${shape_label(st)}: снаружи ${on_off(v)}')
 	}
 	u.inv_cb = inv_cb
-	rows << SectionRow{inv_cb}
+	u.radial_rows << inv_cb
 	rows << SectionRow{vgui.separator()}
 	rows << build_range_rows(mut st, lbl_w, val_w)
 	mut hint := vgui.label('Точки на снимке: перенос, переход, размер и поворот')

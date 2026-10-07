@@ -9,12 +9,20 @@ module pipeline
 //   S  - исходный кадр w x h (как отдаёт LibRaw);
 //   V  - после ориентации W0 x H0: сначала rot90 четвертей по часовой,
 //        затем отражения flip_h / flip_v (в показе);
-//   R  - V, повёрнутый на angle градусов ПРОТИВ часовой вокруг центра,
+//   V' - V с исправленной перспективой (pv, ph), того же размера: кадр
+//        увеличен так, что пустых углов нет (persp_plan);
+//   R  - V', повёрнутый на angle градусов ПРОТИВ часовой вокруг центра,
 //        того же размера W0 x H0 (углы за краем V - пустые);
 //   O  - выход: рамка [x0, x1] x [y0, y1] в долях R.
 // Выход -> источник - аффинное отображение (geom_affine): на пиксель
 // выборка из S (без поворота - ближайший пиксель, с поворотом -
-// билинейная).
+// билинейная). С перспективой - проективное (geom_proj, билинейно).
+//
+// Перспектива - последнее звено: point_to_source, geom_affine и всё, что
+// на них опирается (рамка, маски фильтров - mask_map, пипетки), работают
+// в S' - кадре S с исправленной перспективой (как будто LibRaw отдал уже
+// исправленный кадр). Только выборка пикселей (geom_apply, фрагменты,
+// превью камеры) идёт дальше, S' -> S.
 import math
 import bigbuf
 
@@ -33,6 +41,11 @@ pub mut:
 	// а не округлением доли (1:1 - ровно квадрат); 0 - по рамке.
 	// Производное поле (crop.v, out_geom), в сайдкар не пишется
 	aspect f32
+	// Перспектива -100..100: «Вертикаль» (наклон камеры вверх-вниз:
+	// минус расширяет верх - сходящиеся вертикали при съёмке снизу),
+	// «Горизонталь» (поворот вбок: минус расширяет левый край)
+	pv f32
+	ph f32
 }
 
 pub const geom_angle_max = f32(45)
@@ -40,7 +53,12 @@ pub const geom_angle_max = f32(45)
 // is_identity - геометрия ничего не меняет
 pub fn (g Geom) is_identity() bool {
 	return g.rot90 % 4 == 0 && !g.flip_h && !g.flip_v && g.angle == 0 && g.x0 <= 0
-		&& g.y0 <= 0 && g.x1 >= 1 && g.y1 >= 1
+		&& g.y0 <= 0 && g.x1 >= 1 && g.y1 >= 1 && !g.has_persp()
+}
+
+// has_persp - есть исправление перспективы
+pub fn (g Geom) has_persp() bool {
+	return g.pv != 0 || g.ph != 0
 }
 
 // oriented - размер кадра w x h после ориентации (W0 x H0)
@@ -176,7 +194,8 @@ fn geom_affine(g Geom, w int, h int, crop bool, ow int, oh int) Affine {
 // is_noop - геометрия не меняет буфер: тождественная или (весь кадр,
 // crop = false) только рамка обрезки - результат равен исходному
 pub fn (g Geom) is_noop(crop bool) bool {
-	return g.is_identity() || (!crop && g.rot90 % 4 == 0 && !g.flip_h && !g.flip_v && g.angle == 0)
+	return g.is_identity() || (!crop && g.rot90 % 4 == 0 && !g.flip_h && !g.flip_v && g.angle == 0
+		&& !g.has_persp())
 }
 
 // geom_apply - геометрия буфера w x h с ch каналами u16 (3 - сырьё, 1 -
@@ -198,60 +217,27 @@ pub fn geom_apply_into(src &u16, w int, h int, ch int, g Geom, crop bool, mut ou
 		unsafe { vmemcpy(out.data, src, w * h * ch * 2) }
 		return w, h
 	}
+	if g.has_persp() || g.angle != 0 {
+		// С поворотом или перспективой - билинейно, в потоках (persp_apply)
+		persp_apply(src, Region{0, 0, w, h}, w, h, ch, geom_proj(g, w, h, crop, ow, oh),
+			Region{0, 0, ow, oh}, unsafe { &u16(out.data) })
+		return ow, oh
+	}
+	// Без поворота - ближайший пиксель (центры ложатся на центры)
 	m := geom_affine(g, w, h, crop, ow, oh)
 	unsafe {
 		mut d := &u16(out.data)
-		if g.angle == 0 {
-			// Без поворота - ближайший пиксель (центры ложатся на центры)
-			for j in 0 .. oh {
-				for i in 0 .. ow {
-					mut sx := int(math.floor(m.a * i + m.b * j + m.c))
-					mut sy := int(math.floor(m.d * i + m.e * j + m.f))
-					sx = if sx < 0 { 0 } else if sx >= w { w - 1 } else { sx }
-					sy = if sy < 0 { 0 } else if sy >= h { h - 1 } else { sy }
-					s := src + (sy * w + sx) * ch
-					for c in 0 .. ch {
-						d[c] = s[c]
-					}
-					d += ch
-				}
-			}
-			return ow, oh
-		}
-		// С поворотом - билинейно; за краем кадра - чёрное
 		for j in 0 .. oh {
-			mut sx := m.a * 0 + m.b * j + m.c - 0.5
-			mut sy := m.d * 0 + m.e * j + m.f - 0.5
-			for _ in 0 .. ow {
-				if sx < -0.5 || sy < -0.5 || sx > f64(w) - 0.5 || sy > f64(h) - 0.5 {
-					for c in 0 .. ch {
-						d[c] = 0
-					}
-				} else {
-					mut x0 := int(math.floor(sx))
-					mut y0 := int(math.floor(sy))
-					fx := f32(sx - f64(x0))
-					fy := f32(sy - f64(y0))
-					mut x1 := x0 + 1
-					mut y1 := y0 + 1
-					x0 = if x0 < 0 { 0 } else { x0 }
-					y0 = if y0 < 0 { 0 } else { y0 }
-					x1 = if x1 >= w { w - 1 } else { x1 }
-					y1 = if y1 >= h { h - 1 } else { y1 }
-					p00 := src + (y0 * w + x0) * ch
-					p10 := src + (y0 * w + x1) * ch
-					p01 := src + (y1 * w + x0) * ch
-					p11 := src + (y1 * w + x1) * ch
-					for c in 0 .. ch {
-						top := f32(p00[c]) + (f32(p10[c]) - f32(p00[c])) * fx
-						bot := f32(p01[c]) + (f32(p11[c]) - f32(p01[c])) * fx
-						v := top + (bot - top) * fy
-						d[c] = u16(if v < 0 { f32(0) } else if v > 65535 { f32(65535) } else { v + 0.5 })
-					}
+			for i in 0 .. ow {
+				mut sx := int(math.floor(m.a * i + m.b * j + m.c))
+				mut sy := int(math.floor(m.d * i + m.e * j + m.f))
+				sx = if sx < 0 { 0 } else if sx >= w { w - 1 } else { sx }
+				sy = if sy < 0 { 0 } else if sy >= h { h - 1 } else { sy }
+				s := src + (sy * w + sx) * ch
+				for c in 0 .. ch {
+					d[c] = s[c]
 				}
 				d += ch
-				sx += m.a
-				sy += m.d
 			}
 		}
 	}
@@ -267,10 +253,19 @@ pub fn geom_rgba(src []u8, w int, h int, g Geom, crop bool, ow int, oh int) []u8
 		return out
 	}
 	m := geom_affine(g, w, h, crop, ow, oh)
+	pp := if g.has_persp() { geom_proj(g, w, h, crop, ow, oh) } else { Proj{} }
 	for j in 0 .. oh {
 		for i in 0 .. ow {
-			sx := int(math.floor(m.a * i + m.b * j + m.c))
-			sy := int(math.floor(m.d * i + m.e * j + m.f))
+			mut sx := 0
+			mut sy := 0
+			if g.has_persp() {
+				px, py := pp.at(f64(i), f64(j))
+				sx = int(math.floor(px))
+				sy = int(math.floor(py))
+			} else {
+				sx = int(math.floor(m.a * i + m.b * j + m.c))
+				sy = int(math.floor(m.d * i + m.e * j + m.f))
+			}
 			o := (j * ow + i) * 4
 			if sx < 0 || sy < 0 || sx >= w || sy >= h {
 				out[o + 3] = 255

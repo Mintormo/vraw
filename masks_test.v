@@ -254,3 +254,21 @@ fn test_mask_parts_history_copy() {
 	assert snap2.params.masks[2].strokes.len == 2
 	assert snap2.params.masks[2].parts[0].strokes[0].pts[0] == 0.2
 }
+
+// Размер и поворот радиальной формы с панели: большая полуось - % высоты
+// кадра, пропорции те же; поворот приводится к -90..90
+fn test_mask_size_angle() {
+	mut m := pipeline.Mask{
+		kind:  .radial
+		rx:    0.4
+		ry:    0.2
+		angle: 170
+	}
+	assert int(mask_get(m, .size, -1) + 0.5) == 40
+	assert mask_get(m, .angle, -1) == -10
+	mask_set(mut m, .size, 20, -1)
+	assert math.abs(m.rx - 0.2) < 1e-6 && math.abs(m.ry - 0.1) < 1e-6
+	mask_set(mut m, .angle, 30, -1)
+	assert m.angle == 30
+	assert ellipse_angle(-90) == 90 && ellipse_angle(270) == 90 && ellipse_angle(-100) == 80
+}

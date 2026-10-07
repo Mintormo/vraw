@@ -231,6 +231,11 @@ mut:
 	geom_key    GeomKey
 	crop_mode   bool
 	horizon     bool // инструмент «линия горизонта»
+	// Инструмент «перспектива по двум линиям» (crop.v): включён, первая
+	// линия (x0, y0, x1, y1 в пикселях R превью; пусто - ещё нет)
+	persp_tool  bool
+	persp_l1    []f64
+	persp_v1    []f64 // та же линия в пикселях V (снимок без перспективы)
 	crop_drag   CropDrag
 	crop_before EditState // настройки при входе в режим (Esc)
 	crop_ui     &CropUi = unsafe { nil }
