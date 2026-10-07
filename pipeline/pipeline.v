@@ -913,7 +913,11 @@ const wb_sat_k = f32(1.0 / (0.018 * 65535.0))
 // иначе тоновые значения (0..255, ×256 в u16, без квантования и дизера)
 // в tone - для резкости, которая досчитает и запишет dst сама.
 fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16) {
-	lc := local_ctx(&p)
+	lc := local_ctx(&p, &ImgRef{
+		src: src
+		w:   p.lmap.w
+		h:   if p.lmap.w > 0 { npix / p.lmap.w } else { 0 }
+	})
 	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, tone, &lc, unsafe { nil },
 		unsafe { nil })
 	free_ctx(&lc)
@@ -1215,7 +1219,7 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			}
 			mut ls := LocalSum{}
 			if local {
-				ls = local_sum(lc, f32(px), f32(py), y, cr, cg, cb, s)
+				ls = local_sum(lc, f32(px), f32(py), y, cr, cg, cb)
 				if !isnil(so) {
 					so[i] = sp_enc(if ls.any { ls.sp } else { f32(0) })
 				}

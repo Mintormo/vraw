@@ -640,3 +640,75 @@ fn test_local_brush_auto() {
 		dither: false
 	}) == a
 }
+
+// Автомаска плавная: небо с градиентом 1.2 EV, диагональный мазок с
+// цветами из кадра - у клеток сетки цветов у края досягаемости разные
+// наборы цветов; вес соседних пикселей не прыгает (было - ступеньки на
+// границах клеток, IMG_1118)
+fn test_local_brush_auto_smooth() {
+	w, h := 300, 200
+	mut src := []u16{len: w * h * 3}
+	col := fn [h] (y int) []u16 {
+		k := math.pow(2, -1.2 * f64(y) / f64(h))
+		return [u16(30000 * k), u16(42000 * k), u16(60000 * k)]
+	}
+	for y in 0 .. h {
+		c := col(y)
+		for x in 0 .. w {
+			i := (y * w + x) * 3
+			src[i] = c[0]
+			src[i + 1] = c[1]
+			src[i + 2] = c[2]
+		}
+	}
+	mut st := Stroke{
+		radius:  0.25
+		feather: 30
+		auto:    true
+	}
+	for k in 0 .. 50 {
+		fx := 0.1 + 0.8 * f64(k) / 49
+		fy := 0.2 + 0.6 * f64(k) / 49
+		st.pts << [f32(fx), f32(fy)]
+		c := col(int(fy * h))
+		st.cols << [f32(c[0]), f32(c[1]), f32(c[2])]
+	}
+	p := Params{
+		masks: [Mask{
+			kind:     .brush
+			strokes:  [st]
+			exposure: 1
+		}]
+		lmap:  lt_map(w, h)
+	}
+	wt := mask_view(unsafe { &u16(src.data) }, unsafe { nil }, w, h, p, 0)
+	// База - тот же мазок без автомаски (спад покрытия на краю мазка)
+	mut pp := p
+	pp.masks = [Mask{
+		...p.masks[0]
+		strokes: [Stroke{
+			...st
+			auto: false
+		}]
+	}]
+	wp := mask_view(unsafe { &u16(src.data) }, unsafe { nil }, w, h, pp, 0)
+	jump := max_jump(wt, w, h)
+	base := max_jump(wp, w, h)
+	eprintln('автомаска: наибольший скачок веса между соседями ${jump} из 255 (без автомаски ${base})')
+	assert jump <= base + 4
+	// Мазок действует: на пути - полный вес
+	assert wt[(h / 2) * w + w / 2] > 240
+}
+
+// max_jump - наибольшая разница веса соседних пикселей (по x и по y)
+fn max_jump(wt []u8, w int, h int) int {
+	mut jump := 0
+	for y in 1 .. h {
+		for x in 1 .. w {
+			a := int(wt[y * w + x])
+			jump = imax(jump, math.abs(a - int(wt[y * w + x - 1])))
+			jump = imax(jump, math.abs(a - int(wt[(y - 1) * w + x])))
+		}
+	}
+	return jump
+}

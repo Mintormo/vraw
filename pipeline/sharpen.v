@@ -44,7 +44,11 @@ pub fn apply_image(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, s
 // в dst вместо снимка - маска краёв или добавка резкости
 pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, scale f32, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
-	lc := local_ctx(&p)
+	lc := local_ctx(&p, &ImgRef{
+		src: src
+		w:   w
+		h:   h
+	})
 	defer {
 		free_ctx(&lc) // сетки кисти фильтров
 	}
