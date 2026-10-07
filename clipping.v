@@ -107,4 +107,5 @@ fn set_clip_warn(mut st State, hi bool, lo bool) {
 	if !isnil(st.tone_fx) {
 		st.tone_fx()
 	}
+	pair_show(mut st) // левый кадр сравнения - тоже (pair.v)
 }

@@ -218,6 +218,7 @@ struct ExportOpts {
 	ai_cache &ai.Cache = unsafe { nil }
 	progress ?StageProgress
 	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
+	half     bool       // половинный размер, как превью (левый кадр сравнения, pair.v)
 }
 
 // develop_full - проявка RAW-файла по настройкам кадра e в 8-битный RGB
@@ -229,11 +230,13 @@ struct ExportOpts {
 // плитками AI.
 fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Image {
 	mut progress := o.progress or { StageProgress(NoStage{}) }
+	// Масштаб радиусов (Capture-резкость, резкость, чёткость) - как у превью
+	scale := if o.half { preview_scale } else { f32(1.0) }
 	if !progress.stage(.decode, 0, 0) {
 		return ExportCancelled{}
 	}
 	mut d := raw.open(path)!
-	mut img := d.develop() or {
+	mut img := d.develop(half: o.half) or {
 		d.close()
 		return err
 	}
@@ -320,7 +323,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 			return ExportCancelled{}
 		}
 		dc = bigbuf.new_u16(w * h * 3)
-		pipeline.deconvolve_into(buf, w, h, e.params.sharp, 1.0, mut dc)
+		pipeline.deconvolve_into(buf, w, h, e.params.sharp, scale, mut dc)
 		src = unsafe { &u16(dc.data) }
 		img.free() // сырьё дальше не нужно
 	}
@@ -354,7 +357,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	mut rgb := bigbuf.new_u8(gw * gh * 3)
 	// Градиентные фильтры - по пикселям кадра после геометрии
 	ep := with_lmap(e.params, pipeline.mask_map(out_geom(&e), w, h, true, gw, gh))
-	pipeline.apply_image(src, mask, &haze, gw, gh, ep, 1.0, mut rgb, 3)
+	pipeline.apply_image(src, mask, &haze, gw, gh, ep, scale, mut rgb, 3)
 	// Размер на выход (окно «Экспорт»): только уменьшение, с резкостью на
 	// выход (она - только при уменьшении)
 	fw, fh := export_dims(o.size, gw, gh)

@@ -316,6 +316,19 @@ mut:
 	cmp_row  &vgui.HBox   = unsafe { nil }
 	m_sbs    &vgui.MenuItem = unsafe { nil }
 	sbs_last ViewState
+	// Сравнение двух кадров (pair.v): левый кадр (путь, RGBA без подсветки
+	// клипа), номер проявки и её отмена, потоки, приёмник, пункт меню
+	pair_on      bool
+	pair_path    string
+	pair_img     []u8
+	pair_w       int
+	pair_h       int
+	pair_gen     int
+	pair_busy    bool
+	pair_flag    &StopFlag = unsafe { nil }
+	pair_threads []thread
+	pair_done    fn (PairResult) = unsafe { nil }
+	m_pair       &vgui.MenuItem  = unsafe { nil }
 	// «Вид - JPEG камеры» (camjpeg.v): показ, JPEG кадра (RGBA pw x ph
 	// до геометрии; пусто - нет), пункт меню
 	jpeg_show bool
@@ -1508,6 +1521,7 @@ fn main() {
 		crop_overlay(mut st, mut ctx)
 		mask_overlay(mut st, mut ctx) // ручки градиентного фильтра
 		ba_overlay(mut st, mut ctx) // шторка до/после
+		pair_overlay(st, mut ctx) // подпись открытого при сравнении кадров
 		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
 		detail_overlay(st, mut ctx) // прогресс AI на 1:1
 		sbs_sync(mut st, false) // бок о бок: зум и прокрутка - холсту «до»
@@ -1539,13 +1553,24 @@ fn main() {
 	cv_b.fill(viewer_bg)
 	cv_b.take_keys = false
 	cv_b.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
-		ba_overlay_b(st, mut ctx)
+		if st.pair_on {
+			pair_overlay_b(st, mut ctx)
+		} else {
+			ba_overlay_b(st, mut ctx)
+		}
 		sbs_sync(mut st, true)
 	}
 	cv_b.on_input = fn [mut st, mut cv_b] (ev &vgui.CanvasInputEvent) {
+		// Сравнение кадров (pair.v): холст левого кадра
+		if pair_input(mut st, ev) {
+			return
+		}
 		zoom_click(mut st, mut cv_b, ev)
 	}
 	st.cv_b = cv_b
+	st.pair_done = fn [mut st] (res PairResult) {
+		pair_take(mut st, res)
+	}
 	st.ba_prep_done = fn [mut st] (res PrepResult) {
 		ba_prep_take(mut st, res)
 	}
@@ -2112,6 +2137,8 @@ fn main() {
 			nm.show_error('Ошибка: ${err.msg()}')
 			return
 		}
+		// Открывают левый кадр сравнения - левым станет уходящий (pair.v)
+		pair_before_open(mut st, path)
 		// Сырьё уходящего кадра - в кэш (framecache.v): вернутся к нему -
 		// без загрузки
 		frame_store(mut st)
@@ -2300,6 +2327,7 @@ fn main() {
 	strip.multi_select = true
 	strip.on_select = fn [mut st] (idx int, text string) {
 		strip_info_text(mut st)
+		pair_select(mut st, idx) // при сравнении - этот кадр слева
 	}
 	st.strip = strip
 	mut strip_info := vgui.label('')
@@ -2378,6 +2406,7 @@ fn main() {
 	// (правки некуда писать - record без истории молчит), вместо снимка -
 	// заглушка. Результаты фоновых воркеров отбросятся по file_gen.
 	close_file := fn [mut st, mut cv, mut hist, mut lens_cb, mut lens_lb, mut placeholder] () {
+		set_pair(mut st, false)
 		frame_store(mut st)
 		if !isnil(st.load_stop) {
 			mut ls := st.load_stop
@@ -2853,6 +2882,18 @@ fn main() {
 		set_ba_sbs(mut st, v)
 	}
 	st.m_sbs = m_sbs
+	// Сравнение двух кадров (pair.v): C, как в Lightroom
+	mut m_pair := vgui.menu_checkbox('Сравнить с выделенным', false)
+	m_pair.shortcut = 'C'
+	m_pair.on_toggle = fn [mut st] (v bool) {
+		set_pair(mut st, v)
+	}
+	st.m_pair = m_pair
+	mut m_swap := vgui.menu_action('Сравнение: поменять местами')
+	m_swap.shortcut = 'Shift+C'
+	m_swap.on_click = fn [mut st] () {
+		pair_swap(mut st)
+	}
 	// JPEG камеры вместо проявки (camjpeg.v)
 	mut m_jpeg := vgui.menu_checkbox('JPEG камеры', false)
 	m_jpeg.shortcut = 'K'
@@ -2901,7 +2942,7 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_jpeg, m_clipwarn, m_mask, m_strip, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, m_strip, m_bg, m_themes])
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
@@ -3180,6 +3221,7 @@ fn main() {
 	wait_prep(mut st) // воркер пользуется профилем из st.lens_db
 	wait_details(mut st) // и фрагмент 1:1 - тоже
 	wait_ba(mut st) // и сырьё «до»
+	wait_pair(mut st) // и левый кадр сравнения
 	wait_thumbs(mut st)
 	wait_loads(mut st)
 	// Потоки сохранения уже дождались выше (повторный wait того же потока

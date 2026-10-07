@@ -279,7 +279,7 @@ fn ba_apply(mut st State, mut cv vgui.Canvas) {
 	// кадрирования и при показе карт там был бы старый снимок
 	if !isnil(st.cv_b) {
 		mut cb := st.cv_b
-		cb.visible = ba_active(st)
+		cb.visible = ba_active(st) || st.pair_on
 	}
 	if !ba_active(st) {
 		st.ba_after = []u8{}
@@ -352,6 +352,9 @@ fn set_ba_split(mut st State, on bool) {
 	if on && st.ba_sbs {
 		set_ba_sbs(mut st, false)
 	}
+	if on && st.pair_on {
+		set_pair(mut st, false) // сравнение кадров (pair.v)
+	}
 	st.ba_split = on
 	st.ba_drag = false
 	if !isnil(st.m_split) {
@@ -370,6 +373,9 @@ fn set_ba_split(mut st State, on bool) {
 fn set_ba_sbs(mut st State, on bool) {
 	if on && st.ba_split {
 		set_ba_split(mut st, false)
+	}
+	if on && st.pair_on {
+		set_pair(mut st, false) // сравнение кадров (pair.v)
 	}
 	st.ba_sbs = on
 	if !isnil(st.m_sbs) {
@@ -437,7 +443,7 @@ fn ba_refresh(mut st State) {
 	}
 	if !isnil(st.cv_b) {
 		mut cb := st.cv_b
-		cb.visible = ba_active(st)
+		cb.visible = ba_active(st) || st.pair_on
 	}
 	mut cv := st.cv
 	n := st.gw * st.gh * 4
@@ -488,7 +494,7 @@ fn set_view_state(mut cv vgui.Canvas, v ViewState) {
 // sbs_sync - из on_overlay холста (b - холст «до»): его зум или прокрутка
 // изменились с прошлой связи - перенести на второй холст
 fn sbs_sync(mut st State, b bool) {
-	if !st.ba_sbs || isnil(st.cv) || isnil(st.cv_b) {
+	if (!st.ba_sbs && !st.pair_on) || isnil(st.cv) || isnil(st.cv_b) {
 		return
 	}
 	mut cv := st.cv
@@ -746,6 +752,10 @@ fn (mut k KeyWatch) handle_event(ev &vgui.GuiEvent, app &vgui.App) bool {
 		set_ba_sbs(mut st, !st.ba_sbs) // Shift+Y
 		return true
 	}
+	if ev.typ == .key_down && mods == vgui.sdl_kmod_shift && !latin && ev.scancode == 6 {
+		pair_swap(mut st) // Shift+C
+		return true
+	}
 	if ev.typ != .key_down || mods != 0 || latin {
 		return false
 	}
@@ -757,6 +767,7 @@ fn (mut k KeyWatch) handle_event(ev &vgui.GuiEvent, app &vgui.App) bool {
 		28 { set_ba_split(mut st, !st.ba_split) } // Y
 		13 { set_clip_warn(mut st, !(st.clip_hi || st.clip_lo), !(st.clip_hi || st.clip_lo)) } // J
 		21 { set_crop_mode(mut st, !st.crop_mode) } // R
+		6 { set_pair(mut st, !st.pair_on) } // C
 		else { return false }
 	}
 	return true

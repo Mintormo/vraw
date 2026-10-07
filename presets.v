@@ -242,6 +242,7 @@ fn refresh_frame_thumb(mut st State, path string) {
 
 // mark_frame_edited - отметка «изменён» у кадра ленты по пути RAW
 fn mark_frame_edited(mut st State, path string) {
+	pair_edited(mut st, path) // левый кадр сравнения - заново (pair.v)
 	for i, f in st.frames {
 		if f.path == path && !f.edited {
 			st.frames[i].edited = true
