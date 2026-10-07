@@ -118,6 +118,68 @@ struct SideMask {
 	tint       f32
 	clarity    f32 // в старых файлах нет - 0
 	sharpness  f32 // в старых файлах нет - 0
+	// Части (сложение масок; в старых файлах нет - пусто): вид и
+	// операция строками
+	parts []SidePart
+}
+
+// SidePart - часть фильтра в файле (pipeline.MaskPart)
+struct SidePart {
+	kind    string
+	op      string
+	ax      f32
+	ay      f32
+	bx      f32
+	by      f32
+	rx      f32
+	ry      f32
+	angle   f32
+	feather f32
+	invert  bool
+}
+
+fn side_part(p pipeline.MaskPart) SidePart {
+	return SidePart{
+		kind:    if p.kind == .radial { 'radial' } else { 'linear' }
+		op:      match p.op {
+			.add { 'add' }
+			.subtract { 'subtract' }
+			.intersect { 'intersect' }
+		}
+		ax:      p.ax
+		ay:      p.ay
+		bx:      p.bx
+		by:      p.by
+		rx:      p.rx
+		ry:      p.ry
+		angle:   p.angle
+		feather: p.feather
+		invert:  p.invert
+	}
+}
+
+// part_of - часть из файла; неизвестная операция - вычесть
+fn part_of(s SidePart) pipeline.MaskPart {
+	lim := fn (v f32, l f32) f32 {
+		return if v < -l { -l } else if v > l { l } else { v }
+	}
+	return pipeline.MaskPart{
+		kind:    if s.kind == 'radial' { pipeline.MaskKind.radial } else { pipeline.MaskKind.linear }
+		op:      match s.op {
+			'add' { pipeline.MaskOp.add }
+			'intersect' { pipeline.MaskOp.intersect }
+			else { pipeline.MaskOp.subtract }
+		}
+		ax:      s.ax
+		ay:      s.ay
+		bx:      s.bx
+		by:      s.by
+		rx:      lim(s.rx, 10)
+		ry:      lim(s.ry, 10)
+		angle:   s.angle
+		feather: lim(s.feather, 100)
+		invert:  s.invert
+	}
 }
 
 fn side_mask(m pipeline.Mask) SideMask {
@@ -149,6 +211,7 @@ fn side_mask(m pipeline.Mask) SideMask {
 		tint:       m.tint
 		clarity:    m.clarity
 		sharpness:  m.sharpness
+		parts:      m.parts.map(side_part(it))
 	}
 }
 
@@ -189,6 +252,7 @@ fn mask_of(s SideMask) pipeline.Mask {
 		tint:       c(s.tint, 100)
 		clarity:    c(s.clarity, 100)
 		sharpness:  c(s.sharpness, 100)
+		parts:      s.parts.map(part_of(it))
 	}
 }
 

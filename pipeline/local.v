@@ -53,6 +53,9 @@ pub mut:
 	angle   f32
 	feather f32 = 50
 	invert  bool
+	// Части фильтра (сложение масок): формы с операцией над весом -
+	// добавить, вычесть, пересечь; применяются по порядку после основы
+	parts []MaskPart
 	// Ограничение диапазоном (умножает вес формы). По яркости - тоновая
 	// позиция пикселя (0..100: гамма-шкала люмы после экспозиции, как у
 	// теней/светов) от lum_lo до lum_hi, края спадают на lum_soft. По
@@ -76,6 +79,77 @@ pub mut:
 	saturation f32
 	temp       f32
 	tint       f32
+}
+
+// MaskOp - операция части над весом фильтра w (wp - вес части):
+// add - объединение w + wp - w·wp, subtract - w·(1 - wp), intersect - w·wp
+pub enum MaskOp {
+	add
+	subtract
+	intersect
+}
+
+// MaskPart - форма фильтра: основа (Mask.shape) или часть с операцией.
+// Поля - как у Mask (доли кадра S, длины - доли высоты S)
+pub struct MaskPart {
+pub mut:
+	kind    MaskKind
+	op      MaskOp
+	ax      f32
+	ay      f32
+	bx      f32
+	by      f32
+	rx      f32
+	ry      f32
+	angle   f32
+	feather f32 = 50
+	invert  bool
+}
+
+// shape - форма фильтра: i = -1 - основа, иначе часть i
+pub fn (m Mask) shape(i int) MaskPart {
+	if i >= 0 && i < m.parts.len {
+		return m.parts[i]
+	}
+	return MaskPart{
+		kind:    m.kind
+		ax:      m.ax
+		ay:      m.ay
+		bx:      m.bx
+		by:      m.by
+		rx:      m.rx
+		ry:      m.ry
+		angle:   m.angle
+		feather: m.feather
+		invert:  m.invert
+	}
+}
+
+// set_shape - записать форму i (-1 - основа: вид и операция основы не
+// меняются)
+pub fn (mut m Mask) set_shape(i int, s MaskPart) {
+	if i >= 0 && i < m.parts.len {
+		m.parts[i] = s
+		return
+	}
+	m.ax = s.ax
+	m.ay = s.ay
+	m.bx = s.bx
+	m.by = s.by
+	m.rx = s.rx
+	m.ry = s.ry
+	m.angle = s.angle
+	m.feather = s.feather
+	m.invert = s.invert
+}
+
+// copy - глубокая копия (части - свой массив: снимки истории не должны
+// делить его с живым состоянием)
+pub fn (m Mask) copy() Mask {
+	return Mask{
+		...m
+		parts: m.parts.clone()
+	}
 }
 
 // has_edits - у фильтра есть хоть одна правка (пустой не считается)
@@ -133,10 +207,10 @@ pub fn (m MaskMap) region(x int, y int, w int) MaskMap {
 	}
 }
 
-// LocalMask - фильтр, готовый к рендеру: форма как аффинные функции
-// пикселя буфера (линейный - u, 0 в a и 1 в b; радиальный - u, v - оси
-// эллипса, единичная окружность - край) и правки в рабочих единицах
-struct LocalMask {
+// LocalShape - форма, готовая к рендеру: аффинные функции пикселя буфера
+// (линейный - u, 0 в a и 1 в b; радиальный - u, v - оси эллипса,
+// единичная окружность - край)
+struct LocalShape {
 	radial bool
 	invert bool
 	inner  f32 // радиальный: полное действие до этого радиуса (1 - растушёвка)
@@ -146,6 +220,19 @@ struct LocalMask {
 	va     f32
 	vb     f32
 	vc     f32
+}
+
+// LocalPart - часть фильтра к рендеру: форма и операция
+struct LocalPart {
+	form LocalShape
+	op   MaskOp
+}
+
+// LocalMask - фильтр, готовый к рендеру: основа, части и правки в
+// рабочих единицах
+struct LocalMask {
+	form   LocalShape
+	parts  []LocalPart
 	ev     f32 // EV
 	sh     f32 // -1..1
 	hi     f32
@@ -193,29 +280,43 @@ const local_temp_ev = f32(0.3)
 const local_tint_ev = f32(0.25)
 const local_feather_min = f32(0.01)
 
-// compile_mask - фильтр к рендеру под отображение mm; none - форма
-// вырождена (точки линейного совпали, нулевой радиус)
+// compile_mask - фильтр к рендеру под отображение mm; none - основа
+// вырождена (точки линейного совпали, нулевой радиус); вырожденная часть
+// пропускается
 fn compile_mask(m Mask, mm MaskMap) ?LocalMask {
-	mut lm := LocalMask{
-		radial: m.kind == .radial
-		invert: m.invert
-		ev:     m.exposure
-		sh:     m.shadows / 100
-		hi:     m.highlights / 100
-		con:    m.contrast / 100
-		cl:     m.clarity / 100
-		sp:     m.sharpness / 100
-		sat:    m.saturation / 100
-		temp:   m.temp / 100
-		tint:   m.tint / 100
-		lum:    m.lum_on
-		llo:    m.lum_lo / 100
-		lhi:    m.lum_hi / 100
-		lsf:    if m.lum_soft > 0.5 { m.lum_soft / 100 } else { f32(0.005) }
-		col:    m.col_on
-		hue:    hue_sextant(m.hue)
-		hw:     if m.hue_w > 1 { m.hue_w / 60 } else { f32(1.0 / 60) }
+	form := compile_shape(m.shape(-1), mm)?
+	mut parts := []LocalPart{}
+	for pt in m.parts {
+		pf := compile_shape(pt, mm) or { continue }
+		parts << LocalPart{
+			form: pf
+			op:   pt.op
+		}
 	}
+	return LocalMask{
+		form:  form
+		parts: parts
+		ev:    m.exposure
+		sh:    m.shadows / 100
+		hi:    m.highlights / 100
+		con:   m.contrast / 100
+		cl:    m.clarity / 100
+		sp:    m.sharpness / 100
+		sat:   m.saturation / 100
+		temp:  m.temp / 100
+		tint:  m.tint / 100
+		lum:   m.lum_on
+		llo:   m.lum_lo / 100
+		lhi:   m.lum_hi / 100
+		lsf:   if m.lum_soft > 0.5 { m.lum_soft / 100 } else { f32(0.005) }
+		col:   m.col_on
+		hue:   hue_sextant(m.hue)
+		hw:    if m.hue_w > 1 { m.hue_w / 60 } else { f32(1.0 / 60) }
+	}
+}
+
+// compile_shape - форма к рендеру под отображение mm; none - вырождена
+fn compile_shape(m MaskPart, mm MaskMap) ?LocalShape {
 	ax := f64(m.ax) * mm.ar
 	ay := f64(m.ay)
 	if m.kind == .linear {
@@ -225,8 +326,7 @@ fn compile_mask(m Mask, mm MaskMap) ?LocalMask {
 		if l2 <= 1e-12 {
 			return none
 		}
-		return LocalMask{
-			...lm
+		return LocalShape{
 			ua: f32((mm.a * dx + mm.d * dy) / l2)
 			ub: f32((mm.b * dx + mm.e * dy) / l2)
 			uc: f32(((mm.c - ax) * dx + (mm.f - ay) * dy) / l2)
@@ -248,15 +348,16 @@ fn compile_mask(m Mask, mm MaskMap) ?LocalMask {
 	}
 	// u = ((X - ax)·cos + (Y - ay)·sin) / rx,
 	// v = (-(X - ax)·sin + (Y - ay)·cos) / ry
-	return LocalMask{
-		...lm
-		inner: 1 - fe
-		ua:    f32((mm.a * cs + mm.d * sn) / rx)
-		ub:    f32((mm.b * cs + mm.e * sn) / rx)
-		uc:    f32(((mm.c - ax) * cs + (mm.f - ay) * sn) / rx)
-		va:    f32((-mm.a * sn + mm.d * cs) / ry)
-		vb:    f32((-mm.b * sn + mm.e * cs) / ry)
-		vc:    f32((-(mm.c - ax) * sn + (mm.f - ay) * cs) / ry)
+	return LocalShape{
+		radial: true
+		invert: m.invert
+		inner:  1 - fe
+		ua:     f32((mm.a * cs + mm.d * sn) / rx)
+		ub:     f32((mm.b * cs + mm.e * sn) / rx)
+		uc:     f32(((mm.c - ax) * cs + (mm.f - ay) * sn) / rx)
+		va:     f32((-mm.a * sn + mm.d * cs) / ry)
+		vb:     f32((-mm.b * sn + mm.e * cs) / ry)
+		vc:     f32((-(mm.c - ax) * sn + (mm.f - ay) * cs) / ry)
 	}
 }
 
@@ -357,9 +458,38 @@ fn contrast_curve(a f32) []f32 {
 	return c
 }
 
-// mask_weight - вес фильтра в пикселе (x, y) буфера, 0..1
+// mask_weight - вес фильтра в пикселе (x, y) буфера, 0..1: основа, затем
+// части по порядку
 @[inline]
 fn mask_weight(m &LocalMask, x f32, y f32) f32 {
+	mut w := shape_weight(&m.form, x, y)
+	for k in 0 .. m.parts.len {
+		pt := unsafe { &m.parts[k] }
+		match pt.op {
+			.add {
+				if w < 1 {
+					wp := shape_weight(&pt.form, x, y)
+					w = w + wp - w * wp
+				}
+			}
+			.subtract {
+				if w > 0 {
+					w *= 1 - shape_weight(&pt.form, x, y)
+				}
+			}
+			.intersect {
+				if w > 0 {
+					w *= shape_weight(&pt.form, x, y)
+				}
+			}
+		}
+	}
+	return w
+}
+
+// shape_weight - вес формы в пикселе (x, y) буфера, 0..1
+@[inline]
+fn shape_weight(m &LocalShape, x f32, y f32) f32 {
 	u := m.ua * x + m.ub * y + m.uc
 	if !m.radial {
 		// Полное действие до a (u <= 0), нет - за b (u >= 1), между -

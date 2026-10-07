@@ -406,3 +406,75 @@ fn test_local_range() {
 	assert math.abs(pr.hue - 233.33) < 0.1 && pr.sat > 0.8
 	assert math.abs(probe(30000, 30000, 30000, &Params{}).tone - 100 * math.powf(30000.0 / 65535, 1 / 2.2)) < 0.1
 }
+
+// Части фильтра: вычесть, пересечь, добавить - вес по порядку частей
+fn test_local_parts() {
+	w, h := 60, 60
+	mm := lt_map(w, h)
+	// Основа - весь кадр (линейный, до точки a полное действие)
+	all := Mask{
+		kind:     .linear
+		ax:       0
+		ay:       2
+		bx:       0
+		by:       3
+		exposure: 1
+	}
+	// Круг в центре, радиус 0.2 высоты, почти без растушёвки
+	disk := MaskPart{
+		kind:    .radial
+		ax:      0.5
+		ay:      0.5
+		rx:      0.2
+		ry:      0.2
+		feather: 1
+	}
+	at := fn [w] (wt []u8, x int, y int) int {
+		return int(wt[y * w + x])
+	}
+	mut sub := all.copy()
+	sub.parts << MaskPart{
+		...disk
+		op: .subtract
+	}
+	ws := mask_weights(sub, mm, w, h)
+	assert at(ws, 30, 30) == 0 && at(ws, 2, 2) == 255
+	mut inter := all.copy()
+	inter.parts << MaskPart{
+		...disk
+		op: .intersect
+	}
+	wi := mask_weights(inter, mm, w, h)
+	assert at(wi, 30, 30) == 255 && at(wi, 2, 2) == 0
+	// Добавить: основа - только верх (до 0.2 высоты), круг внизу
+	mut add := all.copy()
+	add.ay = 0.15
+	add.by = 0.2
+	add.parts << MaskPart{
+		...disk
+		ay: 0.75
+		op: .add
+	}
+	wa := mask_weights(add, mm, w, h)
+	assert at(wa, 30, 2) == 255 // верх - основа
+	assert at(wa, 30, 45) == 255 // круг
+	assert at(wa, 2, 45) == 0 // ни то ни другое
+	// Порядок: вычесть круг, затем добавить тот же - круг снова в фильтре
+	mut ord := sub.copy()
+	ord.parts << MaskPart{
+		...disk
+		op: .add
+	}
+	assert at(mask_weights(ord, mm, w, h), 30, 30) == 255
+	// Вырожденная часть пропускается, основа действует
+	mut bad := all.copy()
+	bad.parts << MaskPart{
+		kind: .radial
+		op:   .intersect
+	}
+	assert at(mask_weights(bad, mm, w, h), 30, 30) == 255
+	// copy - свой массив частей
+	mut c := sub.copy()
+	c.parts[0].ax = 0.1
+	assert sub.parts[0].ax == 0.5
+}

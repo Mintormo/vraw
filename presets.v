@@ -101,7 +101,7 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.crop_portrait = s.crop_portrait
 			}
 			'masks' {
-				e.params.masks = s.params.masks.clone()
+				e.params.masks = s.params.masks.map(it.copy())
 			}
 			else {}
 		}

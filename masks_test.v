@@ -39,6 +39,27 @@ fn sample_masks() []pipeline.Mask {
 			col_on:     true
 			hue:        215
 			hue_w:      25
+			parts:      [
+				pipeline.MaskPart{
+					kind:    .radial
+					op:      .intersect
+					ax:      0.3
+					ay:      0.4
+					rx:      0.1
+					ry:      0.15
+					angle:   20
+					feather: 30
+					invert:  true
+				},
+				pipeline.MaskPart{
+					kind: .linear
+					op:   .add
+					ax:   0.1
+					ay:   0.9
+					bx:   0.2
+					by:   0.7
+				},
+			]
 		},
 	]
 }
@@ -118,7 +139,7 @@ fn test_mask_view_map() {
 // Ручки: конец полуоси задаёт радиус и поворот, перенос сдвигает обе точки
 fn test_drag_mask() {
 	ar := 1.5
-	r := pipeline.Mask{
+	r := pipeline.MaskPart{
 		kind: .radial
 		ax:   0.5
 		ay:   0.5
@@ -140,7 +161,7 @@ fn test_drag_mask() {
 		start: r
 	}, 0.75 + 0.1, 0.5 + 0.1, ar)
 	assert math.abs(m2.angle + 45) < 1e-3 && math.abs(m2.ry - math.sqrt2 * 0.1) < 1e-6
-	l := pipeline.Mask{
+	l := pipeline.MaskPart{
 		kind: .linear
 		ax:   0.2
 		ay:   0.1
@@ -155,4 +176,18 @@ fn test_drag_mask() {
 	}, 0.3 + 0.15, 0.3 + 0.05, ar)
 	assert math.abs(mv.ax - 0.3) < 1e-6 && math.abs(mv.bx - 0.3) < 1e-6
 	assert math.abs(mv.ay - 0.15) < 1e-6 && math.abs(mv.by - 0.55) < 1e-6
+}
+
+// Снимок истории - свои части: правка части в живом состоянии не меняет
+// снимок (иначе Ctrl+Z не вернул бы перемещение части)
+fn test_mask_parts_history_copy() {
+	mut e := neutral_edit()
+	e.params.masks = sample_masks()
+	snap := e.clone()
+	e.params.masks[1].parts[0].ax = 0.9
+	e.params.masks[1].parts << pipeline.MaskPart{
+		kind: .radial
+	}
+	assert snap.params.masks[1].parts[0].ax == 0.3
+	assert snap.params.masks[1].parts.len == 2
 }

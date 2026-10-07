@@ -237,6 +237,7 @@ mut:
 	// Градиентные фильтры (masks.v): выделенный фильтр (-1 - нет; не
 	// правка), заливка маски, перетаскивание ручки, виджеты секции
 	mask_sel   int = -1
+	mask_part  int = -1 // форма выделенного фильтра: -1 - основа, иначе часть
 	mask_show  bool
 	mask_drag  MaskDrag
 	mask_pick  bool // пипетка цвета фильтра (ограничение диапазоном)
@@ -2125,6 +2126,7 @@ fn main() {
 		drop(mut st.gmask)
 		crop_leave(mut st)
 		st.mask_sel = -1
+		st.mask_part = -1
 		st.mask_drag = MaskDrag{}
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
@@ -2384,6 +2386,7 @@ fn main() {
 		drop(mut st.gmask)
 		crop_leave(mut st)
 		st.mask_sel = -1
+		st.mask_part = -1
 		st.mask_drag = MaskDrag{}
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
