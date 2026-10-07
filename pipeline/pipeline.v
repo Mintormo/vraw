@@ -914,12 +914,15 @@ const wb_sat_k = f32(1.0 / (0.018 * 65535.0))
 // в tone - для резкости, которая досчитает и запишет dst сама.
 fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16) {
 	lc := local_ctx(&p)
-	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, tone, &lc, unsafe { nil })
+	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, tone, &lc, unsafe { nil },
+		unsafe { nil })
 }
 
 // render_ex - render с готовыми фильтрами lc; wout != nil - показ маски:
-// вместо снимка в wout (npix байт) сумма весов фильтров lc (mask_view)
-fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16, lc &LocalCtx, wout &u8) {
+// вместо снимка в wout (npix байт) сумма весов фильтров lc (mask_view);
+// sout != nil - резкость фильтров на пиксель (npix байт, sp_enc) для
+// sharpen_tone
+fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, dst_stride int, tone &u16, lc &LocalCtx, wout &u8, sout &u8) {
 	mlut := build_mlut(&p)
 	haze_on := p.haze != 0 && !isnil(haze) && haze.d.len == npix
 	hlut := if haze_on { build_hlut(&p) } else { []f32{} }
@@ -959,6 +962,7 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 	ctx := RenderCtx{
 		lc:         unsafe { lc } // живёт до конца render_ex (потоки ждём здесь)
 		wout:       wout
+		sout:       sout
 		src:        src
 		mask:       mask
 		dst:        unsafe { &u8(dst.data) }
@@ -1023,6 +1027,7 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 struct RenderCtx {
 	lc         &LocalCtx = unsafe { nil } // градиентные фильтры (n == 0 - нет)
 	wout       &u8       = unsafe { nil } // показ маски: вес вместо снимка
+	sout       &u8       = unsafe { nil } // резкость фильтров на пиксель (sp_enc)
 	src        &u16 = unsafe { nil }
 	mask       &u16 = unsafe { nil }
 	dst        &u8  = unsafe { nil }
@@ -1095,6 +1100,7 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	local := lc.n > 0
 	view := !isnil(rc.wout)
 	wo := rc.wout
+	so := rc.sout
 	// Пиксель (x, y) буфера - для веса фильтров
 	mut px := if local { i0 % lc.w } else { 0 }
 	mut py := if local { i0 / lc.w } else { 0 }
@@ -1209,6 +1215,9 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			mut ls := LocalSum{}
 			if local {
 				ls = local_sum(lc, f32(px), f32(py), y, cr, cg, cb)
+				if !isnil(so) {
+					so[i] = sp_enc(if ls.any { ls.sp } else { f32(0) })
+				}
 				px++
 				if px == lc.w {
 					px = 0

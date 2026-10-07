@@ -676,6 +676,7 @@ enum MaskField {
 	exposure
 	contrast
 	clarity
+	sharpness
 	highlights
 	shadows
 	saturation
@@ -694,6 +695,7 @@ fn mask_get(m pipeline.Mask, f MaskField) f32 {
 		.exposure { m.exposure }
 		.contrast { m.contrast }
 		.clarity { m.clarity }
+		.sharpness { m.sharpness }
 		.highlights { m.highlights }
 		.shadows { m.shadows }
 		.saturation { m.saturation }
@@ -713,6 +715,7 @@ fn mask_set(mut m pipeline.Mask, f MaskField, v f32) {
 		.exposure { m.exposure = v }
 		.contrast { m.contrast = v }
 		.clarity { m.clarity = v }
+		.sharpness { m.sharpness = v }
 		.highlights { m.highlights = v }
 		.shadows { m.shadows = v }
 		.saturation { m.saturation = v }
@@ -852,6 +855,10 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		MaskSliderSpec{
 			label: 'Чёткость'
 			f:     .clarity
+		},
+		MaskSliderSpec{
+			label: 'Резкость'
+			f:     .sharpness
 		},
 		MaskSliderSpec{
 			label: 'Света'

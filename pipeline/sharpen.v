@@ -15,6 +15,9 @@ module pipeline
 //           маска краёв та же (по люме).
 // Перцептивное пространство - как в RawTherapee (USM по L*): одинаковый
 // ореол у светлого и тёмного края. Половинное превью - радиус × scale.
+// Градиентные фильтры (local.v) добавляют к amount свою резкость на
+// пиксель (буфер от прохода рендера); сумма меньше нуля - смягчение:
+// L + a·(L - B), a ≥ -1 (-1 - размытая люма), без порога и маски краёв.
 import math
 import bigbuf
 import runtime
@@ -41,22 +44,31 @@ pub fn apply_image(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, s
 // в dst вместо снимка - маска краёв или добавка резкости
 pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, scale f32, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
-	if (p.sharp.amount <= 0 && view == .off) || w < 3 || h < 3 {
-		render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil })
+	lc := local_ctx(&p)
+	if (p.sharp.amount <= 0 && !lc.use_sp && view == .off) || w < 3 || h < 3 {
+		render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil }, &lc,
+			unsafe { nil }, unsafe { nil })
 		return
 	}
 	mut tone := bigbuf.new_u16(npix * 3)
+	mut sp := if lc.use_sp { bigbuf.new_u8(npix) } else { []u8{} }
 	defer {
 		bigbuf.free(mut tone)
+		if sp.len > 0 {
+			bigbuf.free(mut sp)
+		}
 	}
-	render(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) })
-	sharpen_tone(tone, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
+	spp := if sp.len > 0 { unsafe { &u8(sp.data) } } else { unsafe { &u8(nil) } }
+	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) }, &lc,
+		unsafe { nil }, spp)
+	sharpen_tone(tone, spp, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
 }
 
 // sharpen_tone - резкость по тоновому буферу (×256) и запись 8 бит в dst.
 // Маска краёв - всегда по размытой люме; добавка - одна на все каналы
-// (по люме) или своя у каждого канала (s.rgb).
-fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, view SharpView, mut dst []u8, dst_stride int) {
+// (по люме) или своя у каждого канала (s.rgb). sp - резкость фильтров на
+// пиксель (sp_enc, npix байт) или nil.
+fn sharpen_tone(tone []u16, sp &u8, w int, h int, s Sharpen, scale f32, dither bool, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
 	mut l := bigbuf.new_f32(npix)
 	for i in 0 .. npix {
@@ -119,15 +131,36 @@ fn sharpen_tone(tone []u16, w int, h int, s Sharpen, scale f32, dither bool, vie
 				mut ar := f32(0)
 				mut ag := f32(0)
 				mut ab := f32(0)
-				if s.rgb {
-					ar = amount * m * soft_threshold(vr0 - cb[0][i], t2)
-					ag = amount * m * soft_threshold(vg0 - cb[1][i], t2)
-					ab = amount * m * soft_threshold(vb0 - cb[2][i], t2)
-				} else {
-					add := amount * m * soft_threshold(pl[i] - pb[i], t2)
-					ar = add
-					ag = add
-					ab = add
+				mut a := amount
+				if !isnil(sp) {
+					a += sp_dec(sp[i])
+				}
+				if a > 0 {
+					if s.rgb {
+						ar = a * m * soft_threshold(vr0 - cb[0][i], t2)
+						ag = a * m * soft_threshold(vg0 - cb[1][i], t2)
+						ab = a * m * soft_threshold(vb0 - cb[2][i], t2)
+					} else {
+						add := a * m * soft_threshold(pl[i] - pb[i], t2)
+						ar = add
+						ag = add
+						ab = add
+					}
+				} else if a < 0 {
+					// Смягчение фильтром: к размытому, без порога и маски краёв
+					if a < -1 {
+						a = -1
+					}
+					if s.rgb {
+						ar = a * (vr0 - cb[0][i])
+						ag = a * (vg0 - cb[1][i])
+						ab = a * (vb0 - cb[2][i])
+					} else {
+						add := a * (pl[i] - pb[i])
+						ar = add
+						ag = add
+						ab = add
+					}
 				}
 				match view {
 					.off {

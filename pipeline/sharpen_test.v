@@ -181,3 +181,72 @@ fn test_sharpen_views() {
 		1.0, .mask, mut m0, 3)
 	assert m0 == m
 }
+
+fn render_sharp_masks(src []u16, w int, h int, s Sharpen, masks []Mask) []u8 {
+	p := Params{
+		dither: false
+		sharp:  s
+		masks:  masks
+		lmap:   mask_map(Geom{}, w, h, true, w, h)
+	}
+	mut out := []u8{len: w * h * 3}
+	apply_image(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w, h, p, 1.0, mut out, 3)
+	return out
+}
+
+// sh_noise - разброс тона на ровной тёмной половине (средний квадрат
+// отклонения от среднего)
+fn sh_noise(a []u8, w int, y0 int, y1 int) f64 {
+	mut s := 0.0
+	mut n := 0
+	for y in y0 .. y1 {
+		for x in 2 .. w / 2 - 4 {
+			s += f64(a[(y * w + x) * 3])
+			n++
+		}
+	}
+	mean := s / n
+	mut d := 0.0
+	for y in y0 .. y1 {
+		for x in 2 .. w / 2 - 4 {
+			v := f64(a[(y * w + x) * 3]) - mean
+			d += v * v
+		}
+	}
+	return d / n
+}
+
+// Резкость фильтра - добавка к резкости кадра: на весь кадр +100 при
+// нуле у кадра - как amount 100; только верх - низ без изменений; кадр 100
+// с фильтром -100 - без резкости; -100 - смягчение (шум на ровном меньше)
+fn test_sharpen_in_mask() {
+	w, h := 40, 20
+	src := edge_frame(w, h, 0)
+	all := Mask{
+		kind:      .linear
+		ax:        0
+		ay:        2
+		bx:        0
+		by:        3 // весь кадр - до точки a
+		sharpness: 100
+	}
+	glob := render_sharp(src, w, h, Sharpen{ amount: 100 })
+	assert render_sharp_masks(src, w, h, Sharpen{}, [all]) == glob
+	base := render_sharp(src, w, h, Sharpen{})
+	mut top := all
+	top.ay = 0.4
+	top.by = 0.45
+	t := render_sharp_masks(src, w, h, Sharpen{}, [top])
+	row := 3 * w
+	assert t[(row + w / 2 - 1) * 3] < base[(row + w / 2 - 1) * 3]
+	for i in (11 * w) * 3 .. t.len {
+		assert t[i] == base[i]
+	}
+	mut minus := all
+	minus.sharpness = -100
+	assert render_sharp_masks(src, w, h, Sharpen{ amount: 100 }, [minus]) == base
+	noisy := edge_frame(w, h, 2000)
+	nb := render_sharp(noisy, w, h, Sharpen{})
+	ns := render_sharp_masks(noisy, w, h, Sharpen{}, [minus])
+	assert sh_noise(ns, w, 2, h - 2) < sh_noise(nb, w, 2, h - 2) * 0.5
+}
