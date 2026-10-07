@@ -47,8 +47,8 @@ fn zlib_compress(data []u8) ![]u8 {
 }
 
 // encode_tiff - TIFF кадра; exif не nil - теги EXIF в IFD кадра и
-// Exif IFD за ним (exif.v)
-fn encode_tiff(w int, h int, rgb []u8, exif &Exif) ![]u8 {
+// Exif IFD за ним (exif.v); icc не пуст - тег InterColorProfile (icc.v)
+fn encode_tiff(w int, h int, rgb []u8, exif &Exif, icc []u8) ![]u8 {
 	row := w * 3
 	strips := (h + tiff_rows_per_strip - 1) / tiff_rows_per_strip
 	mut out := []u8{cap: rgb.len / 2}
@@ -98,6 +98,9 @@ fn encode_tiff(w int, h int, rgb []u8, exif &Exif) ![]u8 {
 		short_entry(296, 2), // ResolutionUnit: дюймы
 		short_entry(317, 2), // Predictor: горизонтальный
 	]
+	if icc.len > 0 {
+		tags << IfdEntry{34675, 7, icc.len, icc} // InterColorProfile
+	}
 	set_u32_le(mut out, 4, u32(out.len))
 	if isnil(exif) {
 		tags << ascii_entry(305, 'vraw') // Software

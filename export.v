@@ -76,14 +76,17 @@ fn export_exif(m raw.Meta, copyright string) imgio.Exif {
 	}
 }
 
-// write_image - кадр в файл; EXIF - если включён и формат его держит
+// write_image - кадр в файл; EXIF - если включён и формат его держит;
+// ICC-профиль sRGB - всегда, где формат его держит (те же JPEG, PNG,
+// TIFF): это не личные данные, а описание цвета кадра
 fn write_image(path string, f imgio.Format, img Image, quality int, s &Settings) ! {
+	icc := if f.has_exif() { imgio.srgb_icc() } else { []u8{} }
 	if !s.export_no_exif && f.has_exif() {
 		e := export_exif(img.meta, s.exif_copyright)
-		imgio.write(path, f, img.width, img.height, img.rgb, quality: quality, exif: &e)!
+		imgio.write(path, f, img.width, img.height, img.rgb, quality: quality, exif: &e, icc: icc)!
 		return
 	}
-	imgio.write(path, f, img.width, img.height, img.rgb, quality: quality)!
+	imgio.write(path, f, img.width, img.height, img.rgb, quality: quality, icc: icc)!
 }
 
 // ExportStage - этапы проявки полного кадра, в порядке выполнения.

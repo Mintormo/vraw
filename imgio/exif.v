@@ -178,6 +178,7 @@ fn (e Exif) exif_entries() []IfdEntry {
 		es << short_entry(34855, if e.iso > 65535 { 65535 } else { e.iso }) // ISO
 	}
 	es << IfdEntry{36864, 7, 4, '0232'.bytes()} // ExifVersion
+	es << short_entry(40961, 1) // ColorSpace: sRGB (кадр всегда в sRGB, icc.v)
 	if e.date.len > 0 {
 		es << ascii_entry(36867, e.date) // DateTimeOriginal
 		es << ascii_entry(36868, e.date) // DateTimeDigitized
@@ -214,7 +215,8 @@ pub fn exif_tiff(e Exif) []u8 {
 }
 
 // jpeg_with_exif - JPEG с сегментом APP1 «Exif» сразу за SOI (так
-// требует стандарт EXIF; stb не пишет APP0/JFIF, конфликта нет)
+// требует стандарт EXIF; APP0 JFIF от stb остаётся следом - читатели
+// понимают оба порядка)
 fn jpeg_with_exif(jpg []u8, e Exif) ![]u8 {
 	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
 		return error('не JPEG')

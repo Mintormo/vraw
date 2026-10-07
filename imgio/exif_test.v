@@ -174,13 +174,13 @@ fn test_exif_tiff() {
 	w, h := 40, 130 // три полосы
 	rgb := ex_frame(w, h)
 	e := sample_exif()
-	d := encode_tiff(w, h, rgb, &e)!
+	d := encode_tiff(w, h, rgb, &e, []u8{})!
 	check_tiff_exif(d)
 	ifd0 := ex_ifd(d, int(ex_u32(d, 4)))
 	assert ex_u32(ifd0[256].data, 0) == u32(w)
 	assert ifd0[273].count == 3 && ifd0[279].count == 3
 	// Без EXIF - Software есть, ссылки на Exif IFD нет
-	pd := encode_tiff(w, h, rgb, unsafe { nil })!
+	pd := encode_tiff(w, h, rgb, unsafe { nil }, []u8{})!
 	plain := ex_ifd(pd, int(ex_u32(pd, 4)))
 	assert ex_str(plain[305]) == 'vraw'
 	assert 34665 !in plain && 271 !in plain

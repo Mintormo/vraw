@@ -243,7 +243,7 @@ fn test_lossless() {
 		}
 		qoi := encode_qoi(w, h, rgb)
 		assert decode_qoi(qoi)! == rgb
-		tif, tw, th := decode_tiff(encode_tiff(w, h, rgb, unsafe { nil })!)!
+		tif, tw, th := decode_tiff(encode_tiff(w, h, rgb, unsafe { nil }, []u8{})!)!
 		assert tw == w && th == h
 		assert tif == rgb
 	}
@@ -253,7 +253,7 @@ fn test_lossless() {
 fn test_tiff_strips() {
 	for h in [1, 64, 65, 200] {
 		rgb := gradient(33, h + 1)[..33 * h * 3]
-		tif, _, th := decode_tiff(encode_tiff(33, h, rgb, unsafe { nil })!)!
+		tif, _, th := decode_tiff(encode_tiff(33, h, rgb, unsafe { nil }, []u8{})!)!
 		assert th == h
 		assert tif == rgb
 	}
