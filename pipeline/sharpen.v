@@ -52,7 +52,7 @@ pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Para
 	defer {
 		free_ctx(&lc) // сетки кисти фильтров
 	}
-	if (p.sharp.amount <= 0 && !lc.use_sp && view == .off) || w < 3 || h < 3 {
+	if (p.sharp.amount <= 0 && p.texture == 0 && !lc.use_sp && view == .off) || w < 3 || h < 3 {
 		render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil }, &lc,
 			unsafe { nil }, unsafe { nil })
 		return
@@ -68,6 +68,7 @@ pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Para
 	spp := if sp.len > 0 { unsafe { &u8(sp.data) } } else { unsafe { &u8(nil) } }
 	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { &u16(tone.data) }, &lc,
 		unsafe { nil }, spp)
+	texture_tone(mut tone, w, h, p.texture, scale) // текстура - до резкости (texture.v)
 	sharpen_tone(tone, spp, w, h, p.sharp, scale, p.dither, view, mut dst, dst_stride)
 }
 

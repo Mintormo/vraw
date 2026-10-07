@@ -1723,6 +1723,21 @@ fn main() {
 		}
 		fx:     tone_fx
 	})
+	// Текстура (pipeline/texture.v) - средняя детализация: листва, кора,
+	// ткань; минус смягчает (кожа)
+	mut txr := edit_slider(mut st, SliderCfg{
+		label:  'Текстура'
+		min:    -100
+		max:    100
+		digits: 0
+		get:    fn (e &EditState) f32 {
+			return e.params.texture
+		}
+		set:    fn (mut e EditState, v f32) {
+			e.params.texture = v
+		}
+		fx:     tone_fx
+	})
 	// Сочность - бережная насыщенность (pipeline.vibrance_pixel): блёклые
 	// цвета сильнее насыщенных, тона кожи защищены
 	mut vib := edit_slider(mut st, SliderCfg{
@@ -2959,6 +2974,7 @@ fn main() {
 	mut sh_row := edit_row(mut st, mut sh, lbl_w, val_w)
 	mut con_row := edit_row(mut st, mut con, lbl_w, val_w)
 	mut clr_row := edit_row(mut st, mut clr, lbl_w, val_w)
+	mut txr_row := edit_row(mut st, mut txr, lbl_w, val_w)
 	mut vib_row := edit_row(mut st, mut vib, lbl_w, val_w)
 	mut sat_row := edit_row(mut st, mut sat, lbl_w, val_w)
 	mut hlt_row := edit_row(mut st, mut hlt, lbl_w, val_w)
@@ -3023,6 +3039,7 @@ fn main() {
 		SectionRow{exp_row},
 		SectionRow{sh_row},
 		SectionRow{con_row},
+		SectionRow{txr_row},
 		SectionRow{clr_row},
 		SectionRow{vib_row},
 		SectionRow{sat_row},

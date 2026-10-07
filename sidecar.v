@@ -87,6 +87,8 @@ struct SideState {
 	masks []SideMask
 	// Clarity -100..100 (в старых файлах нет - 0)
 	clarity f32
+	// Текстура -100..100 (в старых файлах нет - 0)
+	texture f32
 }
 
 // SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
@@ -435,6 +437,7 @@ fn side_state(e EditState) SideState {
 		crop_portrait: e.crop_portrait
 		masks:         p.masks.map(side_mask(it))
 		clarity:       p.clarity
+		texture:       p.texture
 	}
 }
 
@@ -452,6 +455,7 @@ fn edit_state(s SideState) !EditState {
 			sh_shadows:    s.sh_shadows
 			sh_highlights: s.sh_highlights
 			clarity:       s.clarity
+			texture:       s.texture
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			masks:         s.masks.map(mask_of(it))

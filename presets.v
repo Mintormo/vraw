@@ -36,7 +36,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop' && it != 'masks')
 // Производные поля (таблицы кривых, камерная кривая, матрица ББ) не
 // пересчитываются: для открытого кадра это делает set_edit (with_derived),
 // в сайдкар они не пишутся.
-//   tone   - экспозиция, тени, контраст, Clarity, тон-эквалайзер,
+//   tone   - экспозиция, тени, контраст, текстура, Clarity, тон-эквалайзер,
 //            «Тени/Света», камерная кривая (вкл/выкл)
 //   color  - баланс белого, сочность, насыщенность
 //   curves - точки тональных кривых RGB, R, G, B
@@ -55,6 +55,7 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.params.shadows = s.params.shadows
 				e.params.contrast = s.params.contrast
 				e.params.clarity = s.params.clarity
+				e.params.texture = s.params.texture
 				e.params.eq = s.params.eq
 				e.params.sh_shadows = s.params.sh_shadows
 				e.params.sh_highlights = s.params.sh_highlights
