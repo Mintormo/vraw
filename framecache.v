@@ -110,6 +110,28 @@ fn frame_store(mut st State) {
 	frame_trim(mut st)
 }
 
+// frame_put - итог фоновой загрузки (предзагрузка, prefetch.v) в кэш как
+// запись кадра path: ссылки итога переходят в кэш (без share)
+fn frame_put(mut st State, path string, res LoadResult) {
+	frame_drop(mut st, path)
+	mut fc := &FrameCache{
+		path:       path
+		lens_corr:  res.lens_corr
+		corr:       res.corr
+		w:          res.w
+		h:          res.h
+		dev_linear: res.dev_linear
+		raw_linear: res.raw_linear
+		linear:     res.linear
+		mask:       res.mask
+		look:       res.look
+		cam_view:   res.cam_view
+	}
+	fc.bytes = frame_bytes(fc)
+	st.fcache << fc
+	frame_trim(mut st)
+}
+
 // frame_bytes - память кадра в кэше: разные массивы (raw_linear бывает тем
 // же массивом, что dev_linear или linear)
 fn frame_bytes(fc &FrameCache) i64 {

@@ -131,6 +131,17 @@ mut:
 	load_msg     string
 	on_load_done fn (LoadResult) = unsafe { nil }
 	load_ov      &LoadOverlay    = unsafe { nil } // оверлей «Обработка» (loading.v)
+	// Предзагрузка соседа (prefetch.v): куда листали (+1/-1), идёт ли, её
+	// поколение, флаг отмены, путь; открытый кадр ждёт её итога (pf_wait -
+	// путь, pf_nd - хендл LibRaw из open_file); приёмник итога
+	nav_dir    int = 1
+	pf_running bool
+	pf_gen     int
+	pf_stop    &StopFlag = unsafe { nil }
+	pf_path    string
+	pf_wait    string
+	pf_nd      &raw.Developer = unsafe { nil }
+	pf_done    fn (PfResult)  = unsafe { nil }
 	// Настройки между запусками (settings.v) и меню, которое их отражает
 	settings Settings
 	m_strip  &vgui.MenuItem = unsafe { nil }
@@ -2276,6 +2287,12 @@ fn main() {
 		}
 		// Открывают левый кадр сравнения - левым станет уходящий (pair.v)
 		pair_before_open(mut st, path)
+		// Предзагрузка соседа (prefetch.v): открывают его - её итог и
+		// будет загрузкой, другой кадр - отменить
+		adopt := prefetch_adopt(mut st, path, nd)
+		if !adopt {
+			prefetch_cancel(mut st)
+		}
 		// Сырьё уходящего кадра - в кэш (framecache.v): вернутся к нему -
 		// без загрузки
 		frame_store(mut st)
@@ -2340,22 +2357,16 @@ fn main() {
 			start_history(mut st)
 		}
 		show_frame(mut st, path, mut app)
-		stop := &StopFlag{}
-		st.load_stop = stop
+		if adopt {
+			show_loading(mut st, true) // итог - из prefetch_take
+			return
+		}
 		// Кадр в кэше - сразу итог загрузки, без воркера
 		if res := frame_take(mut st, path, nd) {
 			st.on_load_done(res)
 			return
 		}
-		show_loading(mut st, true)
-		job := LoadJob{
-			gen:       st.file_gen
-			dev:       nd
-			db:        st.lens_db
-			lens_corr: st.edit.lens_corr
-			stop:      stop
-		}
-		st.load_threads << spawn load_worker(job, mut app, st.on_load_done)
+		load_start(mut st, nd)
 	}
 
 	// Итог загрузки: хендлы и буферы - в State, затем досчитать то, что
@@ -2430,6 +2441,11 @@ fn main() {
 		if st.load_msg.len > 0 {
 			nm.show_warning(st.load_msg)
 		}
+		// Сосед в ленте - заранее, в фоне (prefetch.v)
+		prefetch_next(mut st)
+	}
+	st.pf_done = fn [mut st] (r PfResult) {
+		prefetch_take(mut st, r)
 	}
 
 	// ── Лента кадров папки (browser.v) ──
@@ -2439,6 +2455,10 @@ fn main() {
 	goto_frame := fn [mut st, open_file] (idx int) {
 		if idx < 0 || idx >= st.frames.len || idx == st.frame_idx {
 			return
+		}
+		// Куда листают - туда и предзагрузка (prefetch.v)
+		if st.frame_idx >= 0 {
+			st.nav_dir = if idx > st.frame_idx { 1 } else { -1 }
 		}
 		open_file(st.frames[idx].path)
 		sync_strip(mut st)
@@ -2544,6 +2564,7 @@ fn main() {
 	// заглушка. Результаты фоновых воркеров отбросятся по file_gen.
 	close_file := fn [mut st, mut cv, mut hist, mut lens_cb, mut lens_lb, mut placeholder] () {
 		set_pair(mut st, false)
+		prefetch_cancel(mut st)
 		frame_store(mut st)
 		if !isnil(st.load_stop) {
 			mut ls := st.load_stop

@@ -40,3 +40,29 @@ fn test_frame_bytes_alias() {
 	}
 	assert frame_bytes(diff) == 4250
 }
+
+// Предзагрузка (prefetch.v): итог - в кэш без лишних ссылок; тот же кадр
+// заменяет прежнюю запись; вытеснение отпускает буферы (реестр пуст)
+fn test_frame_put_ownership() {
+	mut st := State{}
+	before := own_refs.len
+	for _ in 0 .. 2 {
+		lin := own_new[u16](300)
+		res := LoadResult{
+			w:          10
+			h:          10
+			dev_linear: lin
+			raw_linear: share(lin)
+			linear:     share(lin)
+			mask:       own_new[u16](200)
+			cam_view:   own_new[u8](400)
+		}
+		frame_put(mut st, '/x/a.CR3', res)
+	}
+	assert st.fcache.len == 1
+	assert st.fcache[0].bytes == 600 + 400 + 400
+	assert own_refs.len == before + 3
+	frame_drop(mut st, '/x/a.CR3')
+	assert st.fcache.len == 0
+	assert own_refs.len == before
+}

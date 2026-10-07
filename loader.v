@@ -70,6 +70,12 @@ mut:
 
 // load_worker выполняется в spawn; результат - через app.post
 fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
+	post_load(mut app, on_done, load_compute(job))
+}
+
+// load_compute - вся загрузка кадра (в потоке воркера; им же пользуется
+// предзагрузка соседа, prefetch.v)
+fn load_compute(job LoadJob) LoadResult {
 	mut d := job.dev
 	meta := d.meta()
 	mut res := LoadResult{
@@ -88,8 +94,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 			...res
 			err: 'Ошибка проявки: ${err.msg()}'
 		}
-		post_load(mut app, on_done, res)
-		return
+		return res
 	}
 	w := img.width
 	h := img.height
@@ -100,8 +105,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 	img.free()
 	if job.stop.stop {
 		drop(mut dev_linear)
-		post_load(mut app, on_done, res)
-		return
+		return res
 	}
 	// Полный JPEG камеры - один раз на силу виньетки и камерную кривую.
 	// Сила - по профилю кадра, даже если коррекция выключена: включат -
@@ -132,8 +136,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 		drop(mut prep.raw_linear)
 		drop(mut prep.linear)
 		drop(mut prep.mask)
-		post_load(mut app, on_done, res)
-		return
+		return res
 	}
 	res = LoadResult{
 		...res
@@ -149,7 +152,7 @@ fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 		}
 		cam_view:   cam_view(cj, d.flip(), w, h)
 	}
-	post_load(mut app, on_done, res)
+	return res
 }
 
 // cam_view - JPEG камеры для показа: вписан в размер превью w x h в
@@ -565,6 +568,7 @@ fn wait_loads(mut st State) {
 		mut s := st.load_stop
 		s.stop = true
 	}
+	prefetch_cancel(mut st) // предзагрузка соседа - в тех же потоках
 	for t in st.load_threads {
 		t.wait()
 	}
