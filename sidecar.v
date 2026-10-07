@@ -121,6 +121,8 @@ struct SideMask {
 	// Части (сложение масок; в старых файлах нет - пусто): вид и
 	// операция строками
 	parts []SidePart
+	// Кисть: мазки основы (в старых файлах нет - пусто)
+	strokes []SideStroke
 }
 
 // SidePart - часть фильтра в файле (pipeline.MaskPart)
@@ -136,11 +138,12 @@ struct SidePart {
 	angle   f32
 	feather f32
 	invert  bool
+	strokes []SideStroke
 }
 
 fn side_part(p pipeline.MaskPart) SidePart {
 	return SidePart{
-		kind:    if p.kind == .radial { 'radial' } else { 'linear' }
+		kind:    kind_str(p.kind)
 		op:      match p.op {
 			.add { 'add' }
 			.subtract { 'subtract' }
@@ -155,6 +158,7 @@ fn side_part(p pipeline.MaskPart) SidePart {
 		angle:   p.angle
 		feather: p.feather
 		invert:  p.invert
+		strokes: p.strokes.map(side_stroke(it))
 	}
 }
 
@@ -164,7 +168,7 @@ fn part_of(s SidePart) pipeline.MaskPart {
 		return if v < -l { -l } else if v > l { l } else { v }
 	}
 	return pipeline.MaskPart{
-		kind:    if s.kind == 'radial' { pipeline.MaskKind.radial } else { pipeline.MaskKind.linear }
+		kind:    kind_of(s.kind)
 		op:      match s.op {
 			'add' { pipeline.MaskOp.add }
 			'intersect' { pipeline.MaskOp.intersect }
@@ -179,12 +183,59 @@ fn part_of(s SidePart) pipeline.MaskPart {
 		angle:   s.angle
 		feather: lim(s.feather, 100)
 		invert:  s.invert
+		strokes: s.strokes.map(stroke_of(it))
+	}
+}
+
+// kind_str / kind_of - вид формы строкой (неизвестный - линейный)
+fn kind_str(k pipeline.MaskKind) string {
+	return match k {
+		.linear { 'linear' }
+		.radial { 'radial' }
+		.brush { 'brush' }
+	}
+}
+
+fn kind_of(s string) pipeline.MaskKind {
+	return match s {
+		'radial' { pipeline.MaskKind.radial }
+		'brush' { pipeline.MaskKind.brush }
+		else { pipeline.MaskKind.linear }
+	}
+}
+
+// SideStroke - мазок кисти в файле (pipeline.Stroke)
+struct SideStroke {
+	pts     []f32
+	radius  f32
+	feather f32
+	flow    f32
+}
+
+fn side_stroke(t pipeline.Stroke) SideStroke {
+	return SideStroke{
+		pts:     t.pts.clone()
+		radius:  t.radius
+		feather: t.feather
+		flow:    t.flow
+	}
+}
+
+// stroke_of - мазок из файла: нечётная точка отбрасывается, значения - в
+// пределах ползунков
+fn stroke_of(s SideStroke) pipeline.Stroke {
+	n := s.pts.len / 2 * 2
+	return pipeline.Stroke{
+		pts:     s.pts[..n].clone()
+		radius:  if s.radius < 0 { f32(0) } else if s.radius > 1 { f32(1) } else { s.radius }
+		feather: clamp_pct(s.feather)
+		flow:    if s.flow < 0 { f32(0) } else if s.flow > 1 { f32(1) } else { s.flow }
 	}
 }
 
 fn side_mask(m pipeline.Mask) SideMask {
 	return SideMask{
-		kind:       if m.kind == .radial { 'radial' } else { 'linear' }
+		kind:       kind_str(m.kind)
 		on:         m.on
 		ax:         m.ax
 		ay:         m.ay
@@ -212,6 +263,7 @@ fn side_mask(m pipeline.Mask) SideMask {
 		clarity:    m.clarity
 		sharpness:  m.sharpness
 		parts:      m.parts.map(side_part(it))
+		strokes:    m.strokes.map(side_stroke(it))
 	}
 }
 
@@ -225,7 +277,7 @@ fn mask_of(s SideMask) pipeline.Mask {
 		return if v < -lim { -lim } else if v > lim { lim } else { v }
 	}
 	return pipeline.Mask{
-		kind:       if s.kind == 'radial' { pipeline.MaskKind.radial } else { pipeline.MaskKind.linear }
+		kind:       kind_of(s.kind)
 		on:         s.on
 		ax:         s.ax
 		ay:         s.ay
@@ -253,6 +305,7 @@ fn mask_of(s SideMask) pipeline.Mask {
 		clarity:    c(s.clarity, 100)
 		sharpness:  c(s.sharpness, 100)
 		parts:      s.parts.map(part_of(it))
+		strokes:    s.strokes.map(stroke_of(it))
 	}
 }
 

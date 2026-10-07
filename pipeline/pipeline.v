@@ -916,6 +916,7 @@ fn render(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u8, 
 	lc := local_ctx(&p)
 	render_ex(src, mask, haze, npix, p, mut dst, dst_stride, tone, &lc, unsafe { nil },
 		unsafe { nil })
+	free_ctx(&lc)
 }
 
 // render_ex - render с готовыми фильтрами lc; wout != nil - показ маски:

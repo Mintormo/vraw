@@ -478,3 +478,69 @@ fn test_local_parts() {
 	c.parts[0].ax = 0.1
 	assert sub.parts[0].ax == 0.5
 }
+
+// Кисть: вес по мазку, сила, ластик (вычитающая часть), одинаково при
+// разном размере буфера, пустая кисть не действует
+fn test_local_brush() {
+	w, h := 300, 200
+	mm := lt_map(w, h)
+	stroke := Stroke{
+		pts:     [f32(0.2), 0.5, 0.8, 0.5]
+		radius:  0.05
+		feather: 20
+	}
+	br := Mask{
+		kind:     .brush
+		strokes:  [stroke]
+		exposure: 1
+	}
+	at := fn [w] (wt []u8, x int, y int) int {
+		return int(wt[y * w + x])
+	}
+	wb := mask_weights(br, mm, w, h)
+	assert at(wb, 150, 100) >= 254 // на пути
+	assert at(wb, 150, 140) == 0 // вдали от пути (0.2 высоты)
+	assert at(wb, 20, 100) == 0 // за концом
+	assert at(wb, 150, 108) > 200 // внутри радиуса (10 px), до растушёвки
+	// Сила 0.5 - половина
+	mut half := br.copy()
+	half.strokes[0].flow = 0.5
+	wh := mask_weights(half, mm, w, h)
+	assert math.abs(at(wh, 150, 100) - 128) <= 2
+	// Ластик: весь кадр минус мазок
+	all := Mask{
+		kind:     .linear
+		ax:       0
+		ay:       2
+		bx:       0
+		by:       3
+		exposure: 1
+		parts:    [MaskPart{
+			kind:    .brush
+			op:      .subtract
+			strokes: [stroke]
+		}]
+	}
+	we := mask_weights(all, mm, w, h)
+	assert at(we, 150, 100) <= 1 && at(we, 150, 150) == 255
+	// Вдвое больший буфер: та же точка кадра - тот же вес. Пиксель (x, y)
+	// и (2x, 2y) - центры сдвинуты на четверть пикселя: в глубине мазка
+	// разница не больше 2 уровней, на крутом краю - до 24
+	w2, h2 := 600, 400
+	wb2 := mask_weights(br, lt_map(w2, h2), w2, h2)
+	for pt in [[150, 100, 2], [70, 100, 2], [150, 107, 24], [150, 110, 24]] {
+		a := at(wb, pt[0], pt[1])
+		b := int(wb2[(2 * pt[1]) * w2 + 2 * pt[0]])
+		assert math.abs(a - b) <= pt[2], '${pt}: ${a} / ${b}'
+	}
+	// Пустая кисть - не действует (как вырожденная форма)
+	empty := Mask{
+		kind:     .brush
+		exposure: 1
+	}
+	src := lt_gray(w, h, 8000)
+	assert lt_render(src, w, h, Params{
+		masks: [empty]
+		lmap:  mm
+	}) == lt_render(src, w, h, Params{})
+}

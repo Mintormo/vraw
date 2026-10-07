@@ -45,6 +45,9 @@ pub fn apply_image(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, s
 pub fn apply_image_view(src &u16, mask &u16, haze &HazeMap, w int, h int, p Params, scale f32, view SharpView, mut dst []u8, dst_stride int) {
 	npix := w * h
 	lc := local_ctx(&p)
+	defer {
+		free_ctx(&lc) // сетки кисти фильтров
+	}
 	if (p.sharp.amount <= 0 && !lc.use_sp && view == .off) || w < 3 || h < 3 {
 		render_ex(src, mask, haze, npix, p, mut dst, dst_stride, unsafe { nil }, &lc,
 			unsafe { nil }, unsafe { nil })

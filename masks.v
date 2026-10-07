@@ -60,6 +60,7 @@ mut:
 	pdel_btn &vgui.Button   = unsafe { nil }
 	padd_cb  &vgui.ComboBox = unsafe { nil }
 	op_cb    &vgui.ComboBox = unsafe { nil }
+	brush_sl []&vgui.Slider // настройки кисти (включены, когда выделена кисть)
 	on_btn   &vgui.Button   = unsafe { nil }
 	del_btn  &vgui.Button   = unsafe { nil }
 	done_btn &vgui.Button   = unsafe { nil }
@@ -163,7 +164,11 @@ fn mask_active(st &State) bool {
 }
 
 fn mask_name(m pipeline.Mask, i int) string {
-	kind := if m.kind == .radial { 'Радиальный' } else { 'Линейный' }
+	kind := match m.kind {
+		.radial { 'Радиальный' }
+		.brush { 'Кисть' }
+		.linear { 'Линейный' }
+	}
 	off := if m.on { '' } else { '  (выкл)' }
 	parts := if m.parts.len > 0 { ' +${m.parts.len}' } else { '' }
 	return '${i + 1}. ${kind}${parts}${off}'
@@ -244,11 +249,17 @@ fn add_mask(mut st State, kind pipeline.MaskKind) {
 	mut m := pipeline.Mask{
 		kind: kind
 	}
-	m.set_shape(-1, default_shape(st, kind, false))
+	if kind != .brush {
+		m.set_shape(-1, default_shape(st, kind, false))
+	}
 	st.edit.params.masks << m
 	st.mask_sel = st.edit.params.masks.len - 1
 	st.mask_part = -1
-	name := if kind == .radial { 'радиальный' } else { 'линейный' }
+	name := match kind {
+		.radial { 'радиальный' }
+		.brush { 'кисть' }
+		.linear { 'линейный' }
+	}
 	mask_changed(mut st, 'mask_add', 'Фильтр: добавлен ${name}')
 }
 
@@ -256,9 +267,25 @@ fn add_mask(mut st State, kind pipeline.MaskKind) {
 
 const mask_ops = ['Добавить', 'Вычесть', 'Пересечь']
 
-// Пункты «Новая часть»: 0 - подсказка, дальше - операция и вид
-const part_adds = ['Новая часть', 'Вычесть: радиальную', 'Вычесть: линейную', 'Добавить: радиальную',
-	'Добавить: линейную', 'Пересечь: радиальной', 'Пересечь: линейной']
+// PartAdd - пункт «Новая часть»: подпись, вид и операция
+struct PartAdd {
+	label string
+	kind  pipeline.MaskKind
+	op    pipeline.MaskOp
+}
+
+// Пункты «Новая часть» (0 - подсказка, не действие)
+const part_adds = [
+	PartAdd{'Новая часть', .linear, .add},
+	PartAdd{'Вычесть: радиальную', .radial, .subtract},
+	PartAdd{'Вычесть: линейную', .linear, .subtract},
+	PartAdd{'Вычесть: кистью (ластик)', .brush, .subtract},
+	PartAdd{'Добавить: радиальную', .radial, .add},
+	PartAdd{'Добавить: линейную', .linear, .add},
+	PartAdd{'Добавить: кистью', .brush, .add},
+	PartAdd{'Пересечь: радиальной', .radial, .intersect},
+	PartAdd{'Пересечь: линейной', .linear, .intersect},
+]
 
 fn op_index(op pipeline.MaskOp) int {
 	return match op {
@@ -277,7 +304,11 @@ fn op_of(i int) pipeline.MaskOp {
 }
 
 fn kind_word(k pipeline.MaskKind) string {
-	return if k == .radial { 'радиальная' } else { 'линейная' }
+	return match k {
+		.radial { 'радиальная' }
+		.brush { 'кисть' }
+		.linear { 'линейная' }
+	}
 }
 
 // shape_names - пункты выбора формы выделенного фильтра
@@ -315,7 +346,13 @@ fn add_part(mut st State, kind pipeline.MaskKind, op pipeline.MaskOp) {
 	if !mask_valid(st) || st.gw <= 0 {
 		return
 	}
-	mut s := default_shape(st, kind, true)
+	mut s := if kind == .brush {
+		pipeline.MaskPart{
+			kind: .brush
+		}
+	} else {
+		default_shape(st, kind, true)
+	}
 	s.op = op
 	mut m := st.edit.params.masks[st.mask_sel].copy()
 	m.parts << s
@@ -446,8 +483,11 @@ fn m_to_screen(st &State, mm pipeline.MaskMap, x f64, y f64) (f32, f32) {
 
 fn mask_handles(st &State, mm pipeline.MaskMap) []MaskHandle {
 	m := st.edit.params.masks[st.mask_sel].shape(st.mask_part)
-	p := mask_pts(m, mm.ar)
 	mut hs := []MaskHandle{}
+	if m.kind == .brush {
+		return hs // кисть рисуется, ручек нет
+	}
+	p := mask_pts(m, mm.ar)
 	if m.kind == .linear {
 		ax, ay := m_to_screen(st, mm, p.ax, p.ay)
 		bx, by := m_to_screen(st, mm, p.bx, p.by)
@@ -477,6 +517,23 @@ fn mask_hit(st &State, mm pipeline.MaskMap, sx f32, sy f32) MaskHandle {
 	return MaskHandle{}
 }
 
+// shape_anchor - точка метки формы в единицах кадра: центр радиальной,
+// начало линейной, начало первого мазка кисти; false - пустая кисть
+fn shape_anchor(o pipeline.MaskPart, ar f64) (f64, f64, bool) {
+	if o.kind == .brush {
+		if o.strokes.len == 0 || o.strokes[0].pts.len < 2 {
+			return 0, 0, false
+		}
+		return f64(o.strokes[0].pts[0]) * ar, f64(o.strokes[0].pts[1]), true
+	}
+	return f64(o.ax) * ar, f64(o.ay), true
+}
+
+// brush_selected - выделенная форма - кисть (холст рисует)
+fn brush_selected(st &State) bool {
+	return mask_active(st) && st.edit.params.masks[st.mask_sel].shape(st.mask_part).kind == .brush
+}
+
 // shape_pin_hit - метка невыделенной формы выделенного фильтра под
 // курсором: -1 - основа, иначе часть; -2 - нет
 fn shape_pin_hit(st &State, mm pipeline.MaskMap, sx f32, sy f32) int {
@@ -485,8 +542,11 @@ fn shape_pin_hit(st &State, mm pipeline.MaskMap, sx f32, sy f32) int {
 		if k == st.mask_part {
 			continue
 		}
-		o := m.shape(k)
-		qx, qy := m_to_screen(st, mm, f64(o.ax) * mm.ar, f64(o.ay))
+		ox, oy, ok := shape_anchor(m.shape(k), mm.ar)
+		if !ok {
+			continue
+		}
+		qx, qy := m_to_screen(st, mm, ox, oy)
 		if math.abs(qx - sx) <= mask_handle_px && math.abs(qy - sy) <= mask_handle_px {
 			return k
 		}
@@ -500,7 +560,11 @@ fn pin_hit(st &State, mm pipeline.MaskMap, sx f32, sy f32) int {
 		if i == st.mask_sel {
 			continue
 		}
-		qx, qy := m_to_screen(st, mm, f64(m.ax) * mm.ar, f64(m.ay))
+		ox, oy, ok := shape_anchor(m.shape(-1), mm.ar)
+		if !ok {
+			continue
+		}
+		qx, qy := m_to_screen(st, mm, ox, oy)
 		if math.abs(qx - sx) <= mask_handle_px && math.abs(qy - sy) <= mask_handle_px {
 			return i
 		}
@@ -521,6 +585,14 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			if st.mask_pick {
 				return false
 			}
+			brush := brush_selected(st)
+			if brush {
+				// Круг кисти под курсором (mask_overlay)
+				st.brush_hover = true
+				st.brush_hx = ev.fx
+				st.brush_hy = ev.fy
+				mask_redraw(st)
+			}
 			h := mask_hit(st, mm, sx, sy)
 			if h.kind != .none {
 				vgui.set_cursor(if h.kind == .move {
@@ -530,8 +602,17 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				})
 			} else if shape_pin_hit(st, mm, sx, sy) > -2 || pin_hit(st, mm, sx, sy) >= 0 {
 				vgui.set_cursor(vgui.sdl_system_cursor_hand)
+			} else if brush {
+				vgui.set_cursor(vgui.sdl_system_cursor_crosshair)
 			} else {
 				vgui.set_cursor(vgui.sdl_system_cursor_default)
+			}
+			return false
+		}
+		.leave {
+			if st.brush_hover {
+				st.brush_hover = false
+				mask_redraw(st)
 			}
 			return false
 		}
@@ -557,6 +638,10 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 					select_mask(mut st, pin)
 					return true
 				}
+				if brush_selected(st) {
+					brush_begin(mut st, mm, ev.fx, ev.fy)
+					return true
+				}
 				return false
 			}
 			qx, qy := buf_to_m(mm, ev.fx, ev.fy)
@@ -571,6 +656,12 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			return true
 		}
 		.pointer_move {
+			if st.brush_paint {
+				st.brush_hx = ev.fx
+				st.brush_hy = ev.fy
+				brush_extend(mut st, mm, ev.fx, ev.fy)
+				return true
+			}
 			d := st.mask_drag
 			if d.kind == .none {
 				return false
@@ -582,6 +673,11 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			return true
 		}
 		.pointer_up {
+			if st.brush_paint {
+				st.brush_paint = false
+				mask_changed(mut st, 'mask_stroke', '${shape_label(st)}: мазок')
+				return true
+			}
 			d := st.mask_drag
 			st.mask_drag = MaskDrag{}
 			if d.kind == .none {
@@ -600,6 +696,56 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 		else {}
 	}
 	return false
+}
+
+// ── Кисть ──
+
+// brush_radius - радиус кисти в долях высоты кадра по ползунку «Размер»
+// (1..100 -> до четверти высоты; квадрат - мелкие размеры точнее)
+fn brush_radius(st &State) f32 {
+	k := st.brush_size / 100
+	return 0.003 + 0.25 * k * k
+}
+
+// brush_begin - новый мазок выделенной кисти в точке (fx, fy) буфера
+fn brush_begin(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
+	x, y := buf_to_m(mm, fx, fy)
+	mut sh := st.edit.params.masks[st.mask_sel].shape(st.mask_part)
+	sh.strokes << pipeline.Stroke{
+		pts:     [f32(x / mm.ar), f32(y)]
+		radius:  brush_radius(st)
+		feather: st.brush_feather
+		flow:    st.brush_flow / 100
+	}
+	st.edit.params.masks[st.mask_sel].set_shape(st.mask_part, sh)
+	st.brush_paint = true
+	defer_fx(mut st, st.tone_fx)
+}
+
+// brush_extend - продолжить мазок до (fx, fy): точка добавляется, если
+// курсор ушёл дальше четверти радиуса (покрытие - по расстоянию до
+// ломаной, путь и так гладкий; меньше точек - быстрее растеризация)
+fn brush_extend(mut st State, mm pipeline.MaskMap, fx f32, fy f32) {
+	x, y := buf_to_m(mm, fx, fy)
+	px := f32(x / mm.ar)
+	py := f32(y)
+	mut sh := st.edit.params.masks[st.mask_sel].shape(st.mask_part)
+	if sh.strokes.len == 0 {
+		return
+	}
+	k := sh.strokes.len - 1
+	n := sh.strokes[k].pts.len
+	dx := (px - sh.strokes[k].pts[n - 2]) * f32(mm.ar)
+	dy := py - sh.strokes[k].pts[n - 1]
+	step := sh.strokes[k].radius * 0.25
+	if dx * dx + dy * dy < step * step {
+		mask_redraw(st)
+		return
+	}
+	sh.strokes[k].pts << px
+	sh.strokes[k].pts << py
+	st.edit.params.masks[st.mask_sel].set_shape(st.mask_part, sh)
+	defer_fx(mut st, st.tone_fx)
 }
 
 // drag_mask - форма после перетаскивания ручки в точку (x, y) кадра
@@ -666,7 +812,23 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 	ix0, iy0 := cv.buf_to_screen(0, 0)
 	ix1, iy1 := cv.buf_to_screen(f32(st.gw), f32(st.gh))
 	ctx.push_clip(vgui.Rect{ix0, iy0, ix1 - ix0, iy1 - iy0})
-	if m.kind == .linear {
+	if m.kind == .brush {
+		// Пути мазков - тонко; круг кисти под курсором: размер и граница
+		// растушёвки
+		draw_strokes(mut ctx, st, mm, m, vgui.Color{255, 255, 255, 90})
+		if st.brush_hover || st.brush_paint {
+			cx, cy := cv.buf_to_screen(st.brush_hx, st.brush_hy)
+			bx, by := buf_to_m(mm, st.brush_hx, st.brush_hy)
+			ex, ey := m_to_screen(st, mm, bx + f64(brush_radius(st)), by)
+			r := f32(math.hypot(ex - cx, ey - cy))
+			ctx.draw_circle(cx, cy, r + 1, mask_dark)
+			ctx.draw_circle(cx, cy, r, mask_line)
+			ri := r * (1 - st.brush_feather / 100)
+			if ri > 2 {
+				ctx.draw_circle(cx, cy, ri, mask_soft)
+			}
+		}
+	} else if m.kind == .linear {
 		ax, ay := m_to_screen(st, mm, p.ax, p.ay)
 		bx, by := m_to_screen(st, mm, p.bx, p.by)
 		// Линии поперёк перехода через a и b - на всю ширину снимка
@@ -711,15 +873,26 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 		}
 		o := full.shape(k)
 		c := if k < 0 { mask_line } else { part_colors[op_index(o.op)] }
+		ca := vgui.Color{c.r, c.g, c.b, 150}
 		op := mask_pts(o, mm.ar)
-		if o.kind == .radial {
-			draw_ellipse(mut ctx, st, mm, op, 1.0, vgui.Color{c.r, c.g, c.b, 150}, false)
-		} else {
-			ax, ay := m_to_screen(st, mm, op.ax, op.ay)
-			bx, by := m_to_screen(st, mm, op.bx, op.by)
-			ctx.draw_line(ax, ay, bx, by, vgui.Color{c.r, c.g, c.b, 150})
+		match o.kind {
+			.radial {
+				draw_ellipse(mut ctx, st, mm, op, 1.0, ca, false)
+			}
+			.brush {
+				draw_strokes(mut ctx, st, mm, o, ca)
+			}
+			.linear {
+				ax, ay := m_to_screen(st, mm, op.ax, op.ay)
+				bx, by := m_to_screen(st, mm, op.bx, op.by)
+				ctx.draw_line(ax, ay, bx, by, ca)
+			}
 		}
-		qx, qy := m_to_screen(st, mm, op.ax, op.ay)
+		ox, oy, ok := shape_anchor(o, mm.ar)
+		if !ok {
+			continue
+		}
+		qx, qy := m_to_screen(st, mm, ox, oy)
 		ctx.fill_circle(qx, qy, 6, mask_dark)
 		ctx.fill_circle(qx, qy, 4.5, c)
 	}
@@ -728,11 +901,32 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 		if i == st.mask_sel {
 			continue
 		}
-		qx, qy := m_to_screen(st, mm, f64(o.ax) * mm.ar, f64(o.ay))
+		ox, oy, ok := shape_anchor(o.shape(-1), mm.ar)
+		if !ok {
+			continue
+		}
+		qx, qy := m_to_screen(st, mm, ox, oy)
 		ctx.fill_circle(qx, qy, 5.5, mask_dark)
 		ctx.draw_circle(qx, qy, 4, mask_line)
 	}
 	ctx.pop_clip()
+}
+
+// draw_strokes - пути мазков кисти ломаными на экране
+fn draw_strokes(mut ctx vgui.RenderContext, st &State, mm pipeline.MaskMap, o pipeline.MaskPart, c vgui.Color) {
+	for t in o.strokes {
+		n := t.pts.len / 2
+		mut qx := f32(0)
+		mut qy := f32(0)
+		for i in 0 .. n {
+			sx, sy := m_to_screen(st, mm, f64(t.pts[2 * i]) * mm.ar, f64(t.pts[2 * i + 1]))
+			if i > 0 {
+				ctx.draw_line(qx, qy, sx, sy, c)
+			}
+			qx = sx
+			qy = sy
+		}
+	}
 }
 
 // draw_ellipse - эллипс фильтра (масштаб k от полуосей) ломаной на экране
@@ -855,6 +1049,11 @@ fn sync_mask_ui(mut st State) {
 	}
 	if !valid && st.mask_pick {
 		set_mask_pick(mut st, false)
+	}
+	// Настройки кисти - когда выделена кисть
+	brush := valid && st.edit.params.masks[st.mask_sel].shape(st.mask_part).kind == .brush
+	for mut bsl in u.brush_sl {
+		bsl.enabled = brush
 	}
 	// Растушёвка и действие снаружи - у выделенной формы (радиальной)
 	sh := if valid { st.edit.params.masks[st.mask_sel].shape(st.mask_part) } else { pipeline.MaskPart{} }
@@ -1006,10 +1205,17 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	add_r.on_click = fn [mut st] () {
 		add_mask(mut st, .radial)
 	}
+	mut add_b := vgui.button('Кисть')
+	add_b.icon_name = 'brush'
+	add_b.style = .outline
+	add_b.on_click = fn [mut st] () {
+		add_mask(mut st, .brush)
+	}
 	mut add_row := vgui.create_hbox_fill()
 	add_row.set_spacing(6)
 	add_row.add(add_l, flex: 1)
 	add_row.add(add_r, flex: 1)
+	add_row.add(add_b, flex: 1)
 
 	mut on_b := icon_button(mut st, 'eye', 'Включить / выключить фильтр')
 	on_b.on_click = fn [mut st] () {
@@ -1075,16 +1281,12 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	form_row.add(form_cb, flex: 1)
 	form_row.add(pdel_b)
 	mut padd_cb := vgui.combo_box()
-	padd_cb.set_items(part_adds)
+	padd_cb.set_items(part_adds.map(it.label))
 	padd_cb.on_change = fn [mut st] (idx int, text string) {
-		if st.suppress || idx <= 0 {
+		if st.suppress || idx <= 0 || idx >= part_adds.len {
 			return
 		}
-		// Пункты парами: радиальная, линейная; пары - вычесть, добавить,
-		// пересечь
-		kind := if idx % 2 == 1 { pipeline.MaskKind.radial } else { pipeline.MaskKind.linear }
-		op := [pipeline.MaskOp.subtract, .add, .intersect][(idx - 1) / 2]
-		add_part(mut st, kind, op)
+		add_part(mut st, part_adds[idx].kind, part_adds[idx].op)
 	}
 	u.padd_cb = padd_cb
 	mut op_cb := vgui.combo_box()
@@ -1103,6 +1305,10 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 
 	mut rows := [SectionRow{add_row}, SectionRow{sel_row}, SectionRow{form_row},
 		SectionRow{part_row}, SectionRow{tools}]
+	// Кисть: размер, растушёвка, сила - для новых мазков (не правка)
+	for i, lbl in ['Размер', 'Мягкость', 'Сила'] {
+		rows << SectionRow{brush_slider(mut st, lbl, i, lbl_w, val_w)}
+	}
 	for spec in [
 		MaskSliderSpec{
 			label:  'Экспозиция'
@@ -1180,12 +1386,42 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	hint.font_size = 12
 	st.hint_labels << hint
 	rows << SectionRow{hint}
-	mut hint2 := vgui.label('Цветные метки - части фильтра: зелёная добавляет, красная вычитает, синяя пересекает')
+	mut hint3 := vgui.label('Кисть: левая кнопка рисует, ластик - «Вычесть: кистью»')
+	hint3.font_size = 12
+	st.hint_labels << hint3
+	rows << SectionRow{hint3}
+	mut hint2 := vgui.label('Метки частей: зелёная добавляет, красная вычитает, синяя пересекает')
 	hint2.font_size = 12
 	st.hint_labels << hint2
 	rows << SectionRow{hint2}
 	sync_mask_ui(mut st)
 	return rows
+}
+
+// brush_slider - ряд настройки кисти: 0 - размер, 1 - мягкость
+// (растушёвка мазка), 2 - сила (State.brush_*; не правка кадра - без истории)
+fn brush_slider(mut st State, label string, which int, lbl_w f32, val_w f32) &vgui.HBox {
+	def := [f32(35), 50, 100][which]
+	cur := [st.brush_size, st.brush_feather, st.brush_flow][which]
+	lb := vgui.label(label)
+	mut vl := value_label('${int(cur)}')
+	mut sl := vgui.slider_horizontal(if which == 1 { f32(0) } else { f32(1) }, 100, cur)
+	sl.step = 1
+	sl.wheel = false
+	sl.on_change = fn [mut st, mut vl, which] (v f32) {
+		match which {
+			0 { st.brush_size = v }
+			1 { st.brush_feather = v }
+			else { st.brush_flow = v }
+		}
+		vl.text = '${int(v)}'
+		mask_redraw(st) // круг кисти
+	}
+	if !isnil(st.mask_ui) {
+		mut u := st.mask_ui
+		u.brush_sl << sl
+	}
+	return slider_row(mut st, lb, mut sl, vl, def, lbl_w, val_w)
 }
 
 struct MaskSliderSpec {

@@ -25,10 +25,24 @@ module pipeline
 // Пиксели вне всех фильтров (сумма весов 0) не меняются - байт в байт
 // как без фильтров.
 import math
+import bigbuf
 
 pub enum MaskKind {
 	linear
 	radial
+	brush // кисть: мазки (Stroke), растеризуются под отображение
+}
+
+// Stroke - мазок кисти: путь - пары x, y в долях кадра S (до ориентации,
+// поворота и кадрирования), радиус - доля высоты S, растушёвка 0..100 -
+// доля радиуса со спадом до нуля, сила 0..1. Мазки складываются как
+// объединение с силой: w + f·c - w·f·c (c - покрытие мазка)
+pub struct Stroke {
+pub mut:
+	pts     []f32
+	radius  f32
+	feather f32 = 50
+	flow    f32 = 1
 }
 
 // Mask - градиентный фильтр. Координаты точек - доли кадра S (x - по
@@ -53,6 +67,8 @@ pub mut:
 	angle   f32
 	feather f32 = 50
 	invert  bool
+	// Кисть: мазки (kind == .brush)
+	strokes []Stroke
 	// Части фильтра (сложение масок): формы с операцией над весом -
 	// добавить, вычесть, пересечь; применяются по порядку после основы
 	parts []MaskPart
@@ -104,6 +120,23 @@ pub mut:
 	angle   f32
 	feather f32 = 50
 	invert  bool
+	strokes []Stroke
+}
+
+// copy - глубокая копия мазков
+pub fn (s Stroke) copy() Stroke {
+	return Stroke{
+		...s
+		pts: s.pts.clone()
+	}
+}
+
+// copy - глубокая копия формы (мазки - свои массивы)
+pub fn (p MaskPart) copy() MaskPart {
+	return MaskPart{
+		...p
+		strokes: p.strokes.map(it.copy())
+	}
 }
 
 // shape - форма фильтра: i = -1 - основа, иначе часть i
@@ -122,6 +155,7 @@ pub fn (m Mask) shape(i int) MaskPart {
 		angle:   m.angle
 		feather: m.feather
 		invert:  m.invert
+		strokes: m.strokes
 	}
 }
 
@@ -141,6 +175,7 @@ pub fn (mut m Mask) set_shape(i int, s MaskPart) {
 	m.angle = s.angle
 	m.feather = s.feather
 	m.invert = s.invert
+	m.strokes = s.strokes
 }
 
 // copy - глубокая копия (части - свой массив: снимки истории не должны
@@ -148,7 +183,8 @@ pub fn (mut m Mask) set_shape(i int, s MaskPart) {
 pub fn (m Mask) copy() Mask {
 	return Mask{
 		...m
-		parts: m.parts.clone()
+		strokes: m.strokes.map(it.copy())
+		parts:   m.parts.map(it.copy())
 	}
 }
 
@@ -212,6 +248,10 @@ pub fn (m MaskMap) region(x int, y int, w int) MaskMap {
 // единичная окружность - край)
 struct LocalShape {
 	radial bool
+	brush  bool // кисть: вес - из сетки grid (u, v - координаты сетки)
+	grid   []u8 // кисть: вес 0..255 на сетке gw x gh (bigbuf, free_ctx)
+	gw     int
+	gh     int
 	invert bool
 	inner  f32 // радиальный: полное действие до этого радиуса (1 - растушёвка)
 	ua     f32
@@ -317,6 +357,28 @@ fn compile_mask(m Mask, mm MaskMap) ?LocalMask {
 
 // compile_shape - форма к рендеру под отображение mm; none - вырождена
 fn compile_shape(m MaskPart, mm MaskMap) ?LocalShape {
+	if m.kind == .brush {
+		if m.strokes.len == 0 {
+			return none
+		}
+		// Сетка в долях кадра: gx = X / ar · gw - 0.5, gy = Y · gh - 0.5
+		// (центры клеток), X, Y - единицы кадра (mm)
+		gw, gh := brush_dims(mm.ar)
+		kx := f64(gw) / mm.ar
+		ky := f64(gh)
+		return LocalShape{
+			brush: true
+			grid:  raster_strokes(m.strokes, gw, gh)
+			gw:    gw
+			gh:    gh
+			ua:    f32(mm.a * kx)
+			ub:    f32(mm.b * kx)
+			uc:    f32(mm.c * kx - 0.5)
+			va:    f32(mm.d * ky)
+			vb:    f32(mm.e * ky)
+			vc:    f32(mm.f * ky - 0.5)
+		}
+	}
 	ax := f64(m.ax) * mm.ar
 	ay := f64(m.ay)
 	if m.kind == .linear {
@@ -490,6 +552,9 @@ fn mask_weight(m &LocalMask, x f32, y f32) f32 {
 // shape_weight - вес формы в пикселе (x, y) буфера, 0..1
 @[inline]
 fn shape_weight(m &LocalShape, x f32, y f32) f32 {
+	if m.brush {
+		return grid_sample(m, m.ua * x + m.ub * y + m.uc, m.va * x + m.vb * y + m.vc)
+	}
 	u := m.ua * x + m.ub * y + m.uc
 	if !m.radial {
 		// Полное действие до a (u <= 0), нет - за b (u >= 1), между -
@@ -755,6 +820,7 @@ pub fn mask_weights(m Mask, mm MaskMap, w int, h int) []u8 {
 			out[j * w + i] = u8(int(mask_weight(&lm, f32(i), f32(j)) * 255 + 0.5))
 		}
 	}
+	free_mask(&lm)
 	return out
 }
 
@@ -773,6 +839,7 @@ pub fn mask_view(src &u16, haze &HazeMap, w int, h int, p Params, idx int) []u8 
 	mut none_ := []u8{}
 	render_ex(src, unsafe { nil }, haze, w * h, p, mut none_, 4, unsafe { nil }, &lc,
 		unsafe { &u8(out.data) }, unsafe { nil })
+	free_ctx(&lc) // сетки кисти lm - те же, что в lc
 	return out
 }
 
@@ -788,4 +855,212 @@ fn sp_enc(s f32) u8 {
 @[inline]
 fn sp_dec(v u8) f32 {
 	return f32(v) * 0.01 - 1
+}
+
+// ── Кисть ──
+
+// brush_grid - длинная сторона сетки кисти (клеток): на полном кадре 24 Мп
+// клетка ~3 px - край жёсткой кисти чуть мягче, растушёванной - незаметно
+const brush_grid = 2048
+
+// brush_dims - размер сетки кисти по пропорции кадра ar = W/H
+fn brush_dims(ar f64) (int, int) {
+	if ar >= 1 {
+		return brush_grid, imax(1, int(f64(brush_grid) / ar + 0.5))
+	}
+	return imax(1, int(f64(brush_grid) * ar + 0.5)), brush_grid
+}
+
+// raster_strokes - вес мазков (0..255) на сетке gw x gh (bigbuf,
+// освобождает вызывающий). Покрытие мазка - по расстоянию d до пути
+// (ломаная, минимум по отрезкам): до inner = r·(1 - растушёвка) - 1,
+// дальше гладкий спад до 0 на r; путь из одной точки - круг. Мазки
+// складываются объединением (от порядка не зависит), поэтому сетка
+// делится на полосы строк по потокам: каждый рисует все мазки в своих
+// строках
+fn raster_strokes(strokes []Stroke, gw int, gh int) []u8 {
+	mut g := bigbuf.new_u8(gw * gh)
+	rc := RasterCtx{
+		strokes: strokes
+		g:       unsafe { &u8(g.data) }
+		gw:      gw
+		gh:      gh
+	}
+	nt := bands(gw, gh)
+	if nt <= 1 {
+		raster_rows(&rc, 0, gh)
+		return g
+	}
+	step := (gh + nt - 1) / nt
+	mut ts := []thread{}
+	for y0 := 0; y0 < gh; y0 += step {
+		ts << spawn raster_rows(&rc, y0, imin(gh, y0 + step))
+	}
+	ts.wait()
+	return g
+}
+
+// RasterCtx - входы raster_rows (общие для потоков; g - каждый пишет свои
+// строки)
+struct RasterCtx {
+	strokes []Stroke // заголовок массива: данные общие, только чтение
+	g       &u8 = unsafe { nil }
+	gw      int
+	gh      int
+}
+
+// raster_rows - мазки в строках ry0..ry1 сетки
+fn raster_rows(rc &RasterCtx, ry0 int, ry1 int) {
+	gw := rc.gw
+	gh := rc.gh
+	fw := f64(gw)
+	fh := f64(gh)
+	for st in rc.strokes {
+		n := st.pts.len / 2
+		if n == 0 || st.radius <= 0 {
+			continue
+		}
+		mut r := f64(st.radius) * fh
+		if r < 0.5 {
+			r = 0.5
+		}
+		mut fe := f64(st.feather) / 100
+		fe = if fe < 0.02 { 0.02 } else if fe > 1 { 1.0 } else { fe }
+		inner := r * (1 - fe)
+		flow := if st.flow < 0 { f32(0) } else if st.flow > 1 { f32(1) } else { st.flow }
+		if flow <= 0 {
+			continue
+		}
+		// Рамка мазка на сетке, в строках полосы
+		mut x0 := fw
+		mut y0 := fh
+		mut x1 := -1.0
+		mut y1 := -1.0
+		for k in 0 .. n {
+			px := f64(st.pts[2 * k]) * fw
+			py := f64(st.pts[2 * k + 1]) * fh
+			x0 = math.min(x0, px)
+			y0 = math.min(y0, py)
+			x1 = math.max(x1, px)
+			y1 = math.max(y1, py)
+		}
+		bx0 := imax(0, int(math.floor(x0 - r)))
+		by0 := imax(ry0, int(math.floor(y0 - r)))
+		bx1 := imin(gw, int(math.ceil(x1 + r)) + 1)
+		by1 := imin(ry1, int(math.ceil(y1 + r)) + 1)
+		if bx0 >= bx1 || by0 >= by1 {
+			continue
+		}
+		bw := bx1 - bx0
+		r2 := r * r
+		// Минимум квадрата расстояния до пути (r² - вне мазка)
+		mut dd := bigbuf.new_f32(bw * (by1 - by0))
+		for i in 0 .. dd.len {
+			dd[i] = f32(r2)
+		}
+		last := if n > 1 { n - 1 } else { 1 }
+		for k in 0 .. last {
+			ax := f64(st.pts[2 * k]) * fw
+			ay := f64(st.pts[2 * k + 1]) * fh
+			k2 := if n > 1 { k + 1 } else { k }
+			bxp := f64(st.pts[2 * k2]) * fw
+			byp := f64(st.pts[2 * k2 + 1]) * fh
+			sx0 := imax(bx0, int(math.floor(math.min(ax, bxp) - r)))
+			sy0 := imax(by0, int(math.floor(math.min(ay, byp) - r)))
+			sx1 := imin(bx1, int(math.ceil(math.max(ax, bxp) + r)) + 1)
+			sy1 := imin(by1, int(math.ceil(math.max(ay, byp) + r)) + 1)
+			dx := bxp - ax
+			dy := byp - ay
+			l2 := dx * dx + dy * dy
+			il2 := if l2 > 0 { 1 / l2 } else { 0.0 }
+			for y in sy0 .. sy1 {
+				cy := f64(y) + 0.5 - ay
+				row := (y - by0) * bw - bx0
+				for x in sx0 .. sx1 {
+					cx := f64(x) + 0.5 - ax
+					mut t := (cx * dx + cy * dy) * il2
+					t = if t < 0 { 0.0 } else if t > 1 { 1.0 } else { t }
+					ex := cx - t * dx
+					ey := cy - t * dy
+					d2 := f32(ex * ex + ey * ey)
+					if d2 < dd[row + x] {
+						dd[row + x] = d2
+					}
+				}
+			}
+		}
+		// Покрытие и объединение с сеткой
+		inner2 := f32(inner * inner)
+		fr := f32(r)
+		finner := f32(inner)
+		for y in by0 .. by1 {
+			row := (y - by0) * bw
+			for x in bx0 .. bx1 {
+				d2 := dd[row + x - bx0]
+				if d2 >= f32(r2) {
+					continue
+				}
+				c := if d2 <= inner2 {
+					flow
+				} else {
+					q := (fr - math.sqrtf(d2)) / (fr - finner)
+					q * q * (3 - 2 * q) * flow
+				}
+				unsafe {
+					gi := y * gw + x
+					v := f32(rc.g[gi]) * (1.0 / 255)
+					nv := v + c - v * c
+					rc.g[gi] = u8(int(nv * 255 + 0.5))
+				}
+			}
+		}
+		bigbuf.free(mut dd)
+	}
+}
+
+// grid_sample - вес кисти в точке сетки (gx, gy) - билинейно, за краем -
+// как у края
+@[inline]
+fn grid_sample(m &LocalShape, gx f32, gy f32) f32 {
+	mut fx := gx
+	mut fy := gy
+	mx := f32(m.gw - 1)
+	my := f32(m.gh - 1)
+	fx = if fx < 0 { 0 } else if fx > mx { mx } else { fx }
+	fy = if fy < 0 { 0 } else if fy > my { my } else { fy }
+	x0 := int(fx)
+	y0 := int(fy)
+	x1 := if x0 + 1 < m.gw { x0 + 1 } else { x0 }
+	y1 := if y0 + 1 < m.gh { y0 + 1 } else { y0 }
+	tx := fx - f32(x0)
+	ty := fy - f32(y0)
+	unsafe {
+		g := &u8(m.grid.data)
+		a := f32(g[y0 * m.gw + x0]) * (1 - tx) + f32(g[y0 * m.gw + x1]) * tx
+		b := f32(g[y1 * m.gw + x0]) * (1 - tx) + f32(g[y1 * m.gw + x1]) * tx
+		return (a * (1 - ty) + b * ty) * (1.0 / 255)
+	}
+}
+
+// free_shape - сетка кисти формы (bigbuf)
+fn free_shape(sh &LocalShape) {
+	if sh.grid.len > 0 {
+		mut g := unsafe { sh.grid } // тот же буфер - освобождаем его
+		bigbuf.free(mut g)
+	}
+}
+
+// free_mask - сетки кисти фильтра
+fn free_mask(m &LocalMask) {
+	free_shape(&m.form)
+	for k in 0 .. m.parts.len {
+		free_shape(unsafe { &m.parts[k].form })
+	}
+}
+
+// free_ctx - сетки кисти всех фильтров контекста (после рендера)
+fn free_ctx(lc &LocalCtx) {
+	for k in 0 .. lc.ms.len {
+		free_mask(unsafe { &lc.ms[k] })
+	}
 }

@@ -61,6 +61,33 @@ fn sample_masks() []pipeline.Mask {
 				},
 			]
 		},
+		pipeline.Mask{
+			kind:       .brush
+			saturation: 30
+			strokes:    [
+				pipeline.Stroke{
+					pts:     [f32(0.1), 0.2, 0.3, 0.25, 0.5, 0.3]
+					radius:  0.04
+					feather: 70
+					flow:    0.8
+				},
+				pipeline.Stroke{
+					pts:    [f32(0.6), 0.6]
+					radius: 0.1
+				},
+			]
+			parts:      [
+				pipeline.MaskPart{
+					kind:    .brush
+					op:      .subtract
+					strokes: [pipeline.Stroke{
+						pts:     [f32(0.2), 0.22, 0.25, 0.24]
+						radius:  0.02
+						feather: 10
+					}]
+				},
+			]
+		},
 	]
 }
 
@@ -190,4 +217,12 @@ fn test_mask_parts_history_copy() {
 	}
 	assert snap.params.masks[1].parts[0].ax == 0.3
 	assert snap.params.masks[1].parts.len == 2
+	// Мазки кисти - тоже свои (основа и части)
+	snap2 := e.clone()
+	e.params.masks[2].strokes[0].pts[0] = 0.9
+	e.params.masks[2].strokes << pipeline.Stroke{}
+	e.params.masks[2].parts[0].strokes[0].pts[0] = 0.9
+	assert snap2.params.masks[2].strokes[0].pts[0] == 0.1
+	assert snap2.params.masks[2].strokes.len == 2
+	assert snap2.params.masks[2].parts[0].strokes[0].pts[0] == 0.2
 }
