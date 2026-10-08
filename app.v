@@ -927,6 +927,9 @@ fn repaint_histogram(mut st State) {
 	}
 }
 
+// Подпись профиля объектива, пока снимок не выбран
+const lens_no_info = 'Информации нет'
+
 // show_lens - подпись и доступность чекбокса «Коррекция объектива» по
 // найденному профилю (после загрузки кадра, load_done)
 fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
@@ -1625,7 +1628,7 @@ fn main() {
 		record(mut st, 'lens', 'Коррекция объектива: ${on_off(v)}', false)
 	}
 	st.lens_cb = lens_cb
-	mut lens_lb := vgui.label('')
+	mut lens_lb := vgui.label(lens_no_info)
 	st.secondary_labels << lens_lb
 
 	// «Как JPEG камеры»: тональная кривая и множитель насыщенности,
@@ -2400,6 +2403,7 @@ fn main() {
 		show_loading(mut st, false)
 		if res.err.len > 0 {
 			free_load(res)
+			lens_lb.text = lens_no_info
 			show_placeholder(mut cv, mut placeholder)
 			sync_view_bg(mut st)
 			nm.show_error(res.err)
@@ -2627,7 +2631,7 @@ fn main() {
 		st.hist_pos = 0
 		refresh_history(mut st)
 		st.frame_idx = -1
-		lens_lb.text = ''
+		lens_lb.text = lens_no_info
 		lens_cb.enabled = false
 		clear_histogram(mut st, mut hist)
 		show_loading(mut st, false)
