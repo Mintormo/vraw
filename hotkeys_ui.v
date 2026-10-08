@@ -27,7 +27,7 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 	list.set_spacing(2)
 	list.set_padding(4)
 	for g in hk_groups {
-		list.add(caption(g))
+		list.add(caption(i18n.tr(g)))
 		for i, h in st.hk {
 			if h.group != g {
 				continue

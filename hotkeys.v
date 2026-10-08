@@ -23,7 +23,7 @@ import i18n
 // окна, сочетание по умолчанию, пункт меню
 struct HotItem {
 	id    string
-	group string
+	group string // ключ из hk_groups (русский) - переводится только при показе
 	name  string
 	def   string
 	item  &vgui.MenuItem = unsafe { nil }

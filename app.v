@@ -2973,10 +2973,10 @@ fn main() {
 		vgui.menu_separator(), m_quit])
 	// Горячие клавиши - настраиваемые (hotkeys.v): ключи постоянные, по
 	// умолчанию - сочетания, заданные пунктам выше
-	hk_add(mut st, 'file.open', i18n.tr('Файл'), mut m_open)
-	hk_add(mut st, 'file.open_dir', i18n.tr('Файл'), mut m_open_dir)
-	hk_add(mut st, 'file.export', i18n.tr('Файл'), mut m_export)
-	hk_add(mut st, 'file.quit', i18n.tr('Файл'), mut m_quit)
+	hk_add(mut st, 'file.open', 'Файл', mut m_open)
+	hk_add(mut st, 'file.open_dir', 'Файл', mut m_open_dir)
+	hk_add(mut st, 'file.export', 'Файл', mut m_export)
+	hk_add(mut st, 'file.quit', 'Файл', mut m_quit)
 
 	mut m_undo := vgui.menu_action(i18n.tr('Отменить'))
 	m_undo.shortcut = 'Ctrl+Z'
@@ -3049,17 +3049,17 @@ fn main() {
 	bar.add_menu(i18n.tr('Правка'), [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
 		m_all, vgui.menu_separator(), m_crop, m_spots, m_pick, m_autotone, m_reset, vgui.menu_separator(),
 		m_settings])
-	hk_add(mut st, 'edit.undo', i18n.tr('Правка'), mut m_undo)
-	hk_add(mut st, 'edit.redo', i18n.tr('Правка'), mut m_redo)
-	hk_add(mut st, 'edit.copy', i18n.tr('Правка'), mut m_copy)
-	hk_add(mut st, 'edit.paste', i18n.tr('Правка'), mut m_paste)
-	hk_add(mut st, 'edit.select_all', i18n.tr('Правка'), mut m_all)
-	hk_add(mut st, 'edit.crop', i18n.tr('Правка'), mut m_crop)
-	hk_add(mut st, 'edit.spots', i18n.tr('Правка'), mut m_spots)
-	hk_add(mut st, 'edit.wb_pick', i18n.tr('Правка'), mut m_pick)
-	hk_add(mut st, 'edit.autotone', i18n.tr('Правка'), mut m_autotone)
-	hk_add(mut st, 'edit.reset_tone', i18n.tr('Правка'), mut m_reset)
-	hk_add(mut st, 'edit.settings', i18n.tr('Правка'), mut m_settings)
+	hk_add(mut st, 'edit.undo', 'Правка', mut m_undo)
+	hk_add(mut st, 'edit.redo', 'Правка', mut m_redo)
+	hk_add(mut st, 'edit.copy', 'Правка', mut m_copy)
+	hk_add(mut st, 'edit.paste', 'Правка', mut m_paste)
+	hk_add(mut st, 'edit.select_all', 'Правка', mut m_all)
+	hk_add(mut st, 'edit.crop', 'Правка', mut m_crop)
+	hk_add(mut st, 'edit.spots', 'Правка', mut m_spots)
+	hk_add(mut st, 'edit.wb_pick', 'Правка', mut m_pick)
+	hk_add(mut st, 'edit.autotone', 'Правка', mut m_autotone)
+	hk_add(mut st, 'edit.reset_tone', 'Правка', mut m_reset)
+	hk_add(mut st, 'edit.settings', 'Правка', mut m_settings)
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {
@@ -3165,7 +3165,7 @@ fn main() {
 	for i, id in pick_ids {
 		if id.len > 0 {
 			mut it := pick_items[i]
-			hk_add(mut st, id, i18n.tr('Отбор'), mut it)
+			hk_add(mut st, id, 'Отбор', mut it)
 		}
 	}
 
@@ -3303,7 +3303,7 @@ fn main() {
 		m_clipwarn, m_mask, m_full, m_strip, m_top, m_panel, m_left]
 	for i, id in view_ids {
 		mut it := view_items[i]
-		hk_add(mut st, id, i18n.tr('Вид'), mut it)
+		hk_add(mut st, id, 'Вид', mut it)
 	}
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
