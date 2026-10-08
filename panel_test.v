@@ -41,14 +41,16 @@ fn test_panel_settings_roundtrip() {
 	s.no_strip = true
 	s.panel_left = true
 	s.strip_top = true
+	s.fs_panel = true
+	s.fs_strip = true
 	s.panel_order = panel_move(panel_default_order(), 'history', -13)
 	s.panel_hidden = ['crop', 'fx']
 	back := settings_from(json2.decode[Settings](json2.encode(s))!)
-	assert back.no_panel && back.no_strip && back.panel_left && back.strip_top
+	assert back.no_panel && back.no_strip && back.panel_left && back.strip_top && back.fs_panel && back.fs_strip
 	assert back.panel_order[0] == 'history'
 	assert back.panel_hidden == ['crop', 'fx']
 	old := settings_from(json2.decode[Settings]('{"theme": "dark"}')!)
-	assert !old.no_panel && !old.no_strip && !old.panel_left && !old.strip_top
+	assert !old.no_panel && !old.no_strip && !old.panel_left && !old.strip_top && !old.fs_panel && !old.fs_strip
 	assert old.panel_order == panel_default_order()
 	assert old.panel_hidden.len == 0
 }

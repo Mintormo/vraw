@@ -3,7 +3,8 @@ module main
 // Окно «Настройки» (меню «Правка - Настройки...»), вкладки: «Общие» -
 // оформление (тема, фон вокруг снимка - те же, что в меню «Вид»), память
 // (кэш кадров, framecache.v); «Интерфейс» - панель инструментов и лента
-// кадров, разделы панели (panel.v); «AI-шумодав»: скачивание ONNX
+// кадров (panel.v); «Разделы панели» - какие и в каком порядке;
+// «AI-шумодав»: скачивание ONNX
 // Runtime и моделей в папки рядом с программой, выбор модели для новых
 // прогонов. Настройки экспорта - в окне «Экспорт» (export_setup.v). Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
@@ -62,6 +63,8 @@ mut:
 	side_cb  &vgui.ComboBox = unsafe { nil }
 	strip_ck &vgui.CheckBox = unsafe { nil }
 	top_cb   &vgui.ComboBox = unsafe { nil }
+	fs_panel &vgui.CheckBox = unsafe { nil }
+	fs_strip &vgui.CheckBox = unsafe { nil }
 	sec_box  &vgui.VBox     = unsafe { nil } // ряды разделов по порядку
 	sec_rows []SecRow // по индексу panel_sections
 }
@@ -305,7 +308,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	general.add(note(mut u, 'Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)'))
 
 	// ── Вкладка «Интерфейс» ──
-	iface := build_iface_tab(mut st, mut u, mut dw)
+	iface, secs := build_iface_tab(mut st, mut u, mut dw)
 
 	// ── Вкладка «AI-шумодав» ──
 	mut body := tab_page()
@@ -389,6 +392,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut tabs := vgui.tab_box()
 	tabs.add_tab('Общие', general)
 	tabs.add_tab('Интерфейс', iface)
+	tabs.add_tab('Разделы панели', secs)
 	tabs.add_tab('AI-шумодав', body)
 
 	// ── Где что лежит, закрыть ──
@@ -430,14 +434,15 @@ fn tab_page() &vgui.VBox {
 	return v
 }
 
-// build_iface_tab - вкладка «Интерфейс»: видимость панели инструментов и
-// ленты, сторона панели, разделы панели (показывать ли, порядок кнопками
-// вверх/вниз). Ряды разделов создаются один раз, порядок - пересборкой
-// sec_box (sync_settings_ui).
-fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.VBox {
+// build_iface_tab - вкладки «Интерфейс» (видимость панели инструментов
+// и ленты в окне и в полноэкранном режиме, их стороны) и «Разделы
+// панели» (показывать ли, порядок кнопками вверх/вниз; отдельной
+// вкладкой - иначе окно выше экрана). Ряды разделов создаются один раз,
+// порядок - пересборкой sec_box (sync_settings_ui).
+fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VBox, &vgui.VBox) {
 	mut panel_ck := vgui.checkbox('Показывать панель инструментов (F8)')
 	panel_ck.on_change = fn [mut st] (v bool) {
-		set_panel_visible(mut st, v)
+		set_panel_visible(mut st, false, v)
 	}
 	u.panel_ck = panel_ck
 	mut side_cb := vgui.combo_box()
@@ -448,7 +453,7 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.VBo
 	u.side_cb = side_cb
 	mut strip_ck := vgui.checkbox('Показывать ленту кадров (F6)')
 	strip_ck.on_change = fn [mut st] (v bool) {
-		set_strip_visible(mut st, v)
+		set_strip_visible(mut st, false, v)
 	}
 	u.strip_ck = strip_ck
 	mut top_cb := vgui.combo_box()
@@ -457,6 +462,16 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.VBo
 		set_strip_top(mut st, i == 1)
 	}
 	u.top_cb = top_cb
+	mut fs_panel := vgui.checkbox('Панель инструментов')
+	fs_panel.on_change = fn [mut st] (v bool) {
+		set_panel_visible(mut st, true, v)
+	}
+	u.fs_panel = fs_panel
+	mut fs_strip := vgui.checkbox('Лента кадров')
+	fs_strip.on_change = fn [mut st] (v bool) {
+		set_strip_visible(mut st, true, v)
+	}
+	u.fs_strip = fs_strip
 	side_col := column_width(mut dw, ['Расположение панели', 'Расположение ленты'], 8)
 	mut side_items := panel_side_names.clone()
 	side_items << strip_side_names
@@ -517,11 +532,16 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.VBo
 	v.add(labeled('Расположение панели', side_cb, side_col, side_w))
 	v.add(strip_ck)
 	v.add(labeled('Расположение ленты', top_cb, side_col, side_w))
-	v.add(caption('Разделы панели инструментов'))
-	v.add(note(mut u, 'Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.'))
-	v.add(sec_box)
-	v.add(reset_row)
-	return v
+	v.add(caption('Полноэкранный режим (F)'))
+	v.add(note(mut u, 'Что показывать вокруг снимка; F8 и F6 в режиме - то же'))
+	v.add(fs_panel)
+	v.add(fs_strip)
+	mut secs := tab_page()
+	secs.add(caption('Разделы панели инструментов'))
+	secs.add(note(mut u, 'Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.'))
+	secs.add(sec_box)
+	secs.add(reset_row)
+	return v, secs
 }
 
 // sync_iface - вкладка «Интерфейс» по настройкам: флажки, сторона,
@@ -540,6 +560,10 @@ fn sync_iface(mut u SettingsUi, s &Settings) {
 	mut tcb := u.top_cb
 	tcb.set_selected(if s.strip_top { 1 } else { 0 })
 	tcb.enabled = !s.no_strip
+	mut fpc := u.fs_panel
+	fpc.checked = s.fs_panel
+	mut fsc := u.fs_strip
+	fsc.checked = s.fs_strip
 	order := panel_order_from(s.panel_order)
 	mut box := u.sec_box
 	box.clear()

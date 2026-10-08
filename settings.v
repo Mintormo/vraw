@@ -72,6 +72,10 @@ mut:
 	no_strip     bool
 	panel_left   bool
 	strip_top    bool // лента кадров над снимком
+	// полноэкранный режим: панель и лента видны (свои, не как в окне;
+	// по умолчанию - один снимок)
+	fs_panel bool
+	fs_strip bool
 	panel_order  []string = panel_default_order()
 	panel_hidden []string
 }
@@ -150,6 +154,8 @@ fn settings_from(s Settings) Settings {
 		no_strip:     s.no_strip
 		panel_left:   s.panel_left
 		strip_top:    s.strip_top
+		fs_panel:     s.fs_panel
+		fs_strip:     s.fs_strip
 		panel_order:  panel_order_from(s.panel_order)
 		panel_hidden: panel_hidden_from(s.panel_hidden)
 		no_frame_cache: s.no_frame_cache

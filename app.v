@@ -148,6 +148,11 @@ mut:
 	m_panel  &vgui.MenuItem = unsafe { nil }
 	m_left   &vgui.MenuItem = unsafe { nil }
 	m_top    &vgui.MenuItem = unsafe { nil }
+	m_full   &vgui.MenuItem = unsafe { nil }
+	// Полноэкранный режим (panel.v): окно на весь экран без меню, панели
+	// и ленты; в настройки не пишется
+	fullscreen bool
+	win        &vgui.Window = unsafe { nil }
 	// Раскладка окна (panel.v): корень (меню + рабочая область), меню,
 	// аккордеон панели, виджеты разделов и их раскрытость (по индексу
 	// panel_sections), показанные разделы по порядку секций
@@ -2543,6 +2548,8 @@ fn main() {
 			set_mask_pick(mut st, false) // пипетка цвета фильтра - отмена
 		} else if st.mask_sel >= 0 {
 			select_mask(mut st, -1) // градиентный фильтр: снять выделение
+		} else if st.fullscreen {
+			set_fullscreen(mut st, false)
 		}
 	})
 	// Соседи - среди кадров фильтра ленты
@@ -3077,13 +3084,13 @@ fn main() {
 	mut m_strip := vgui.menu_checkbox('Лента кадров', !st.settings.no_strip)
 	m_strip.shortcut = 'F6'
 	m_strip.on_toggle = fn [mut st] (v bool) {
-		set_strip_visible(mut st, v)
+		set_strip_visible(mut st, st.fullscreen, v)
 	}
 	st.m_strip = m_strip
 	mut m_panel := vgui.menu_checkbox('Панель инструментов', !st.settings.no_panel)
 	m_panel.shortcut = 'F8'
 	m_panel.on_toggle = fn [mut st] (v bool) {
-		set_panel_visible(mut st, v)
+		set_panel_visible(mut st, st.fullscreen, v)
 	}
 	st.m_panel = m_panel
 	mut m_left := vgui.menu_checkbox('Панель слева', st.settings.panel_left)
@@ -3091,6 +3098,13 @@ fn main() {
 		set_panel_left(mut st, v)
 	}
 	st.m_left = m_left
+	// Полноэкранный режим: F, выход - F или Esc (как в Lightroom)
+	mut m_full := vgui.menu_checkbox('Полноэкранный режим', false)
+	m_full.shortcut = 'F'
+	m_full.on_toggle = fn [mut st] (v bool) {
+		set_fullscreen(mut st, v)
+	}
+	st.m_full = m_full
 	mut m_top := vgui.menu_checkbox('Лента сверху', st.settings.strip_top)
 	m_top.on_toggle = fn [mut st] (v bool) {
 		set_strip_top(mut st, v)
@@ -3132,7 +3146,7 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, vgui.menu_separator(), m_strip, m_top, m_panel, m_left, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, vgui.menu_separator(), m_full, m_strip, m_top, m_panel, m_left, m_bg, m_themes])
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
@@ -3329,7 +3343,7 @@ fn main() {
 	st.load_ov = load_ov
 	view_stack.add(load_ov.stack)
 	mut view_area := vgui.create_vbox_fill()
-	view_area.set_padding(16)
+	view_area.set_padding(view_pad)
 	view_area.set_bg(ph.edge) // выбранный фон - когда виден снимок (sync_view_bg)
 	view_area.add(view_stack, flex: 1)
 	st.view_area = view_area
@@ -3371,6 +3385,9 @@ fn main() {
 	mut root := vgui.create_vbox_fill()
 	st.root = root
 	st.menu = bar
+	st.win = win
+	// Сочетания меню - и в полноэкранном режиме, где полоса скрыта
+	bar.keys_when_hidden = true
 	layout_work(mut st)
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх

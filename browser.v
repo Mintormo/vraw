@@ -347,7 +347,8 @@ fn strip_cell(mut st State, idx int) &StripCell {
 
 // load_folder - новая папка в ленте: список кадров, ячейки с пустыми
 // миниатюрами, отметки изменённых и пометки отбора (начало сайдкара,
-// read_side_head), строки по фильтру, фоновый расчёт миниатюр.
+// read_side_head), строки по фильтру, фоновый расчёт миниатюр. Без
+// открытого кадра (cur_path пусто) лента показывается, даже скрытая.
 fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	stop_thumbs(mut st)
 	st.thumb_gen++
@@ -383,6 +384,12 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	st.thumb_seq++
 	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), st.thumb_gen,
 		st.thumb_seq, stop, mut app, st.thumb_done)
+	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
+	// (F6, в окне или в полноэкранном режиме) показывается
+	if cur_path == '' && paths.len > 0 && !strip_on(st) {
+		set_strip_visible(mut st, st.fullscreen, true)
+		return
+	}
 	layout_strip(mut st)
 }
 
@@ -611,7 +618,7 @@ fn center_strip(mut st State) {
 		sp := st.hsplit
 		// Ширина просмотра минус поля панели ленты; без панели сплиттер
 		// не в окне, но его ширина - прежняя ширина рабочей области
-		bar := if st.settings.no_panel { f32(0) } else { sp.bar_size }
+		bar := if panel_on(st) { sp.bar_size } else { f32(0) }
 		view_w = (sp.bounds.w - bar) * viewer_share(st) - 2 * strip_box_pad - 2 * strip.pad
 	}
 	if view_w <= 0 {
@@ -626,7 +633,7 @@ fn center_strip(mut st State) {
 }
 
 // layout_strip собирает область просмотра: без папки или с лентой,
-// скрытой целиком (settings.no_strip), - только область снимка
+// скрытой целиком (strip_on), - только область снимка
 // (view_area); лента открыта - вертикальный сплиттер «снимок |
 // полоса + лента» (лента сверху - наоборот, settings.strip_top); скрыта - снимок и под ним панель с одной полосой
 // («Развернуть ленту»). Пересборка через clear + add: VBox.remove в vgui
@@ -645,10 +652,11 @@ fn layout_strip(mut st State) {
 	sb.clear()
 	if !isnil(st.m_strip) {
 		mut m := st.m_strip
-		m.checked = !st.settings.no_strip
+		m.checked = strip_on(st)
 	}
-	// Без папки или лента скрыта целиком (меню «Вид», F6) - только снимок
-	if st.frames.len == 0 || st.settings.no_strip {
+	// Без папки или лента скрыта целиком (F6; в полноэкранном режиме -
+	// своя видимость, strip_on) - только снимок
+	if st.frames.len == 0 || !strip_on(st) {
 		v.add(st.view_area, flex: 1)
 		return
 	}

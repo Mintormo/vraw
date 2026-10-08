@@ -768,6 +768,7 @@ fn (mut k KeyWatch) handle_event(ev &vgui.GuiEvent, app &vgui.App) bool {
 		13 { set_clip_warn(mut st, !(st.clip_hi || st.clip_lo), !(st.clip_hi || st.clip_lo)) } // J
 		21 { set_crop_mode(mut st, !st.crop_mode) } // R
 		6 { set_pair(mut st, !st.pair_on) } // C
+		9 { set_fullscreen(mut st, !st.fullscreen) } // F
 		else { return false }
 	}
 	return true

@@ -40,6 +40,9 @@ const panel_sections = [
 const panel_side_names = ['Справа', 'Слева']
 const strip_side_names = ['Снизу', 'Сверху']
 
+// Поля вокруг снимка (в полноэкранном режиме - без полей)
+const view_pad = f32(16)
+
 // Мин. высота снимка в сплиттере «снимок | лента»
 const view_min_h = f32(200)
 
@@ -181,7 +184,7 @@ fn layout_work(mut st State) {
 	root.add(st.menu)
 	sp.clear_first()
 	sp.clear_second()
-	if st.settings.no_panel {
+	if !panel_on(st) {
 		root.add(st.viewer, flex: 1)
 	} else {
 		if st.settings.panel_left {
@@ -199,7 +202,7 @@ fn layout_work(mut st State) {
 	}
 	if !isnil(st.m_panel) {
 		mut m := st.m_panel
-		m.checked = !st.settings.no_panel
+		m.checked = panel_on(st)
 	}
 	if !isnil(st.m_left) {
 		mut m := st.m_left
@@ -210,7 +213,7 @@ fn layout_work(mut st State) {
 
 // viewer_share - доля просмотра в сплиттере «просмотр | панель»
 fn viewer_share(st &State) f32 {
-	if st.settings.no_panel {
+	if !panel_on(st) {
 		return 1
 	}
 	r := st.hsplit.ratio
@@ -224,10 +227,25 @@ fn panel_start_ratio(left bool) f32 {
 	return if left { pf } else { 1 - pf }
 }
 
-// set_panel_visible - показать/скрыть панель инструментов (меню «Вид»,
-// F8, окно настроек)
-fn set_panel_visible(mut st State, v bool) {
-	st.settings.no_panel = !v
+// panel_on / strip_on - видны ли панель и лента сейчас: в окне - по
+// no_panel/no_strip, в полноэкранном режиме - по fs_panel/fs_strip
+fn panel_on(st &State) bool {
+	return if st.fullscreen { st.settings.fs_panel } else { !st.settings.no_panel }
+}
+
+fn strip_on(st &State) bool {
+	return if st.fullscreen { st.settings.fs_strip } else { !st.settings.no_strip }
+}
+
+// set_panel_visible - показать/скрыть панель инструментов в окне (fs =
+// false) или в полноэкранном режиме (fs = true). Меню «Вид» и F8 - для
+// текущего режима, окно настроек - для каждого своим флажком.
+fn set_panel_visible(mut st State, fs bool, v bool) {
+	if fs {
+		st.settings.fs_panel = v
+	} else {
+		st.settings.no_panel = !v
+	}
 	save_settings(st.settings)
 	layout_work(mut st)
 	sync_settings_ui(mut st)
@@ -261,6 +279,32 @@ fn strip_start_ratio(top bool) f32 {
 	return if top { sf } else { 1 - sf }
 }
 
+// set_fullscreen - полноэкранный режим (меню «Вид», F; выход - F, Esc):
+// окно SDL на весь экран, полоса меню скрыта (её сочетания клавиш
+// работают - keys_when_hidden), снимок без полей. Панель и лента - свои
+// у режима (fs_panel, fs_strip; по умолчанию скрыты, F8/F6 в режиме -
+// они): по выходе в окне всё как было.
+fn set_fullscreen(mut st State, on bool) {
+	if isnil(st.win) || isnil(st.menu) || st.fullscreen == on {
+		return
+	}
+	st.fullscreen = on
+	mut w := st.win
+	w.set_fullscreen(on)
+	mut m := st.menu
+	m.visible = !on
+	if !isnil(st.view_area) {
+		mut va := st.view_area
+		va.set_padding(if on { 0 } else { view_pad })
+	}
+	if !isnil(st.m_full) {
+		mut mi := st.m_full
+		mi.checked = on
+	}
+	layout_work(mut st)
+	layout_strip(mut st)
+}
+
 // set_strip_top - лента сверху или снизу; высота ленты сохраняется
 fn set_strip_top(mut st State, top bool) {
 	if st.settings.strip_top == top {
@@ -281,10 +325,14 @@ fn set_strip_top(mut st State, top bool) {
 }
 
 // set_strip_visible - показать/скрыть ленту кадров целиком, вместе с
-// полосой (меню «Вид», F6, окно настроек); свернуть до полосы -
-// set_strip_open
-fn set_strip_visible(mut st State, v bool) {
-	st.settings.no_strip = !v
+// полосой, в окне или в полноэкранном режиме (fs, как у панели);
+// свернуть до полосы - set_strip_open
+fn set_strip_visible(mut st State, fs bool, v bool) {
+	if fs {
+		st.settings.fs_strip = v
+	} else {
+		st.settings.no_strip = !v
+	}
 	save_settings(st.settings)
 	layout_strip(mut st)
 	sync_settings_ui(mut st)
