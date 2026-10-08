@@ -30,6 +30,7 @@ const panel_sections = [
 	PanelSection{'eq', 'Тон-эквалайзер (EV)', false},
 	PanelSection{'curves', 'Кривые', false},
 	PanelSection{'hsl', 'HSL', false},
+	PanelSection{'bw', 'Чёрно-белое', false},
 	PanelSection{'grade', 'Цветокоррекция', false},
 	PanelSection{'masks', 'Градиентные фильтры', false},
 	PanelSection{'nr', 'Шумодав и ореолы', false},

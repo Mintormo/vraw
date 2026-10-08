@@ -446,6 +446,9 @@ fn test_sidecar_wb_sharp_fields() {
 	st.edit.params.grade.zones[2] = pipeline.GradeZone{40, 20, 0}
 	st.edit.params.grade.blend = 0
 	st.edit.params.grade.balance = -25
+	st.edit.params.bw = true
+	st.edit.params.bw_mix[5] = -60
+	st.edit.params.bw_mix[0] = 25
 	st.edit.params.sharp = pipeline.Sharpen{
 		amount:      60
 		radius:      1.5
@@ -471,6 +474,7 @@ fn test_sidecar_wb_sharp_fields() {
 	assert e.params.fx == st.edit.params.fx
 	// Смешение 0 у включённой цветокоррекции - не умолчание
 	assert e.params.grade == st.edit.params.grade
+	assert e.params.bw && e.params.bw_mix == st.edit.params.bw_mix
 	assert e.params.sharp.rgb && e.params.sharp.dc_amount == 70
 	assert e.params.sharp.dc_radius == f32(1.1) && e.params.sharp.dc_contrast == 0
 	// Старый файл: полей нет (чужие ключи json2 пропускает)
@@ -478,7 +482,7 @@ fn test_sidecar_wb_sharp_fields() {
 	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
 		'sharp_masking', 'haze', 'haze_depth', 'vibrance', 'clarity', 'texture', 'vig_amount', 'vig_mid', 'vig_round', 'vig_feather', 'grain',
 		'grain_size', 'grain_rough', 'sharp_rgb', 'dc_amount', 'dc_radius',
-		'dc_contrast', 'grade', 'grade_blend', 'grade_balance'] {
+		'dc_contrast', 'grade', 'grade_blend', 'grade_balance', 'bw', 'bw_mix'] {
 		old = old.replace('"${key}"', '"old_${key}"')
 	}
 	assert !old.contains('"wb_mode"')
@@ -492,6 +496,7 @@ fn test_sidecar_wb_sharp_fields() {
 	assert o.params.texture == 0
 	assert o.params.fx == pipeline.Effects{}
 	assert o.params.grade == pipeline.Grade{}
+	assert !o.params.bw && o.params.bw_mix == [8]f32{}
 }
 
 // Режим «как снято» - без матрицы; другой режим - матрица по цвету камеры

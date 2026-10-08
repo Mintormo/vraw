@@ -20,10 +20,10 @@ import json2
 import vgui
 
 // Группы настроек: ключи (settings.json, файлы пресетов) и названия в окне
-const copy_groups = ['tone', 'color', 'curves', 'hsl', 'grade', 'nr', 'sharp', 'haze', 'fx', 'lens',
+const copy_groups = ['tone', 'color', 'curves', 'hsl', 'bw', 'grade', 'nr', 'sharp', 'haze', 'fx', 'lens',
 	'crop', 'masks']
 const copy_group_names = ['Экспозиция и тон', 'Баланс белого и цвет',
-	'Кривые', 'HSL', 'Цветокоррекция', 'Шумодав и ореолы (и AI)', 'Резкость',
+	'Кривые', 'HSL', 'Чёрно-белое', 'Цветокоррекция', 'Шумодав и ореолы (и AI)', 'Резкость',
 	'Удаление дымки', 'Эффекты (виньетка, зерно)', 'Коррекция объектива', 'Кадрирование и поворот',
 	'Градиентные фильтры']
 
@@ -41,6 +41,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop' && it != 'masks')
 //   color  - баланс белого, сочность, насыщенность
 //   curves - точки тональных кривых RGB, R, G, B
 //   hsl    - HSL-эквалайзер
+//   bw     - чёрно-белое и микшер
 //   grade  - цветокоррекция (тонирование теней, средних, светов)
 //   nr     - классический шумодав и ореолы, AI-шумодав (сила и модель)
 //   sharp, haze, lens - резкость, удаление дымки, коррекция объектива
@@ -80,6 +81,10 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.params.hsl_hue = s.params.hsl_hue
 				e.params.hsl_sat = s.params.hsl_sat
 				e.params.hsl_lum = s.params.hsl_lum
+			}
+			'bw' {
+				e.params.bw = s.params.bw
+				e.params.bw_mix = s.params.bw_mix
 			}
 			'grade' {
 				e.params.grade = s.params.grade

@@ -231,6 +231,8 @@ fn auto_tone(src []u16, mask []u16, npix int, base pipeline.Params) ToneSet {
 	p.hsl_sat = [8]f32{}
 	p.hsl_lum = [8]f32{}
 	p.grade = pipeline.Grade{}
+	p.bw = false
+	p.bw_mix = [8]f32{}
 	p = ToneSet{}.put(p)
 	// Света и белые - только если есть что мерить без клипа
 	hi_ok := pr.nu * 100 >= pr.n

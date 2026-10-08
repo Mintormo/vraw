@@ -173,6 +173,7 @@ mut:
 	hint_labels      []&vgui.Label
 	secondary_labels []&vgui.Label
 	hsl_labels       []&vgui.Label
+	bw_cb            &vgui.CheckBox = unsafe { nil } // «Чёрно-белое» (bw_ui.v)
 	grade_wheels     []&GradeWheel // круги раздела «Цветокоррекция» (grade_ui.v)
 	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
 	// AI-шумодав (ai_nr.v): где лежат модели и ORT, кэши моделей по id
@@ -3264,6 +3265,7 @@ fn main() {
 	panel_add(mut st, 'hsl', section([
 		SectionRow{hsl_tabs},
 	]))
+	panel_add(mut st, 'bw', bw_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'grade', grade_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'masks', section(mask_rows))
 	// Раскрытая секция показывает метки всех фильтров на снимке (индекс

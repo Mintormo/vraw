@@ -89,6 +89,10 @@ pub mut:
 	hsl_hue [8]f32
 	hsl_sat [8]f32
 	hsl_lum [8]f32
+	// Чёрно-белое (bw.v): серый по люме, микшер - яркость по 8 диапазонам
+	// оттенков (hsl_centers), -100..100. Вместо насыщенности, сочности и HSL
+	bw     bool
+	bw_mix [8]f32
 	// Цветокоррекция (grade.v): тонирование теней, средних, светов и
 	// общий оттенок - после HSL
 	grade Grade
@@ -959,9 +963,10 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 	} else {
 		channel_luts(&p, build_flut(&p))
 	}
-	use_hsl := hsl_active(&p)
+	use_hsl := hsl_active(&p) && !p.bw // в Ч/Б HSL не действует (bw.v)
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
 	use_grade := p.grade.active()
+	bwt := if p.bw && bw_active_mix(&p) { build_bw(&p) } else { []f32{} }
 	grade := if use_grade { build_grade(&p.grade) } else { GradeLut{} }
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
@@ -1009,6 +1014,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 		hlm:        unsafe { &f32(hsl.lm.data) }
 		hact:       unsafe { &u8(hsl.act.data) }
 		use_grade:  use_grade
+		bw:         p.bw
+		bwt:        if bwt.len > 0 { unsafe { &f32(bwt.data) } } else { unsafe { nil } }
 		gd:         unsafe { &f32(grade.d.data) }
 		cdh:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hue.data) } } else { unsafe { nil } }
 		csk:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hsat.data) } } else { unsafe { nil } }
@@ -1076,6 +1083,8 @@ struct RenderCtx {
 	hlm        &f32 = unsafe { nil }
 	hact       &u8  = unsafe { nil }
 	use_grade  bool
+	bw         bool // чёрно-белое: bwt - микшер (nil - чистая люма)
+	bwt        &f32 = unsafe { nil }
 	gd         &f32 = unsafe { nil } // цветокоррекция по тону люмы (build_grade)
 	cdh        &f32 = unsafe { nil } // таблица цвета «как JPEG» или nil
 	csk        &f32 = unsafe { nil }
@@ -1115,6 +1124,8 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	pcl := rc.pcl
 	use_hsl := rc.use_hsl
 	use_grade := rc.use_grade
+	bw := rc.bw
+	bwt := rc.bwt
 	gd := rc.gd
 	sat := rc.sat
 	vib := rc.vib
@@ -1342,17 +1353,23 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 					sp = sat * if ls.sat < -1 { f32(0) } else { 1 + ls.sat }
 				}
 			}
-			if sp != 1.0 {
-				l := 0.2126 * vr + 0.7152 * vg + 0.0722 * vb
-				vr = l + sp * (vr - l)
-				vg = l + sp * (vg - l)
-				vb = l + sp * (vb - l)
-			}
-			if vib != 0 {
-				vr, vg, vb = vibrance_pixel(vr, vg, vb, vib)
-			}
-			if use_hsl {
-				vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact, cdh, csk)
+			if bw {
+				vr = bw_pixel(vr, vg, vb, bwt)
+				vg = vr
+				vb = vr
+			} else {
+				if sp != 1.0 {
+					l := 0.2126 * vr + 0.7152 * vg + 0.0722 * vb
+					vr = l + sp * (vr - l)
+					vg = l + sp * (vg - l)
+					vb = l + sp * (vb - l)
+				}
+				if vib != 0 {
+					vr, vg, vb = vibrance_pixel(vr, vg, vb, vib)
+				}
+				if use_hsl {
+					vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact, cdh, csk)
+				}
 			}
 			if use_grade {
 				vr, vg, vb = grade_pixel(vr, vg, vb, gd)

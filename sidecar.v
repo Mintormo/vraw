@@ -104,6 +104,9 @@ struct SideState {
 	grade         []f32
 	grade_blend   f32
 	grade_balance f32
+	// Чёрно-белое (в старых файлах нет - цвет; микшер пуст - нули)
+	bw     bool
+	bw_mix []f32 // 8 диапазонов, как HSL
 }
 
 // SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
@@ -360,7 +363,8 @@ fn mask_of(s SideMask) pipeline.Mask {
 fn (s SideState) validate() ! {
 	if s.eq.len != 5 || s.hsl_hue.len != 8 || s.hsl_sat.len != 8 || s.hsl_lum.len != 8
 		|| s.nr.len != 4 || s.curves.len != 4 || (s.crop.len != 0 && s.crop.len != 4)
-		|| (s.grade.len != 0 && s.grade.len != 3 * pipeline.grade_zones) {
+		|| (s.grade.len != 0 && s.grade.len != 3 * pipeline.grade_zones)
+		|| (s.bw_mix.len != 0 && s.bw_mix.len != 8) {
 		return error('неверный размер массивов настроек')
 	}
 	// С допуском: доли у края кадра - 1 ± погрешность f32
@@ -464,6 +468,8 @@ fn side_state(e EditState) SideState {
 		grade:         side_grade(p.grade)
 		grade_blend:   p.grade.blend
 		grade_balance: p.grade.balance
+		bw:            p.bw
+		bw_mix:        p.bw_mix[..].clone()
 	}
 }
 
@@ -535,6 +541,7 @@ fn edit_state(s SideState) !EditState {
 			texture:       s.texture
 			fx:            side_fx(s)
 			grade:         grade_of(s)
+			bw:            s.bw
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			masks:         s.masks.map(mask_of(it))
@@ -584,6 +591,9 @@ fn edit_state(s SideState) !EditState {
 		e.params.hsl_hue[i] = s.hsl_hue[i]
 		e.params.hsl_sat[i] = s.hsl_sat[i]
 		e.params.hsl_lum[i] = s.hsl_lum[i]
+		if s.bw_mix.len == 8 {
+			e.params.bw_mix[i] = clampf(s.bw_mix[i], -100, 100)
+		}
 	}
 	for i in 0 .. 4 {
 		e.nr[i] = s.nr[i]
