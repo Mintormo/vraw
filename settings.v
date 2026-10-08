@@ -64,6 +64,16 @@ mut:
 	crop_grid   string = 'thirds'
 	// отбор (rating.v): после пометки открытого кадра - к следующему
 	auto_advance bool
+	// раскладка окна (panel.v): панель инструментов и лента кадров скрыты
+	// целиком (отрицание - в старом settings.json полей нет, всё видно),
+	// панель слева; разделы панели - порядок (ключи panel_sections) и
+	// скрытые
+	no_panel     bool
+	no_strip     bool
+	panel_left   bool
+	strip_top    bool // лента кадров над снимком
+	panel_order  []string = panel_default_order()
+	panel_hidden []string
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -136,6 +146,12 @@ fn settings_from(s Settings) Settings {
 		crop_aspect: if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
 		crop_grid:   if s.crop_grid in crop_grids { s.crop_grid } else { 'thirds' }
 		auto_advance: s.auto_advance
+		no_panel:     s.no_panel
+		no_strip:     s.no_strip
+		panel_left:   s.panel_left
+		strip_top:    s.strip_top
+		panel_order:  panel_order_from(s.panel_order)
+		panel_hidden: panel_hidden_from(s.panel_hidden)
 		no_frame_cache: s.no_frame_cache
 		frame_cache_mb: if s.frame_cache_mb in frame_cache_mbs { s.frame_cache_mb } else { 0 }
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию

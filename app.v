@@ -145,6 +145,18 @@ mut:
 	// Настройки между запусками (settings.v) и меню, которое их отражает
 	settings Settings
 	m_strip  &vgui.MenuItem = unsafe { nil }
+	m_panel  &vgui.MenuItem = unsafe { nil }
+	m_left   &vgui.MenuItem = unsafe { nil }
+	m_top    &vgui.MenuItem = unsafe { nil }
+	// Раскладка окна (panel.v): корень (меню + рабочая область), меню,
+	// аккордеон панели, виджеты разделов и их раскрытость (по индексу
+	// panel_sections), показанные разделы по порядку секций
+	root       &vgui.VBox      = unsafe { nil }
+	menu       &vgui.MenuBar   = unsafe { nil }
+	acc        &vgui.Accordion = unsafe { nil }
+	sec_w      []&vgui.Widget
+	sec_open   []bool
+	panel_keys []string
 	m_bg     []&vgui.MenuItem
 	holder   &Placeholder = unsafe { nil } // заглушка области снимка
 	// Тема (themes.v): палитра vraw, пункты меню, виджеты со своими
@@ -2490,7 +2502,7 @@ fn main() {
 	mut strip_info := vgui.label('')
 	st.secondary_labels << strip_info
 	st.strip_info = strip_info
-	mut strip_toggle := vgui.button('Скрыть ленту')
+	mut strip_toggle := vgui.button('Свернуть ленту')
 	strip_toggle.style = .outline
 	strip_toggle.on_click = fn [mut st] () {
 		set_strip_open(mut st, !st.strip_open)
@@ -3060,11 +3072,30 @@ fn main() {
 		set_jpeg_show(mut st, v)
 	}
 	st.m_jpeg = m_jpeg
-	mut m_strip := vgui.menu_checkbox('Лента кадров', st.strip_open)
+	// Раскладка окна (panel.v): лента и панель скрываются целиком (F6/F8,
+	// как в Lightroom), панель - справа или слева
+	mut m_strip := vgui.menu_checkbox('Лента кадров', !st.settings.no_strip)
+	m_strip.shortcut = 'F6'
 	m_strip.on_toggle = fn [mut st] (v bool) {
-		set_strip_open(mut st, v)
+		set_strip_visible(mut st, v)
 	}
 	st.m_strip = m_strip
+	mut m_panel := vgui.menu_checkbox('Панель инструментов', !st.settings.no_panel)
+	m_panel.shortcut = 'F8'
+	m_panel.on_toggle = fn [mut st] (v bool) {
+		set_panel_visible(mut st, v)
+	}
+	st.m_panel = m_panel
+	mut m_left := vgui.menu_checkbox('Панель слева', st.settings.panel_left)
+	m_left.on_toggle = fn [mut st] (v bool) {
+		set_panel_left(mut st, v)
+	}
+	st.m_left = m_left
+	mut m_top := vgui.menu_checkbox('Лента сверху', st.settings.strip_top)
+	m_top.on_toggle = fn [mut st] (v bool) {
+		set_strip_top(mut st, v)
+	}
+	st.m_top = m_top
 	// Пересветы и провалы (clipping.v): J - оба сразу, как в Lightroom
 	mut m_clipwarn := vgui.menu_checkbox('Пересветы и провалы', false)
 	m_clipwarn.shortcut = 'J'
@@ -3101,7 +3132,7 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, m_strip, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, vgui.menu_separator(), m_strip, m_top, m_panel, m_left, m_bg, m_themes])
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
@@ -3171,14 +3202,14 @@ fn main() {
 	acc.fit_content = true
 	acc.spacing = 4
 	acc.header_height = 30
-	acc.add_section_expanded('Коррекция', section([
+	panel_add(mut st, 'lens', section([
 		SectionRow{lens_cb},
 		SectionRow{lens_lb},
 		SectionRow{crv_cb},
 	]))
-	acc.add_section('Кадрирование и поворот', section(crop_rows))
-	acc.add_section_expanded('Баланс белого', section(wb_rows))
-	acc.add_section_expanded('Экспозиция и тон', section([
+	panel_add(mut st, 'crop', section(crop_rows))
+	panel_add(mut st, 'wb', section(wb_rows))
+	panel_add(mut st, 'tone', section([
 		SectionRow{at_row},
 		SectionRow{exp_row},
 		SectionRow{sh_row},
@@ -3188,13 +3219,13 @@ fn main() {
 		SectionRow{vib_row},
 		SectionRow{sat_row},
 	]))
-	acc.add_section('Удаление дымки', section([
+	panel_add(mut st, 'haze', section([
 		SectionRow{hzs_row},
 		SectionRow{hzd_row},
 		SectionRow{hz_map_cb},
 		SectionRow{hz_hint},
 	]))
-	acc.add_section('Тени/Света', section([
+	panel_add(mut st, 'shadows', section([
 		SectionRow{hlt_row},
 		SectionRow{sht_row},
 	]))
@@ -3202,29 +3233,25 @@ fn main() {
 	for row in eq_rows {
 		eq_items << SectionRow{row}
 	}
-	acc.add_section('Тон-эквалайзер (EV)', section(eq_items))
-	acc.add_section('Кривые', section([
+	panel_add(mut st, 'eq', section(eq_items))
+	panel_add(mut st, 'curves', section([
 		SectionRow{ch_row},
 		SectionRow{ed},
 		SectionRow{curve_hint},
 	]))
 	// Высота вкладок: заголовок TabBox + 8 рядов с отступами секции
-	acc.add_section('HSL', section([
+	panel_add(mut st, 'hsl', section([
 		SectionRow{hsl_tabs},
 	]))
-	acc.add_section('Градиентные фильтры', section(mask_rows))
-	// Раскрытая секция показывает метки всех фильтров на снимке
-	if !isnil(st.mask_ui) {
-		mut mu := st.mask_ui
-		mu.acc = acc
-		mu.acc_idx = acc.get_section_count() - 1
-	}
+	panel_add(mut st, 'masks', section(mask_rows))
+	// Раскрытая секция показывает метки всех фильтров на снимке (индекс
+	// секции - layout_panel)
 	acc.on_change = fn [mut st] (idx int, open bool) {
 		if !isnil(st.mask_ui) && idx == st.mask_ui.acc_idx {
 			mask_redraw(st)
 		}
 	}
-	acc.add_section('Шумодав и ореолы', section([
+	panel_add(mut st, 'nr', section([
 		SectionRow{ai_caption},
 		SectionRow{ai_block},
 		SectionRow{vgui.separator()},
@@ -3234,7 +3261,7 @@ fn main() {
 		SectionRow{nrc_row},
 		SectionRow{df_row},
 	]))
-	acc.add_section('Резкость', section([
+	panel_add(mut st, 'sharp', section([
 		SectionRow{dc_caption},
 		SectionRow{dca_row},
 		SectionRow{dcr_row},
@@ -3250,7 +3277,7 @@ fn main() {
 		SectionRow{sh_show_cb},
 		SectionRow{sharp_hint},
 	]))
-	acc.add_section('Эффекты', section([
+	panel_add(mut st, 'fx', section([
 		SectionRow{vig_caption},
 		SectionRow{edit_row(mut st, mut vig_amt, lbl_w, val_w)},
 		SectionRow{edit_row(mut st, mut vig_mid, lbl_w, val_w)},
@@ -3263,12 +3290,16 @@ fn main() {
 		SectionRow{edit_row(mut st, mut grn_rough, lbl_w, val_w)},
 		SectionRow{fx_hint},
 	]))
-	// История - последней секцией, открыта: 8 строк списка и подсказка
-	acc.add_section_expanded('История', section([
+	// История - последней секцией (по умолчанию), открыта: 8 строк списка и подсказка
+	panel_add(mut st, 'history', section([
 		SectionRow{hist_lb},
 		SectionRow{ba_row},
 		SectionRow{hist_hint},
 	]))
+
+	// Секции - по настройкам: порядок и скрытые разделы (panel.v)
+	st.acc = acc
+	layout_panel(mut st)
 
 	mut scroll := vgui.scroll_box(0)
 	scroll.sb_width = 8
@@ -3312,10 +3343,8 @@ fn main() {
 	// подстраиваются под новую высоту
 	mut vsplit := vgui.splitter_vertical()
 	vsplit.bar_size = 3
-	vsplit.min_first = 200
-	vsplit.min_second = strip_bar_h + 80 + 2 * strip_box_pad
-	// Стартовая высота ленты ~strip_pane_h при высоте окна 946 (минус меню)
-	vsplit.ratio = 1 - strip_pane_h / (946 - 28)
+	// Мин. высоты и порядок половин - layout_strip (лента снизу или сверху)
+	vsplit.ratio = strip_start_ratio(st.settings.strip_top)
 	vsplit.on_resize = fn [mut st] (r f32) {
 		fit_strip_items(mut st)
 	}
@@ -3327,14 +3356,11 @@ fn main() {
 	st.strip_box = strip_box
 
 	// Просмотр | панель инструментов - горизонтальный сплиттер: ширину
-	// панели можно менять (по умолчанию 440 при ширине окна 1280)
+	// панели можно менять (по умолчанию 440 при ширине окна 1280); панель
+	// справа или слева, или скрыта - layout_work (panel.v)
 	mut top := vgui.splitter_horizontal()
 	top.bar_size = 3
-	top.min_first = 400
-	top.min_second = 360
-	top.ratio = (1280 - 3 - 440) / f32(1280 - 3)
-	top.set_first(viewer)
-	top.set_second(right)
+	top.ratio = panel_start_ratio(st.settings.panel_left)
 	// Ширина просмотра изменилась - текущий кадр ленты снова по центру
 	top.on_resize = fn [mut st] (r f32) {
 		center_strip(mut st)
@@ -3343,8 +3369,9 @@ fn main() {
 
 	// Корень: меню вверху, под ним рабочая область
 	mut root := vgui.create_vbox_fill()
-	root.add(bar)
-	root.add(top, flex: 1)
+	st.root = root
+	st.menu = bar
+	layout_work(mut st)
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).

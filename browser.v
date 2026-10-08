@@ -586,7 +586,7 @@ fn fit_strip_items(mut st State) {
 	sp := st.vsplit
 	mut pane := strip_pane_h
 	if sp.bounds.h > 0 {
-		pane = (sp.bounds.h - sp.bar_size) * (1 - sp.ratio)
+		pane = (sp.bounds.h - sp.bar_size) * strip_share(st)
 	}
 	mut strip := st.strip
 	strip.item_width = strip_item_width(pane)
@@ -609,8 +609,10 @@ fn center_strip(mut st State) {
 	mut view_w := strip.bounds.w - 2 * strip.pad
 	if !isnil(st.hsplit) && st.hsplit.bounds.w > 0 {
 		sp := st.hsplit
-		// Ширина просмотра минус поля панели ленты
-		view_w = (sp.bounds.w - sp.bar_size) * sp.ratio - 2 * strip_box_pad - 2 * strip.pad
+		// Ширина просмотра минус поля панели ленты; без панели сплиттер
+		// не в окне, но его ширина - прежняя ширина рабочей области
+		bar := if st.settings.no_panel { f32(0) } else { sp.bar_size }
+		view_w = (sp.bounds.w - bar) * viewer_share(st) - 2 * strip_box_pad - 2 * strip.pad
 	}
 	if view_w <= 0 {
 		return
@@ -623,10 +625,11 @@ fn center_strip(mut st State) {
 	strip.scroll_x = x
 }
 
-// layout_strip собирает область просмотра: без папки - только область
-// снимка (view_area); лента открыта - вертикальный сплиттер «снимок |
-// полоса + лента»; скрыта - снимок и под ним панель с одной полосой
-// («Показать ленту»). Пересборка через clear + add: VBox.remove в vgui
+// layout_strip собирает область просмотра: без папки или с лентой,
+// скрытой целиком (settings.no_strip), - только область снимка
+// (view_area); лента открыта - вертикальный сплиттер «снимок |
+// полоса + лента» (лента сверху - наоборот, settings.strip_top); скрыта - снимок и под ним панель с одной полосой
+// («Развернуть ленту»). Пересборка через clear + add: VBox.remove в vgui
 // не работает.
 fn layout_strip(mut st State) {
 	if isnil(st.viewer) || isnil(st.strip) || isnil(st.strip_bar) || isnil(st.vsplit)
@@ -640,33 +643,49 @@ fn layout_strip(mut st State) {
 	sp.clear_first()
 	sp.clear_second()
 	sb.clear()
-	if st.frames.len == 0 {
+	if !isnil(st.m_strip) {
+		mut m := st.m_strip
+		m.checked = !st.settings.no_strip
+	}
+	// Без папки или лента скрыта целиком (меню «Вид», F6) - только снимок
+	if st.frames.len == 0 || st.settings.no_strip {
 		v.add(st.view_area, flex: 1)
 		return
 	}
 	sb.add(st.strip_bar)
+	top := st.settings.strip_top
 	if st.strip_open {
 		sb.add(st.strip, flex: 1)
-		sp.set_first(st.view_area)
-		sp.set_second(sb)
+		strip_min := strip_bar_h + 80 + 2 * strip_box_pad
+		if top {
+			sp.min_first = strip_min
+			sp.min_second = view_min_h
+			sp.set_first(sb)
+			sp.set_second(st.view_area)
+		} else {
+			sp.min_first = view_min_h
+			sp.min_second = strip_min
+			sp.set_first(st.view_area)
+			sp.set_second(sb)
+		}
 		v.add(sp, flex: 1)
 		fit_strip_items(mut st)
+	} else if top {
+		v.add(sb)
+		v.add(st.view_area, flex: 1)
 	} else {
 		v.add(st.view_area, flex: 1)
 		v.add(sb)
 	}
 	if !isnil(st.strip_toggle) {
 		mut b := st.strip_toggle
-		b.text = if st.strip_open { 'Скрыть ленту' } else { 'Показать ленту' }
-	}
-	if !isnil(st.m_strip) {
-		mut m := st.m_strip
-		m.checked = st.strip_open
+		b.text = if st.strip_open { 'Свернуть ленту' } else { 'Развернуть ленту' }
 	}
 }
 
-// set_strip_open - показать/скрыть ленту (кнопка на полосе, меню «Вид»),
-// выбор запоминается в настройках
+// set_strip_open - свернуть ленту до полосы и развернуть (кнопка на
+// полосе), выбор запоминается в настройках; скрыть целиком -
+// set_strip_visible (panel.v)
 fn set_strip_open(mut st State, open bool) {
 	st.strip_open = open
 	st.settings.strip_open = open

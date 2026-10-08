@@ -1,8 +1,9 @@
 module main
 
-// Окно «Настройки» (меню «Правка - Настройки...»): оформление (тема, фон
-// вокруг снимка - те же, что в меню «Вид»), память (кэш кадров,
-// framecache.v), AI-шумодав: скачивание ONNX
+// Окно «Настройки» (меню «Правка - Настройки...»), вкладки: «Общие» -
+// оформление (тема, фон вокруг снимка - те же, что в меню «Вид»), память
+// (кэш кадров, framecache.v); «Интерфейс» - панель инструментов и лента
+// кадров, разделы панели (panel.v); «AI-шумодав»: скачивание ONNX
 // Runtime и моделей в папки рядом с программой, выбор модели для новых
 // прогонов. Настройки экспорта - в окне «Экспорт» (export_setup.v). Диалог создаётся при первом открытии и живёт до выхода:
 // закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
@@ -56,6 +57,21 @@ mut:
 	dl_text  &vgui.Label       = unsafe { nil }
 	dl_stop  &vgui.Button      = unsafe { nil }
 	notes    []&vgui.Label // вторичные подписи - цвет по теме
+	// Интерфейс (panel.v): панель, её сторона, лента, разделы панели
+	panel_ck &vgui.CheckBox = unsafe { nil }
+	side_cb  &vgui.ComboBox = unsafe { nil }
+	strip_ck &vgui.CheckBox = unsafe { nil }
+	top_cb   &vgui.ComboBox = unsafe { nil }
+	sec_box  &vgui.VBox     = unsafe { nil } // ряды разделов по порядку
+	sec_rows []SecRow // по индексу panel_sections
+}
+
+// SecRow - ряд раздела панели в окне: показывать ли, вверх, вниз
+struct SecRow {
+	row  &vgui.HBox     = unsafe { nil }
+	ck   &vgui.CheckBox = unsafe { nil }
+	up   &vgui.Button   = unsafe { nil }
+	down &vgui.Button   = unsafe { nil }
 }
 
 // fmt_title - формат в списке настроек: название и что это
@@ -277,18 +293,22 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	rt_row.add(rt_state, min: state_col)
 	rt_row.add(rt_btn, min: btn_col)
 
-	mut body := vgui.create_vbox_fill()
-	body.set_padding(16)
-	body.set_spacing(6)
-	body.add(caption('Оформление'))
-	body.add(labeled('Тема', theme_cb, look_col, look_w))
-	body.add(labeled('Фон вокруг снимка', bg_cb, look_col, look_w))
+	// ── Вкладка «Общие» ──
+	mut general := tab_page()
+	general.add(caption('Оформление'))
+	general.add(labeled('Тема', theme_cb, look_col, look_w))
+	general.add(labeled('Фон вокруг снимка', bg_cb, look_col, look_w))
 
-	body.add(caption('Память'))
-	body.add(cache_ck)
-	body.add(labeled('Не больше', cache_cb, look_col, look_w))
-	body.add(note(mut u, 'Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)'))
+	general.add(caption('Память'))
+	general.add(cache_ck)
+	general.add(labeled('Не больше', cache_cb, look_col, look_w))
+	general.add(note(mut u, 'Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)'))
 
+	// ── Вкладка «Интерфейс» ──
+	iface := build_iface_tab(mut st, mut u, mut dw)
+
+	// ── Вкладка «AI-шумодав» ──
+	mut body := tab_page()
 	body.add(caption('AI-шумодав'))
 	body.add(rt_row)
 	body.add(note(mut u, 'Движок нейросетей (открытый, MIT) - нужен всем моделям'))
@@ -366,13 +386,21 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.dl_box = layer(dl_v)
 	body.add(u.dl_box)
 
+	mut tabs := vgui.tab_box()
+	tabs.add_tab('Общие', general)
+	tabs.add_tab('Интерфейс', iface)
+	tabs.add_tab('AI-шумодав', body)
+
 	// ── Где что лежит, закрыть ──
-	body.add(vgui.create_spacer(), flex: 1)
+	mut outer := vgui.create_vbox_fill()
+	outer.set_padding(16)
+	outer.set_spacing(6)
+	outer.add(tabs, flex: 1)
 	paths := [path_note('Настройки: ', settings_path(), set_path_max),
 		path_note('Модели: ', st.ai_places.models, set_path_max)]
 	for p in paths {
 		u.notes << p.label
-		body.add(p.label)
+		outer.add(p.label)
 	}
 	mut close := vgui.button('Закрыть')
 	close.style = .accent
@@ -382,9 +410,9 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut close_row := vgui.create_hbox_fill()
 	close_row.add(vgui.create_spacer(), flex: 1)
 	close_row.add(close, min: btn_col)
-	body.add(close_row)
+	outer.add(close_row)
 
-	dlg.add_widget(body)
+	dlg.add_widget(outer)
 	// Подсказки - после корня: рисуются поверх
 	for p in paths {
 		dlg.add_widget(p.tip)
@@ -392,6 +420,139 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	app.add_dialog(dlg)
 	st.sui = u
 	paint_settings(mut st)
+}
+
+// tab_page - содержимое вкладки окна: ряды естественной высоты с полями
+fn tab_page() &vgui.VBox {
+	mut v := vgui.create_vbox_fill()
+	v.set_padding(12)
+	v.set_spacing(6)
+	return v
+}
+
+// build_iface_tab - вкладка «Интерфейс»: видимость панели инструментов и
+// ленты, сторона панели, разделы панели (показывать ли, порядок кнопками
+// вверх/вниз). Ряды разделов создаются один раз, порядок - пересборкой
+// sec_box (sync_settings_ui).
+fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.VBox {
+	mut panel_ck := vgui.checkbox('Показывать панель инструментов (F8)')
+	panel_ck.on_change = fn [mut st] (v bool) {
+		set_panel_visible(mut st, v)
+	}
+	u.panel_ck = panel_ck
+	mut side_cb := vgui.combo_box()
+	side_cb.set_items(panel_side_names)
+	side_cb.on_change = fn [mut st] (i int, _ string) {
+		set_panel_left(mut st, i == 1)
+	}
+	u.side_cb = side_cb
+	mut strip_ck := vgui.checkbox('Показывать ленту кадров (F6)')
+	strip_ck.on_change = fn [mut st] (v bool) {
+		set_strip_visible(mut st, v)
+	}
+	u.strip_ck = strip_ck
+	mut top_cb := vgui.combo_box()
+	top_cb.set_items(strip_side_names)
+	top_cb.on_change = fn [mut st] (i int, _ string) {
+		set_strip_top(mut st, i == 1)
+	}
+	u.top_cb = top_cb
+	side_col := column_width(mut dw, ['Расположение панели', 'Расположение ленты'], 8)
+	mut side_items := panel_side_names.clone()
+	side_items << strip_side_names
+	side_w := column_width(mut dw, side_items, 0) + 2 * side_cb.pad + 24
+
+	for sec in panel_sections {
+		key := sec.key
+		mut ck := vgui.checkbox(sec.title)
+		ck.on_change = fn [mut st, key] (v bool) {
+			mut hidden := st.settings.panel_hidden.filter(it != key)
+			if !v {
+				hidden << key
+			}
+			set_panel_sections(mut st, st.settings.panel_order, hidden)
+		}
+		mut up := vgui.button('')
+		up.icon_name = 'chevron-up'
+		up.icon_size = 15
+		up.style = .flat
+		up.on_click = fn [mut st, key] () {
+			set_panel_sections(mut st, panel_move(panel_order_from(st.settings.panel_order),
+				key, -1), st.settings.panel_hidden)
+		}
+		mut down := vgui.button('')
+		down.icon_name = 'chevron-down'
+		down.icon_size = 15
+		down.style = .flat
+		down.on_click = fn [mut st, key] () {
+			set_panel_sections(mut st, panel_move(panel_order_from(st.settings.panel_order),
+				key, 1), st.settings.panel_hidden)
+		}
+		mut row := vgui.create_hbox_fill()
+		row.set_spacing(4)
+		row.add(ck, flex: 1)
+		row.add(up, min: icon_slot_w)
+		row.add(down, min: icon_slot_w)
+		u.sec_rows << SecRow{
+			row:  row
+			ck:   ck
+			up:   up
+			down: down
+		}
+	}
+	mut sec_box := vgui.create_vbox_fill()
+	sec_box.set_spacing(2)
+	u.sec_box = sec_box
+	mut reset := vgui.button('Как было')
+	reset.on_click = fn [mut st] () {
+		set_panel_sections(mut st, panel_default_order(), [])
+	}
+	mut reset_row := vgui.create_hbox_fill()
+	reset_row.add(reset)
+	reset_row.add(vgui.create_spacer(), flex: 1)
+
+	mut v := tab_page()
+	v.add(caption('Окно'))
+	v.add(panel_ck)
+	v.add(labeled('Расположение панели', side_cb, side_col, side_w))
+	v.add(strip_ck)
+	v.add(labeled('Расположение ленты', top_cb, side_col, side_w))
+	v.add(caption('Разделы панели инструментов'))
+	v.add(note(mut u, 'Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.'))
+	v.add(sec_box)
+	v.add(reset_row)
+	return v
+}
+
+// sync_iface - вкладка «Интерфейс» по настройкам: флажки, сторона,
+// ряды разделов в текущем порядке; у крайних нет кнопки «вверх»/«вниз»
+fn sync_iface(mut u SettingsUi, s &Settings) {
+	if isnil(u.sec_box) {
+		return
+	}
+	mut pck := u.panel_ck
+	pck.checked = !s.no_panel
+	mut scb := u.side_cb
+	scb.set_selected(if s.panel_left { 1 } else { 0 })
+	scb.enabled = !s.no_panel
+	mut sck := u.strip_ck
+	sck.checked = !s.no_strip
+	mut tcb := u.top_cb
+	tcb.set_selected(if s.strip_top { 1 } else { 0 })
+	tcb.enabled = !s.no_strip
+	order := panel_order_from(s.panel_order)
+	mut box := u.sec_box
+	box.clear()
+	for pos, key in order {
+		r := u.sec_rows[panel_section_index(key)]
+		mut ck := r.ck
+		ck.checked = key !in s.panel_hidden
+		mut up := r.up
+		up.enabled = pos > 0
+		mut down := r.down
+		down.enabled = pos < order.len - 1
+		box.add(r.row)
+	}
 }
 
 // sync_settings_ui - окно по состоянию: выбранные тема и фон, модель,
@@ -412,6 +573,7 @@ fn sync_settings_ui(mut st State) {
 	ci := frame_cache_mbs.index(mb)
 	ccb.set_selected(if ci >= 0 { ci } else { frame_cache_mbs.index(frame_cache_mb_default) })
 	ccb.enabled = ck.checked
+	sync_iface(mut u, st.settings)
 	busy := !isnil(st.dl)
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''
