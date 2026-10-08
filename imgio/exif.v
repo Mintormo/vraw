@@ -8,6 +8,7 @@ module imgio
 // в TIFF теги пишутся прямо в IFD кадра (encode_tiff). BMP, QOI и GIF
 // метаданных EXIF не держат.
 import hash.crc32
+import i18n
 
 // Exif - метаданные для записи; пустые строки и нули не пишутся
 pub struct Exif {
@@ -219,12 +220,12 @@ pub fn exif_tiff(e Exif) []u8 {
 // понимают оба порядка)
 fn jpeg_with_exif(jpg []u8, e Exif) ![]u8 {
 	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
-		return error('не JPEG')
+		return error(i18n.tr('не JPEG'))
 	}
 	tiff := exif_tiff(e)
 	n := 2 + 6 + tiff.len // длина сегмента - вместе с полем длины
 	if n > 65535 {
-		return error('EXIF больше 64 КБ')
+		return error(i18n.tr('EXIF больше 64 КБ'))
 	}
 	mut out := []u8{cap: jpg.len + n + 2}
 	out << [u8(0xFF), 0xD8, 0xFF, 0xE1, u8(n >> 8), u8(n)]
@@ -240,7 +241,7 @@ fn png_with_exif(png []u8, e Exif) ![]u8 {
 	// Подпись 8 байт, IHDR: длина 4 + тип 4 + 13 данных + CRC 4
 	ihdr_end := 8 + 25
 	if png.len < ihdr_end || png[12..16].bytestr() != 'IHDR' {
-		return error('не PNG')
+		return error(i18n.tr('не PNG'))
 	}
 	tiff := exif_tiff(e)
 	mut chunk := 'eXIf'.bytes()

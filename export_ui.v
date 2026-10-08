@@ -11,6 +11,7 @@ import math
 import time
 import vgui
 import imgio
+import i18n
 
 // ExportCtl - один экспорт. cancel пишет главный поток, читает воркер
 // между этапами и плитками AI (опоздание на плитку безвредно, как у
@@ -108,7 +109,7 @@ fn show_export(mut st State, mut app vgui.App, parent &vgui.Window) {
 		build_export_ui(mut st, mut app, parent) or {
 			if !isnil(st.nm) {
 				mut nm := st.nm
-				nm.show_error('Не удалось открыть окно экспорта: ${err.msg()}')
+				nm.show_error(i18n.trf('Не удалось открыть окно экспорта: {0}', '${err.msg()}'))
 			}
 			return
 		}
@@ -128,7 +129,7 @@ fn export_open(st &State) bool {
 fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &ExportUi{}
 	mut dlg := vgui.create_dialog(
-		title:     'Экспорт'
+		title:     i18n.tr('Экспорт')
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -159,19 +160,19 @@ fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut timing := vgui.label('')
 	u.timing = timing
 	u.notes << timing
-	folder := path_note('Папка: ', '', exp_path_max)
+	folder := path_note(i18n.tr('Папка: '), '', exp_path_max)
 	u.folder = folder
 	u.notes << folder.label
 
 	// Одна кнопка: во время экспорта - «Отменить», после - «Закрыть»
-	mut btn := vgui.button('Отменить')
+	mut btn := vgui.button(i18n.tr('Отменить'))
 	btn.on_click = fn [mut st, mut dlg] () {
 		if !isnil(st.exp) {
 			mut c := st.exp
 			c.cancel = true
 			if !isnil(st.eui) {
 				mut s := st.eui.stage
-				s.text = 'Отмена...'
+				s.text = i18n.tr('Отмена...')
 				mut b := st.eui.btn
 				b.enabled = false
 			}
@@ -210,7 +211,7 @@ fn export_started(mut st State) {
 	sync_export_files(mut st)
 	paint_export(mut st)
 	mut b := u.btn
-	b.text = 'Отменить'
+	b.text = i18n.tr('Отменить')
 	b.style = .normal
 	b.enabled = true
 	sync_export_ui(mut st)
@@ -226,13 +227,13 @@ fn sync_export_files(mut st State) {
 	c := st.exp
 	mut f := u.files
 	if c.n > 1 {
-		f.text = 'Готово ${c.finished} из ${c.n} ${plural(c.n, 'кадра', 'кадров', 'кадров')}  ·  нагрузка: ${load_title(c.load)}'
+		f.text = i18n.trf('Готово {0} из {1} {2}  ·  нагрузка: {3}', '${c.finished}', '${c.n}', i18n.pl(c.n, 'кадра|кадров|кадров'), load_title(c.load))
 	} else {
-		no_ai := if c.ai_skipped { '  ·  без AI-шумодава' } else { '' }
+		no_ai := if c.ai_skipped { i18n.tr('  ·  без AI-шумодава') } else { '' }
 		f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
 	}
 	if c.dst != '' {
-		u.folder.set('Папка: ', os.dir(c.dst))
+		u.folder.set(i18n.tr('Папка: '), os.dir(c.dst))
 	}
 }
 
@@ -274,10 +275,10 @@ fn stage_text(stage ExportStage, done int, total int, f imgio.Format) string {
 	name := stage_title(stage)
 	return match stage {
 		.ai {
-			if total == 0 { '${name} - загрузка модели...' } else { '${name} - плитка ${done} из ${total}' }
+			if total == 0 { i18n.trf('{0} - загрузка модели...', '${name}') } else { i18n.trf('{0} - плитка {1} из {2}', '${name}', '${done}', '${total}') }
 		}
 		.write {
-			if f == .gif { 'Палитра и запись GIF' } else { 'Запись ${f.name()}' }
+			if f == .gif { i18n.tr('Палитра и запись GIF') } else { i18n.trf('Запись {0}', '${f.name()}') }
 		}
 		else {
 			name
@@ -291,14 +292,14 @@ fn batch_stage_text(c &ExportCtl) string {
 	mut idx := c.frames.keys()
 	idx.sort()
 	if idx.len == 0 {
-		return 'Подготовка...'
+		return i18n.tr('Подготовка...')
 	}
 	if idx.len == 1 {
 		p := c.frames[idx[0]] or { return '' }
 		return '${p.name}: ${stage_text(p.stage, p.done, p.total, c.fmt)}'
 	}
 	names := idx.map(c.frames[it] or { FrameProg{} }.name)
-	return 'В работе ${idx.len} ${plural(idx.len, 'кадр', 'кадра', 'кадров')}: ${names.join(', ')}'
+	return i18n.trf('В работе {0} {1}: {2}', '${idx.len}', i18n.pl(idx.len, 'кадр|кадра|кадров'), names.join(', '))
 }
 
 // sync_export_ui - этап, полоса и время по st.exp (главный поток)
@@ -315,7 +316,7 @@ fn sync_export_ui(mut st State) {
 	s.text = if c.n > 1 {
 		batch_stage_text(c)
 	} else {
-		'Этап ${c.stage_no()} из ${c.plan.stages.len}: ${stage_text(c.stage, c.done, c.total, c.fmt)}'
+		i18n.trf('Этап {0} из {1}: {2}', '${c.stage_no()}', '${c.plan.stages.len}', '${stage_text(c.stage, c.done, c.total, c.fmt)}')
 	}
 	frac := c.fraction()
 	mut bar := u.bar
@@ -323,7 +324,7 @@ fn sync_export_ui(mut st State) {
 	mut p := u.pct
 	p.text = '${int(frac * 100)}%'
 	elapsed := f64(time.now().unix_milli() - c.started) / 1000
-	mut t := 'прошло ${fmt_secs(elapsed)}'
+	mut t := i18n.trf('прошло {0}', '${fmt_secs(elapsed)}')
 	// Оставшееся: на AI - по плиткам (это почти всё время), иначе - по
 	// весам этапов, когда накопилось на что опереться
 	if c.n <= 1 && c.stage == .ai && c.eta >= 0 {
@@ -343,14 +344,14 @@ fn export_finished(mut st State, res SaveOutcome, msg string) bool {
 	}
 	mut u := st.eui
 	mut b := u.btn
-	b.text = 'Закрыть'
+	b.text = i18n.tr('Закрыть')
 	b.style = .accent
 	b.enabled = true
 	mut s := u.stage
 	s.text = match res {
-		.saved { 'Готово' }
-		.failed { 'Ошибка' }
-		.cancelled { 'Экспорт отменён' }
+		.saved { i18n.tr('Готово') }
+		.failed { i18n.tr('Ошибка') }
+		.cancelled { i18n.tr('Экспорт отменён') }
 	}
 	if res == .saved {
 		mut bar := u.bar
@@ -376,9 +377,9 @@ fn export_finished(mut st State, res SaveOutcome, msg string) bool {
 fn fmt_secs(sec f64) string {
 	s := int(sec)
 	if s < 60 {
-		return '${s} с'
+		return i18n.trf('{0} с', '${s}')
 	}
-	return '${s / 60} мин ${s % 60:02} с'
+	return i18n.trf('{0} мин {1} с', '${s / 60}', '${s % 60:02}')
 }
 
 // paint_export - цвета вторичных подписей по теме

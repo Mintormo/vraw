@@ -19,6 +19,7 @@ module main
 import os
 import vgui
 import lens
+import i18n
 
 // PairJob - проявка левого кадра (поток)
 struct PairJob {
@@ -131,7 +132,7 @@ fn set_pair(mut st State, on bool) {
 		if st.history.len == 0 || path.len == 0 {
 			if !isnil(st.nm) {
 				mut nm := st.nm
-				nm.show_info('Сравнение - откройте кадр папки и выделите в ленте второй')
+				nm.show_info(i18n.tr('Сравнение - откройте кадр папки и выделите в ленте второй'))
 			}
 			on_off_menu(st.m_pair, st.pair_on)
 			return
@@ -225,7 +226,7 @@ fn pair_take(mut st State, res PairResult) {
 	if res.err.len > 0 {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_error('${os.file_name(res.path)}: не проявлен (${res.err})')
+			nm.show_error(i18n.trf('{0}: не проявлен ({1})', '${os.file_name(res.path)}', '${res.err}'))
 		}
 		pair_redraw(st)
 		return
@@ -352,7 +353,7 @@ fn pair_overlay_b(st &State, mut ctx vgui.RenderContext) {
 	cb := st.cv_b
 	mut text := os.file_name(st.pair_path)
 	if st.pair_busy {
-		text += ' - проявка...'
+		text += i18n.tr(' - проявка...')
 	}
 	ba_label(mut ctx, text, cb.bounds.x + 10, cb.bounds.y + 10)
 }
@@ -363,7 +364,7 @@ fn pair_overlay(st &State, mut ctx vgui.RenderContext) {
 		return
 	}
 	cv := st.cv
-	ba_label(mut ctx, '${os.file_name(st.raw_path)} - правка', cv.bounds.x + 10, cv.bounds.y + 10)
+	ba_label(mut ctx, i18n.trf('{0} - правка', '${os.file_name(st.raw_path)}'), cv.bounds.x + 10, cv.bounds.y + 10)
 }
 
 // wait_pair - дождаться проявок левого кадра на выходе

@@ -29,6 +29,7 @@ import raw
 import lens
 import ai
 import imgio
+import i18n
 
 // BatchItem - кадр пакета: настройки (derived - уже с производными
 // полями: открытый кадр, как в окне)
@@ -98,9 +99,9 @@ const load_notes = [
 
 fn load_title(key string) string {
 	return match key {
-		'low' { 'фоновая' }
-		'high' { 'максимальная' }
-		else { 'обычная' }
+		'low' { i18n.tr('фоновая') }
+		'high' { i18n.tr('максимальная') }
+		else { i18n.tr('обычная') }
 	}
 }
 
@@ -433,20 +434,20 @@ fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, mut 
 		return ExportCancelled{}
 	}
 	write_image(dst, job.format, img, job.settings.jpeg_quality, &job.settings) or {
-		return error('не удалось сохранить (${err})')
+		return error(i18n.trf('не удалось сохранить ({0})', '${err}'))
 	}
 	return BatchDone{}
 }
 
 // batch_outcome - итог пакета: вид уведомления и текст
 fn batch_outcome(n int, saved int, failed []string, cancelled bool, f imgio.Format, sec f64) (SaveOutcome, string) {
-	done := 'сохранено ${saved} из ${n} ${plural(n, 'кадра', 'кадров', 'кадров')}'
+	done := i18n.trf('сохранено {0} из {1} {2}', '${saved}', '${n}', i18n.pl(n, 'кадра|кадров|кадров'))
 	if cancelled {
-		return SaveOutcome.cancelled, 'Экспорт отменён: ${done}'
+		return SaveOutcome.cancelled, i18n.trf('Экспорт отменён: {0}', '${done}')
 	}
 	if failed.len > 0 {
-		more := if failed.len > 1 { ' (и ещё ${failed.len - 1})' } else { '' }
-		return SaveOutcome.failed, 'Экспорт: ${done}. Ошибка - ${failed[0]}${more}'
+		more := if failed.len > 1 { i18n.trf(' (и ещё {0})', '${failed.len - 1}') } else { '' }
+		return SaveOutcome.failed, i18n.trf('Экспорт: {0}. Ошибка - {1}{2}', '${done}', '${failed[0]}', '${more}')
 	}
-	return SaveOutcome.saved, 'Экспорт: ${done} - ${f.name()}, ${fmt_secs(sec)}'
+	return SaveOutcome.saved, i18n.trf('Экспорт: {0} - {1}, {2}', '${done}', '${f.name()}', '${fmt_secs(sec)}')
 }

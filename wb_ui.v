@@ -10,6 +10,7 @@ module main
 // отпусканию), LibRaw не перепроявляется.
 import vgui
 import pipeline
+import i18n
 
 // Режимы: ключ (в EditState и сайдкаре), название, температура и оттенок
 // пресета (Adobe: дневной свет 5500/+10 и т.д.)
@@ -85,7 +86,7 @@ fn set_wb(mut st State, mode string, t f32, tint f32, name string) {
 	sync_wb_sliders(mut st)
 	sync_wb_mode(mut st)
 	st.tone_fx()
-	record(mut st, 'wb', 'Баланс белого: ${name}', false)
+	record(mut st, 'wb', i18n.trf('Баланс белого: {0}', '${name}'), false)
 }
 
 // sync_wb_sliders - ползунки по st.edit (без пересчётов и записей)
@@ -163,12 +164,12 @@ fn wb_pick_at(mut st State, x int, y int) {
 	if n == 0 || sg / n < 64 || mx >= 65000 {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('Пипетка: место слишком тёмное или пересвеченное - выберите серое')
+			nm.show_warning(i18n.tr('Пипетка: место слишком тёмное или пересвеченное - выберите серое'))
 		}
 		return
 	}
 	t, tint := st.cam.neutral_temp_tint(sr, sg, sb)
-	set_wb(mut st, 'custom', t, tint, 'пипетка')
+	set_wb(mut st, 'custom', t, tint, i18n.tr('пипетка'))
 }
 
 // wb_auto - «Авто»: серый мир по превью (без чёрного и пересветов)
@@ -186,7 +187,7 @@ fn wb_auto(st &State) (f32, f32) {
 // температура, оттенок, подсказка
 fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut cb := vgui.combo_box()
-	cb.set_items(wb_names)
+	cb.set_items(i18n.tr_all(wb_names))
 	cb.set_selected(0)
 	cb.on_change = fn [mut st] (idx int, text string) {
 		if idx < 0 || idx >= wb_modes.len {
@@ -212,17 +213,17 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_wb(mut st, mode, t, tint, text)
 	}
 	st.wb_cb = cb
-	mut pick := icon_button(mut st, 'pipette', 'Пипетка: щёлкните по серому или белому на снимке')
+	mut pick := icon_button(mut st, 'pipette', i18n.tr('Пипетка: щёлкните по серому или белому на снимке'))
 	pick.on_click = fn [mut st] () {
 		set_wb_pick(mut st, !st.wb_pick && st.linear.len > 0)
 	}
 	st.wb_pick_btn = pick
 	mut pick_tip := st.tips.last()
 	st.hk_texts << fn [st, mut pick_tip] () {
-		pick_tip.text = 'Пипетка: щёлкните по серому или белому на снимке${hk_paren(st,
-			'edit.wb_pick')}'
+		pick_tip.text = i18n.tr('Пипетка: щёлкните по серому или белому на снимке') +
+			hk_paren(st, 'edit.wb_pick')
 	}
-	mut mode_lb := vgui.label('Режим')
+	mut mode_lb := vgui.label(i18n.tr('Режим'))
 	mut mode_row := vgui.create_hbox_fill()
 	mode_row.set_spacing(6)
 	mode_row.add(mode_lb, min: lbl_w)
@@ -236,8 +237,8 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		st.tone_fx()
 	}
 	mut temp := edit_slider(mut st, SliderCfg{
-		label:  'Температура'
-		hname:  'Баланс белого: температура'
+		label:  i18n.tr('Температура')
+		hname:  i18n.tr('Баланс белого: температура')
 		max:    wb_pos_max
 		def:    temp_to_pos(5000)
 		digits: 0
@@ -261,8 +262,8 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		fx:     wb_fx
 	})
 	mut tint := edit_slider(mut st, SliderCfg{
-		label:  'Оттенок'
-		hname:  'Баланс белого: оттенок'
+		label:  i18n.trc('ББ', 'Оттенок')
+		hname:  i18n.tr('Баланс белого: оттенок')
 		min:    -pipeline.wb_tint_max
 		max:    pipeline.wb_tint_max
 		digits: 0
@@ -285,9 +286,9 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	st.wb_temp_sl = temp.sl
 	st.wb_tint_sl = tint.sl
 	// Сброс ползунка - «как снято» (а не 5000 K / 0)
-	mut t_reset := reset_button(mut st, 'Как снято')
+	mut t_reset := reset_button(mut st, i18n.tr('Как снято'))
 	t_reset.on_click = fn [mut st] () {
-		set_wb(mut st, '', 0, 0, wb_names[0])
+		set_wb(mut st, '', 0, 0, i18n.tr(wb_names[0]))
 	}
 	mut temp_row := vgui.create_hbox_fill()
 	temp_row.set_spacing(6)
@@ -295,9 +296,9 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	temp_row.add(temp.sl, flex: 1)
 	temp_row.add(temp.vl, min: val_w)
 	temp_row.add(t_reset)
-	mut n_reset := reset_button(mut st, 'Как снято')
+	mut n_reset := reset_button(mut st, i18n.tr('Как снято'))
 	n_reset.on_click = fn [mut st] () {
-		set_wb(mut st, '', 0, 0, wb_names[0])
+		set_wb(mut st, '', 0, 0, i18n.tr(wb_names[0]))
 	}
 	mut tint_row := vgui.create_hbox_fill()
 	tint_row.set_spacing(6)
@@ -305,7 +306,7 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	tint_row.add(tint.sl, flex: 1)
 	tint_row.add(tint.vl, min: val_w)
 	tint_row.add(n_reset)
-	mut hint := vgui.label('Оттенок: минус - зеленее, плюс - пурпурнее')
+	mut hint := vgui.label(i18n.tr('Оттенок: минус - зеленее, плюс - пурпурнее'))
 	hint.font_size = 12
 	st.hint_labels << hint
 	return [SectionRow{mode_row}, SectionRow{temp_row}, SectionRow{tint_row},

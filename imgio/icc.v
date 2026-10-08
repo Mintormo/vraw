@@ -18,6 +18,7 @@ module imgio
 //   общая таблица кривой sRGB (icc_curve_n точек, данные одни на три тега).
 import math
 import hash.crc32
+import i18n
 
 const icc_curve_n = 1024
 // Белое PCS D50 по спецификации ICC
@@ -219,18 +220,18 @@ fn mat_inv(a [][]f64) [][]f64 {
 // 1) за SOI и сегментами APP0/APP1 в начале (EXIF остаётся первым)
 fn jpeg_with_icc(jpg []u8, icc []u8) ![]u8 {
 	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
-		return error('не JPEG')
+		return error(i18n.tr('не JPEG'))
 	}
 	n := 2 + 12 + 2 + icc.len // длина сегмента - вместе с полем длины
 	if n > 65535 {
-		return error('ICC-профиль больше 64 КБ')
+		return error(i18n.tr('ICC-профиль больше 64 КБ'))
 	}
 	mut at := 2
 	for at + 4 <= jpg.len && jpg[at] == 0xFF && (jpg[at + 1] == 0xE0 || jpg[at + 1] == 0xE1) {
 		at += 2 + (int(jpg[at + 2]) << 8 | int(jpg[at + 3]))
 	}
 	if at > jpg.len {
-		return error('битый JPEG')
+		return error(i18n.tr('битый JPEG'))
 	}
 	mut out := []u8{cap: jpg.len + n + 2}
 	out << jpg[..at]
@@ -247,7 +248,7 @@ fn jpeg_with_icc(jpg []u8, icc []u8) ![]u8 {
 fn png_with_icc(png []u8, icc []u8) ![]u8 {
 	ihdr_end := 8 + 25
 	if png.len < ihdr_end || png[12..16].bytestr() != 'IHDR' {
-		return error('не PNG')
+		return error(i18n.tr('не PNG'))
 	}
 	mut chunk := 'iCCP'.bytes()
 	chunk << 'sRGB'.bytes()

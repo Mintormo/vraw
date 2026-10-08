@@ -11,12 +11,16 @@ import vgui
 import ai
 import lens
 import imgio
+import i18n
 
 struct Settings {
 mut:
 	viewer_bg  string = 'dark' // ключ из bg_keys
 	strip_open bool   = true
 	theme      string = 'dark' // ключ из theme_keys (themes.v)
+	// язык интерфейса (код из i18n.langs; '' - как в системе); меняется
+	// после перезапуска
+	lang     string
 	ai_model   string = ai.default_model // модель для новых прогонов AI
 	// Кэш кадров в памяти (framecache.v): отрицание - в старом
 	// settings.json поля нет, кэш по умолчанию включён; предел, МБ (0 -
@@ -145,6 +149,7 @@ fn settings_from(s Settings) Settings {
 		viewer_bg:  bg_keys[bg_index(s.viewer_bg)]
 		strip_open: s.strip_open
 		theme:      theme_keys[theme_index(s.theme)]
+		lang:       if i18n.known(s.lang) { s.lang } else { '' }
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()
 		export_no_ai:  s.export_no_ai

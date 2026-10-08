@@ -15,6 +15,7 @@ import lens
 import ai
 import bigbuf
 import pipeline { Region }
+import i18n
 
 // Запас вокруг фрагмента для фильтров с окрестностью (вейвлет шумодава
 // ~30 px, ореолы ~7, Capture-резкость - итерационная, затухает): внутри
@@ -120,7 +121,7 @@ struct DetailAi {
 struct NoRunner {}
 
 fn (n NoRunner) run(_ []f32, mut _ []f32, _ int, _ int) ! {
-	return error('модели нет')
+	return error(i18n.tr('модели нет'))
 }
 
 // lens_piece - прямоугольник p кадра после коррекции объектива: профиль

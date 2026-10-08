@@ -19,6 +19,7 @@ module main
 import math
 import vgui
 import pipeline
+import i18n
 
 // Пропорции: ключи (EditState.crop_aspect, settings) и названия. Заданы
 // горизонтальными, crop_portrait меняет стороны местами
@@ -201,7 +202,7 @@ fn rotate90(mut st State, dir int) {
 	if st.edit.crop_aspect != '' {
 		st.edit.crop_portrait = !st.edit.crop_portrait
 	}
-	crop_apply(mut st, g, 'rot90', if dir > 0 { 'Поворот на 90° по часовой' } else { 'Поворот на 90° против часовой' },
+	crop_apply(mut st, g, 'rot90', if dir > 0 { i18n.tr('Поворот на 90° по часовой') } else { i18n.tr('Поворот на 90° против часовой') },
 		false)
 }
 
@@ -216,7 +217,7 @@ fn flip_frame(mut st State, h bool) {
 		g.y0, g.y1 = 1 - g.y1, 1 - g.y0
 	}
 	g.angle = -g.angle
-	crop_apply(mut st, g, 'flip', if h { 'Отражение по горизонтали' } else { 'Отражение по вертикали' },
+	crop_apply(mut st, g, 'flip', if h { i18n.tr('Отражение по горизонтали') } else { i18n.tr('Отражение по вертикали') },
 		false)
 }
 
@@ -237,7 +238,7 @@ fn fit_ratio(mut st State, name string) {
 
 // reset_crop - без кадрирования и поворота (пропорция и размер остаются)
 fn reset_crop(mut st State) {
-	crop_apply(mut st, pipeline.Geom{}, 'crop_reset', 'Кадрирование: сброс', false)
+	crop_apply(mut st, pipeline.Geom{}, 'crop_reset', i18n.tr('Кадрирование: сброс'), false)
 }
 
 // ── Режим кадрирования ──
@@ -271,7 +272,7 @@ fn set_crop_mode(mut st State, on bool) {
 			a := crop_ratio(&st.edit, w0, h0)
 			st.edit.geom = st.edit.geom.with_box(st.edit.geom.max_box(a, f64(w0) / 2,
 				f64(h0) / 2, w0, h0), w0, h0)
-			record(mut st, 'crop_ratio', 'Пропорция: ${aspect_name(st.edit)}', false)
+			record(mut st, 'crop_ratio', i18n.trf('Пропорция: {0}', '${aspect_name(st.edit)}'), false)
 		}
 	} else {
 		st.horizon = false
@@ -304,7 +305,7 @@ fn crop_cancel(mut st State) {
 	st.tone_fx()
 	sync_crop_ui(mut st)
 	if changed {
-		record(mut st, 'crop_cancel', 'Кадрирование: отмена', false)
+		record(mut st, 'crop_cancel', i18n.tr('Кадрирование: отмена'), false)
 	}
 }
 
@@ -348,7 +349,7 @@ fn persp_line_done(mut st State, d CropDrag) {
 	mut ng := geom_with_angle(st, fit.angle)
 	ng.pv = fit.pv
 	ng.ph = fit.ph
-	crop_apply(mut st, ng, 'persp_lines', 'Перспектива по линиям: ${int(fit.pv)}, ${int(fit.ph)}, ${angle_text(fit.angle)}',
+	crop_apply(mut st, ng, 'persp_lines', i18n.trf('Перспектива по линиям: {0}, {1}, {2}', '${int(fit.pv)}', '${int(fit.ph)}', '${angle_text(fit.angle)}'),
 		false)
 }
 
@@ -368,18 +369,18 @@ fn upright_apply(mut st State, mode pipeline.UprightMode) {
 	segs := pipeline.upright_segments(unsafe { &u16(st.raw_linear.data) }, st.pw, st.ph,
 		g)
 	w0, h0 := crop_frame(st)
-	name := upright_names[int(mode)]
+	name := i18n.tr(upright_names[int(mode)])
 	fit := pipeline.upright_fit(segs, w0, h0, mode) or {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('Автоперспектива: на снимке мало прямых линий')
+			nm.show_warning(i18n.tr('Автоперспектива: на снимке мало прямых линий'))
 		}
 		return
 	}
 	mut ng := geom_with_angle(st, fit.angle)
 	ng.pv = fit.pv
 	ng.ph = fit.ph
-	crop_apply(mut st, ng, 'upright', 'Автоперспектива (${name.to_lower()}): ${int(fit.pv)}, ${int(fit.ph)}, ${angle_text(fit.angle)}',
+	crop_apply(mut st, ng, 'upright', i18n.trf('Автоперспектива ({0}): {1}, {2}, {3}', '${name.to_lower()}', '${int(fit.pv)}', '${int(fit.ph)}', '${angle_text(fit.angle)}'),
 		false)
 }
 
@@ -520,7 +521,7 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				// Двойной щелчок - вся рамка (наибольшая по центру)
 				a := crop_ratio(&st.edit, w0, h0)
 				nb := g.max_box(a, f64(w0) / 2, f64(h0) / 2, w0, h0)
-				crop_apply(mut st, g.with_box(nb, w0, h0), 'crop_box', 'Кадрирование: вся рамка',
+				crop_apply(mut st, g.with_box(nb, w0, h0), 'crop_box', i18n.tr('Кадрирование: вся рамка'),
 					false)
 				st.crop_drag = CropDrag{}
 				return true
@@ -671,7 +672,7 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 					corr := pipeline.horizon_angle(d.px, d.py, d.cx, d.cy)
 					if corr != 0 {
 						ng := geom_with_angle(st, st.edit.geom.angle + corr)
-						crop_apply(mut st, ng, 'angle', 'Выпрямление: ${angle_text(ng.angle)}',
+						crop_apply(mut st, ng, 'angle', i18n.trf('Выпрямление: {0}', '${angle_text(ng.angle)}'),
 							false)
 					} else {
 						sync_crop_ui(mut st)
@@ -679,13 +680,13 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				}
 				.rotate {
 					if d.moved && st.edit.geom != d.geom {
-						crop_apply(mut st, st.edit.geom, 'angle', 'Поворот: ${angle_text(st.edit.geom.angle)}',
+						crop_apply(mut st, st.edit.geom, 'angle', i18n.trf('Поворот: {0}', '${angle_text(st.edit.geom.angle)}'),
 							false)
 					}
 				}
 				.move, .handle {
 					if d.moved {
-						crop_apply(mut st, st.edit.geom, 'crop_box', 'Кадрирование: рамка',
+						crop_apply(mut st, st.edit.geom, 'crop_box', i18n.tr('Кадрирование: рамка'),
 							false)
 					}
 				}
@@ -725,7 +726,7 @@ fn set_angle_text(mut st State, s string) {
 		sync_crop_ui(mut st)
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('Угол - число от -45 до 45 градусов')
+			nm.show_warning(i18n.tr('Угол - число от -45 до 45 градусов'))
 		}
 		return
 	}
@@ -735,7 +736,7 @@ fn set_angle_text(mut st State, s string) {
 	}
 	ng := geom_with_angle(st, f32(math.round(f64(v) * 10) / 10))
 	if ng != st.edit.geom {
-		crop_apply(mut st, ng, 'angle', 'Угол: ${angle_text(ng.angle)}', false)
+		crop_apply(mut st, ng, 'angle', i18n.trf('Угол: {0}', '${angle_text(ng.angle)}'), false)
 	}
 	// Поле в фокусе sync_crop_ui не трогает - привести к виду «-3.5» здесь
 	if !isnil(st.crop_ui) && !isnil(st.crop_ui.angle_in) {
@@ -750,8 +751,8 @@ fn angle_text(a f32) string {
 
 fn aspect_name(e EditState) string {
 	i := crop_aspects.index(e.crop_aspect)
-	n := if i < 0 { crop_aspect_names[0] } else { crop_aspect_names[i] }
-	return if e.crop_portrait && e.crop_aspect != '' { '${n}, вертикально' } else { n }
+	n := i18n.tr(if i < 0 { crop_aspect_names[0] } else { crop_aspect_names[i] })
+	return if e.crop_portrait && e.crop_aspect != '' { i18n.trf('{0}, вертикально', '${n}') } else { n }
 }
 
 // ── Рисование поверх холста ──
@@ -890,7 +891,7 @@ fn sync_crop_ui(mut st State) {
 	e := st.edit
 	mut mb := u.mode_btn
 	mb.style = if st.crop_mode { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.outline }
-	mb.text = if st.crop_mode { 'Готово (Enter)' } else { 'Кадрировать' }
+	mb.text = if st.crop_mode { i18n.tr('Готово (Enter)') } else { i18n.tr('Кадрировать') }
 	mut acb := u.aspect_cb
 	acb.set_selected(math.max(0, crop_aspects.index(e.crop_aspect)))
 	mut ob := u.orient_btn
@@ -942,12 +943,12 @@ fn sync_crop_total(mut st State) {
 	}
 	mut t := st.crop_ui.total
 	if st.linear.len == 0 {
-		t.text = 'Итог: -'
+		t.text = i18n.tr('Итог: -')
 		return
 	}
 	fw_, fh_ := full_size(st)
 	cw, ch := crop_size(&st.edit, fw_, fh_)
-	t.text = 'Кадр: ${size_text(cw, ch)} px'
+	t.text = i18n.trf('Кадр: {0} px', '${size_text(cw, ch)}')
 }
 
 // build_crop_section - ряды секции «Кадрирование и поворот»
@@ -955,14 +956,14 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut u := &CropUi{}
 	st.crop_ui = u
 
-	mut mode := vgui.button('Кадрировать')
+	mut mode := vgui.button(i18n.tr('Кадрировать'))
 	mode.icon_name = 'crop'
 	mode.style = .outline
 	mode.on_click = fn [mut st] () {
 		set_crop_mode(mut st, !st.crop_mode)
 	}
 	u.mode_btn = mode
-	mut reset := reset_button(mut st, 'Сбросить кадрирование и поворот')
+	mut reset := reset_button(mut st, i18n.tr('Сбросить кадрирование и поворот'))
 	reset.on_click = fn [mut st] () {
 		reset_crop(mut st)
 	}
@@ -973,7 +974,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 
 	// Пропорция и ориентация рамки
 	mut acb := vgui.combo_box()
-	acb.set_items(crop_aspect_names)
+	acb.set_items(i18n.tr_all(crop_aspect_names))
 	acb.set_selected(0)
 	acb.on_change = fn [mut st] (idx int, text string) {
 		if st.suppress || idx < 0 || idx >= crop_aspects.len {
@@ -990,10 +991,10 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		st.edit.crop_aspect = key
 		st.settings.crop_aspect = key
 		save_settings(st.settings)
-		fit_ratio(mut st, 'Пропорция: ${aspect_name(st.edit)}')
+		fit_ratio(mut st, i18n.trf('Пропорция: {0}', '${aspect_name(st.edit)}'))
 	}
 	u.aspect_cb = acb
-	mut orient := icon_button(mut st, 'rectangle-horizontal', 'Горизонтальная / вертикальная рамка')
+	mut orient := icon_button(mut st, 'rectangle-horizontal', i18n.tr('Горизонтальная / вертикальная рамка'))
 	orient.on_click = fn [mut st] () {
 		w0, h0 := crop_frame(st)
 		if st.edit.crop_aspect == '' {
@@ -1002,15 +1003,15 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 			b := g.box_of(w0, h0)
 			a := if b.w() > 0 { b.h() / b.w() } else { 1.0 }
 			nb := g.best_box(a, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, w0, h0)
-			crop_apply(mut st, g.with_box(nb, w0, h0), 'crop_ratio', 'Рамка: другая ориентация',
+			crop_apply(mut st, g.with_box(nb, w0, h0), 'crop_ratio', i18n.tr('Рамка: другая ориентация'),
 				false)
 			return
 		}
 		st.edit.crop_portrait = !st.edit.crop_portrait
-		fit_ratio(mut st, 'Пропорция: ${aspect_name(st.edit)}')
+		fit_ratio(mut st, i18n.trf('Пропорция: {0}', '${aspect_name(st.edit)}'))
 	}
 	u.orient_btn = orient
-	mut a_lb := vgui.label('Пропорция')
+	mut a_lb := vgui.label(i18n.tr('Пропорция'))
 	mut a_row := vgui.create_hbox_fill()
 	a_row.set_spacing(6)
 	a_row.add(a_lb, min: lbl_w)
@@ -1027,18 +1028,18 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 			return
 		}
 		st.edit.crop_aw = v
-		fit_ratio(mut st, 'Своя пропорция ${st.edit.crop_aw}:${st.edit.crop_ah}')
+		fit_ratio(mut st, i18n.trf('Своя пропорция {0}:{1}', '${st.edit.crop_aw}', '${st.edit.crop_ah}'))
 	}
 	ah.on_change = fn [mut st] (v int) {
 		if st.suppress {
 			return
 		}
 		st.edit.crop_ah = v
-		fit_ratio(mut st, 'Своя пропорция ${st.edit.crop_aw}:${st.edit.crop_ah}')
+		fit_ratio(mut st, i18n.trf('Своя пропорция {0}:{1}', '${st.edit.crop_aw}', '${st.edit.crop_ah}'))
 	}
 	u.aw = aw
 	u.ah = ah
-	mut c_lb := vgui.label('Своя')
+	mut c_lb := vgui.label(i18n.tr('Своя'))
 	mut colon := vgui.label(':')
 	colon.align = .center
 	mut c_row := vgui.create_hbox_fill()
@@ -1049,14 +1050,14 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	c_row.add(ah, flex: 1)
 	c_row.add(icon_slot(), min: icon_slot_w)
 
-	mut total := vgui.label('Итог: -')
+	mut total := vgui.label(i18n.tr('Итог: -'))
 	st.secondary_labels << total
 	u.total = total
 
 	// Угол: живой ползунок (геометрия превью пересчитывается по ходу)
 	mut angle := edit_slider(mut st, SliderCfg{
-		label:  'Угол'
-		hname:  'Угол'
+		label:  i18n.tr('Угол')
+		hname:  i18n.tr('Угол')
 		min:    -pipeline.geom_angle_max
 		max:    pipeline.geom_angle_max
 		digits: 1
@@ -1084,7 +1085,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	// Перспектива: живые ползунки, как угол (кадр сам увеличивается -
 	// пустых углов нет, рамка остаётся годной)
 	mut pv := edit_slider(mut st, SliderCfg{
-		label:  'Вертикаль'
+		label:  i18n.tr('Вертикаль')
 		min:    -100
 		max:    100
 		digits: 0
@@ -1102,7 +1103,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	u.pv_sl = pv.sl
 	mut pv_row := edit_row(mut st, mut pv, lbl_w, val_w)
 	mut ph := edit_slider(mut st, SliderCfg{
-		label:  'Горизонталь'
+		label:  i18n.tr('Горизонталь')
 		min:    -100
 		max:    100
 		digits: 0
@@ -1121,23 +1122,23 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut ph_row := edit_row(mut st, mut ph, lbl_w, val_w)
 
 	// Поворот на 90°, отражения, линия горизонта
-	mut r_ccw := icon_button(mut st, 'rotate-ccw-square', 'Повернуть на 90° против часовой')
+	mut r_ccw := icon_button(mut st, 'rotate-ccw-square', i18n.tr('Повернуть на 90° против часовой'))
 	r_ccw.on_click = fn [mut st] () {
 		rotate90(mut st, -1)
 	}
-	mut r_cw := icon_button(mut st, 'rotate-cw-square', 'Повернуть на 90° по часовой')
+	mut r_cw := icon_button(mut st, 'rotate-cw-square', i18n.tr('Повернуть на 90° по часовой'))
 	r_cw.on_click = fn [mut st] () {
 		rotate90(mut st, 1)
 	}
-	mut f_h := icon_button(mut st, 'flip-horizontal-2', 'Отразить по горизонтали')
+	mut f_h := icon_button(mut st, 'flip-horizontal-2', i18n.tr('Отразить по горизонтали'))
 	f_h.on_click = fn [mut st] () {
 		flip_frame(mut st, true)
 	}
-	mut f_v := icon_button(mut st, 'flip-vertical-2', 'Отразить по вертикали')
+	mut f_v := icon_button(mut st, 'flip-vertical-2', i18n.tr('Отразить по вертикали'))
 	f_v.on_click = fn [mut st] () {
 		flip_frame(mut st, false)
 	}
-	mut hz := icon_button(mut st, 'ruler', 'Линия горизонта: проведите по горизонту (или вертикали) на снимке')
+	mut hz := icon_button(mut st, 'ruler', i18n.tr('Линия горизонта: проведите по горизонту (или вертикали) на снимке'))
 	hz.on_click = fn [mut st] () {
 		if st.horizon {
 			st.horizon = false
@@ -1153,7 +1154,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	u.horizon_btn = hz
 	mut pl := icon_button(mut st, 'columns-2',
-		'Перспектива по двум линиям: проведите по двум вертикалям (или горизонталям) на снимке')
+		i18n.tr('Перспектива по двум линиям: проведите по двум вертикалям (или горизонталям) на снимке'))
 	pl.on_click = fn [mut st] () {
 		if st.persp_tool {
 			st.persp_tool = false
@@ -1176,12 +1177,12 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_angle_text(mut st, s)
 	}
 	u.angle_in = ain
-	mut ain_tip := vgui.tooltip('Угол вручную, градусы (-45..45): введите и нажмите Enter')
+	mut ain_tip := vgui.tooltip(i18n.tr('Угол вручную, градусы (-45..45): введите и нажмите Enter'))
 	ain_tip.attach(ain)
 	st.tips << ain_tip
 	mut tools := vgui.create_hbox_fill()
 	tools.set_spacing(6)
-	tools.add(vgui.label('Повернуть'), min: lbl_w)
+	tools.add(vgui.label(i18n.tr('Повернуть')), min: lbl_w)
 	tools.add(r_ccw)
 	tools.add(r_cw)
 	tools.add(f_h)
@@ -1194,7 +1195,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 
 	// Сетка поверх рамки - вид (настройки программы, не кадра)
 	mut gcb := vgui.combo_box()
-	gcb.set_items(crop_grid_names)
+	gcb.set_items(i18n.tr_all(crop_grid_names))
 	gcb.set_selected(math.max(0, crop_grids.index(st.settings.crop_grid)))
 	gcb.on_change = fn [mut st] (idx int, text string) {
 		if idx < 0 || idx >= crop_grids.len {
@@ -1204,7 +1205,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		save_settings(st.settings)
 	}
 	u.grid_cb = gcb
-	mut g_lb := vgui.label('Сетка')
+	mut g_lb := vgui.label(i18n.tr('Сетка'))
 	mut g_row := vgui.create_hbox_fill()
 	g_row.set_spacing(6)
 	g_row.add(g_lb, min: lbl_w)
@@ -1215,12 +1216,12 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut up_row := vgui.create_hbox_fill()
 	up_row.set_spacing(6)
 	// Подпись по своей ширине: с колонкой подписей кнопки не влезают
-	up_row.add(vgui.label('Авто'))
-	up_tips := ['Только наклон: горизонтали и вертикали станут ровными',
-		'Вертикали станут параллельными, плюс наклон',
-		'Вертикали и горизонтали: обе перспективы и наклон']
+	up_row.add(vgui.label(i18n.tr('Авто')))
+	up_tips := [i18n.tr('Только наклон: горизонтали и вертикали станут ровными'),
+		i18n.tr('Вертикали станут параллельными, плюс наклон'),
+		i18n.tr('Вертикали и горизонтали: обе перспективы и наклон')]
 	for i, uname in upright_names {
-		mut b := vgui.button(uname)
+		mut b := vgui.button(i18n.tr(uname))
 		b.style = .flat
 		um := unsafe { pipeline.UprightMode(i) }
 		b.on_click = fn [mut st, um] () {
@@ -1232,7 +1233,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		up_row.add(b, flex: 1)
 	}
 
-	mut hint := vgui.label('Enter - применить, Esc - отмена, двойной щелчок - вся рамка')
+	mut hint := vgui.label(i18n.tr('Enter - применить, Esc - отмена, двойной щелчок - вся рамка'))
 	hint.font_size = 12
 	st.hint_labels << hint
 	return [SectionRow{mode_row}, SectionRow{a_row}, SectionRow{c_row},

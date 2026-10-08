@@ -14,6 +14,7 @@ module ai
 import math
 import sync
 import bigbuf
+import i18n
 
 #flag -I @VMODROOT/ai/include
 #flag -ldl
@@ -43,7 +44,7 @@ pub struct Cancelled {
 }
 
 pub fn (e Cancelled) msg() string {
-	return 'отменено'
+	return i18n.tr('отменено')
 }
 
 // runtime_mu - загрузка библиотеки ORT один раз за процесс (превью и
@@ -60,7 +61,7 @@ pub fn load_runtime(lib string) ! {
 	}
 	mut err := []u8{len: 512}
 	if C.vr_ort_load(&char(lib.str), unsafe { &char(err.data) }, err.len) != 0 {
-		return error('не удалось загрузить ONNX Runtime: ${unsafe { cstring_to_vstring(&char(err.data)) }}')
+		return error(i18n.trf('не удалось загрузить ONNX Runtime: {0}', '${unsafe { cstring_to_vstring(&char(err.data)) }}'))
 	}
 }
 
@@ -69,7 +70,7 @@ pub fn load(path string) !&Model {
 	mut err := []u8{len: 512}
 	m := C.vr_model_open(&char(path.str), unsafe { &char(err.data) }, err.len)
 	if isnil(m) {
-		return error('не удалось загрузить модель: ${unsafe { cstring_to_vstring(&char(err.data)) }}')
+		return error(i18n.trf('не удалось загрузить модель: {0}', '${unsafe { cstring_to_vstring(&char(err.data)) }}'))
 	}
 	return &Model{
 		ptr: m
@@ -80,7 +81,7 @@ pub fn load(path string) !&Model {
 pub fn (m &Model) run(input []f32, mut output []f32, h int, w int) ! {
 	mut err := []u8{len: 512}
 	if C.vr_model_run(m.ptr, input.data, output.data, h, w, unsafe { &char(err.data) }, err.len) != 0 {
-		return error('ошибка модели: ${unsafe { cstring_to_vstring(&char(err.data)) }}')
+		return error(i18n.trf('ошибка модели: {0}', '${unsafe { cstring_to_vstring(&char(err.data)) }}'))
 	}
 }
 

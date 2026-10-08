@@ -1,5 +1,7 @@
 module imgio
 
+import i18n
+
 // TIFF: baseline RGB 8 бит, little-endian, полосы по tiff_rows_per_strip
 // строк, сжатие Deflate (Adobe, тег 8) с горизонтальным предиктором (2):
 // в полосе хранятся разности соседних пикселей строки - так сжатие
@@ -37,7 +39,7 @@ fn zlib_compress(data []u8) ![]u8 {
 	mut n := 0
 	p := C.stbi_zlib_compress(data.data, data.len, &n, 8)
 	if isnil(p) {
-		return error('сжатие Deflate не удалось')
+		return error(i18n.tr('сжатие Deflate не удалось'))
 	}
 	res := unsafe { p.vbytes(n) }.clone()
 	// stb выделяет через V (stbi__callback_malloc в модуле stbi) - и

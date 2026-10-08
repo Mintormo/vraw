@@ -9,6 +9,7 @@ module main
 // обычная проявка.
 import vgui
 import pipeline
+import i18n
 
 // jpeg_active - JPEG показывается: включён и есть, не кадрирование, не
 // показ дымки и резкости
@@ -31,7 +32,7 @@ fn set_jpeg_show(mut st State, on bool) {
 	}
 	if on && st.pw > 0 && st.cam_view.len != st.pw * st.ph * 4 && !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_info('У этого кадра нет встроенного JPEG')
+		nm.show_info(i18n.tr('У этого кадра нет встроенного JPEG'))
 	}
 	if !isnil(st.tone_fx) {
 		st.tone_fx()
@@ -44,5 +45,5 @@ fn jpeg_overlay(st &State, mut ctx vgui.RenderContext) {
 		return
 	}
 	x0, y0 := st.cv.buf_to_screen(0, 0)
-	ba_label(mut ctx, 'JPEG камеры', x0 + 10, y0 + 10)
+	ba_label(mut ctx, i18n.tr('JPEG камеры'), x0 + 10, y0 + 10)
 }

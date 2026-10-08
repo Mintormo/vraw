@@ -5,6 +5,7 @@ module main
 // Esc - отмена, Backspace/Delete - снять) и сброс к умолчанию. Нажатие
 // ловит HkCapture - виджет диалога после корня (события получает первым).
 import vgui
+import i18n
 
 // HkRow - ряд действия: кнопка сочетания и сброс
 struct HkRow {
@@ -18,9 +19,9 @@ const hk_wait_text = 'Нажмите сочетание...'
 // build_hotkeys_tab - содержимое вкладки
 fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.VBox {
 	mut names := st.hk.map(it.name)
-	names << hk_groups
+	names << i18n.tr_all(hk_groups)
 	name_w := column_width(mut dw, names, 16)
-	mut keys := [hk_wait_text, 'Ctrl+Shift+Alt+PageDown']
+	mut keys := [i18n.tr(hk_wait_text), 'Ctrl+Shift+Alt+PageDown']
 	key_w := column_width(mut dw, keys, 24)
 	mut list := vgui.create_vbox_fill()
 	list.set_spacing(2)
@@ -32,7 +33,7 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 				continue
 			}
 			idx := i
-			mut b := vgui.button(hk_none)
+			mut b := vgui.button(i18n.tr(hk_none))
 			b.on_click = fn [mut st, mut u, idx] () {
 				u.hk_wait = if u.hk_wait == idx { -1 } else { idx }
 				u.hk_msg.text = ''
@@ -64,7 +65,7 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 	sb.add(list)
 	mut msg := vgui.label('')
 	u.hk_msg = msg
-	mut all := vgui.button('Вернуть все')
+	mut all := vgui.button(i18n.tr('Вернуть все'))
 	all.on_click = fn [mut st, mut u] () {
 		u.hk_wait = -1
 		u.hk_msg.text = ''
@@ -75,12 +76,12 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 	bottom.add(all)
 	bottom.add(msg, flex: 1)
 	mut v := tab_page()
-	mut how := note(mut u, 'Щёлкните по сочетанию и нажмите новое: Esc - отмена, Backspace - снять. Работают в любой раскладке.')
+	mut how := note(mut u, i18n.tr('Щёлкните по сочетанию и нажмите новое: Esc - отмена, Backspace - снять. Работают в любой раскладке.'))
 	how.wrap = true
 	v.add(how)
 	v.add(sb, flex: 1)
 	v.add(bottom)
-	mut fixed := note(mut u, hk_fixed_note)
+	mut fixed := note(mut u, i18n.tr(hk_fixed_note))
 	fixed.wrap = true
 	v.add(fixed)
 	return v
@@ -95,10 +96,10 @@ fn sync_hotkeys_ui(mut u SettingsUi, st &State) {
 		h := st.hk[i]
 		mut b := r.btn
 		if u.hk_wait == i {
-			b.text = hk_wait_text
+			b.text = i18n.tr(hk_wait_text)
 			b.style = .accent
 		} else {
-			b.text = if h.item.shortcut.len > 0 { h.item.shortcut } else { hk_none }
+			b.text = if h.item.shortcut.len > 0 { h.item.shortcut } else { i18n.tr(hk_none) }
 			b.style = .normal
 		}
 		mut rb := r.reset

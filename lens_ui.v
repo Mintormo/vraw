@@ -7,6 +7,7 @@ module main
 // фоновая подготовка сырья заново (request_prep с коррекцией объектива,
 // ~0.6 с на превью), по ходу перетаскивания снимок не меняется.
 import vgui
+import i18n
 
 // lens_manual_rows - ряды ручной коррекции (подпись, ползунки, подсказка)
 fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
@@ -17,11 +18,11 @@ fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		mut app := st.app
 		request_prep(mut st, mut app, true)
 	}
-	mut man_caption := vgui.label('Вручную')
+	mut man_caption := vgui.label(i18n.tr('Вручную'))
 	man_caption.font_style = .bold
 	mut dist := edit_slider(mut st, SliderCfg{
-		label:  'Дисторсия'
-		hname:  'Объектив: дисторсия'
+		label:  i18n.tr('Дисторсия')
+		hname:  i18n.tr('Объектив: дисторсия')
 		min:    -100
 		max:    100
 		digits: 0
@@ -34,8 +35,8 @@ fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		fx:     fx
 	})
 	mut ca_r := edit_slider(mut st, SliderCfg{
-		label:  'ХА: красный'
-		hname:  'Объектив: ХА красный/голубой'
+		label:  i18n.tr('ХА: красный')
+		hname:  i18n.tr('Объектив: ХА красный/голубой')
 		min:    -100
 		max:    100
 		digits: 0
@@ -48,8 +49,8 @@ fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		fx:     fx
 	})
 	mut ca_b := edit_slider(mut st, SliderCfg{
-		label:  'ХА: синий'
-		hname:  'Объектив: ХА синий/жёлтый'
+		label:  i18n.tr('ХА: синий')
+		hname:  i18n.tr('Объектив: ХА синий/жёлтый')
 		min:    -100
 		max:    100
 		digits: 0
@@ -62,8 +63,8 @@ fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		fx:     fx
 	})
 	mut vign := edit_slider(mut st, SliderCfg{
-		label:  'Виньетка'
-		hname:  'Объектив: виньетирование'
+		label:  i18n.tr('Виньетка')
+		hname:  i18n.tr('Объектив: виньетирование')
 		min:    -100
 		max:    100
 		digits: 0
@@ -76,8 +77,8 @@ fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		fx:     fx
 	})
 	mut mid := edit_slider(mut st, SliderCfg{
-		label:  'Средняя точка'
-		hname:  'Объектив: средняя точка'
+		label:  i18n.tr('Средняя точка')
+		hname:  i18n.tr('Объектив: средняя точка')
 		min:    0
 		max:    100
 		def:    50
@@ -91,7 +92,7 @@ fn lens_manual_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		}
 		fx:     fx
 	})
-	mut hint := vgui.label('Дисторсия: плюс убирает бочку, минус - подушку')
+	mut hint := vgui.label(i18n.tr('Дисторсия: плюс убирает бочку, минус - подушку'))
 	st.hint_labels << hint
 	hint.font_size = 12
 	return [

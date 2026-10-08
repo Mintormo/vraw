@@ -8,9 +8,14 @@ fn test_settings_roundtrip() {
 	mut s := Settings{}
 	s.no_frame_cache = true
 	s.frame_cache_mb = 3072
+	s.lang = 'de'
 	back := settings_from(json2.decode[Settings](json2.encode(s))!)
 	assert back.no_frame_cache
 	assert back.frame_cache_mb == 3072
+	assert back.lang == 'de'
+	// незнакомый язык - как в системе
+	s.lang = 'xx'
+	assert settings_from(s).lang == ''
 	// Чужой предел - по умолчанию; старый файл без полей - кэш включён
 	s.frame_cache_mb = 777
 	assert settings_from(s).frame_cache_mb == 0

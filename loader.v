@@ -29,6 +29,7 @@ import vgui
 import raw
 import lens
 import pipeline
+import i18n
 
 struct LoadJob {
 	gen       int
@@ -95,7 +96,7 @@ fn load_compute(job LoadJob) LoadResult {
 	mut img := d.develop(half: true) or {
 		res = LoadResult{
 			...res
-			err: 'Ошибка проявки: ${err.msg()}'
+			err: i18n.trf('Ошибка проявки: {0}', '${err.msg()}')
 		}
 		return res
 	}

@@ -8,6 +8,7 @@ module main
 // (panel_add), раскладка пересобирает только список секций (layout_panel).
 // Скрытый раздел только не показан - его настройки кадра действуют.
 import vgui
+import i18n
 
 // PanelSection - раздел панели: ключ в настройках, заголовок, открыт ли
 // при старте
@@ -158,9 +159,9 @@ fn layout_panel(mut st State) {
 	for key in st.panel_keys {
 		k := panel_section_index(key)
 		if st.sec_open[k] {
-			acc.add_section_expanded(panel_sections[k].title, st.sec_w[k])
+			acc.add_section_expanded(i18n.tr(panel_sections[k].title), st.sec_w[k])
 		} else {
-			acc.add_section(panel_sections[k].title, st.sec_w[k])
+			acc.add_section(i18n.tr(panel_sections[k].title), st.sec_w[k])
 		}
 	}
 	// Градиентные фильтры: раскрытая секция показывает метки на снимке

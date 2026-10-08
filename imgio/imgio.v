@@ -6,6 +6,7 @@ module imgio
 // Флойда-Стейнберга, LZW). Без vgui - годится для фонового потока.
 import os
 import stbi
+import i18n
 
 pub enum Format {
 	jpeg
@@ -106,7 +107,7 @@ pub fn (f Format) has_exif() bool {
 // write - записать RGB-кадр (w * h * 3 байт) в формате f
 pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	if w <= 0 || h <= 0 || rgb.len < w * h * 3 {
-		return error('неверный размер кадра ${w}x${h}')
+		return error(i18n.trf('неверный размер кадра {0}x{1}', '${w}', '${h}'))
 	}
 	match f {
 		.jpeg {
@@ -128,7 +129,7 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 		}
 		.gif {
 			if w > 65535 || h > 65535 {
-				return error('GIF не бывает больше 65535 px по стороне')
+				return error(i18n.tr('GIF не бывает больше 65535 px по стороне'))
 			}
 			os.write_file_array(path, encode_gif(w, h, rgb))!
 		}

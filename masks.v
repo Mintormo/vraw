@@ -17,6 +17,7 @@ module main
 import math
 import vgui
 import pipeline
+import i18n
 
 const mask_handle_px = f32(9) // радиус захвата ручки на экране
 const mask_line = vgui.Color{255, 255, 255, 230}
@@ -196,9 +197,9 @@ fn mask_pins_only(st &State) bool {
 // kind_name - вид фильтра для списка: «Линейный», «Радиальный», «Кисть»
 fn kind_name(k pipeline.MaskKind) string {
 	return match k {
-		.radial { 'Радиальный' }
-		.brush { 'Кисть' }
-		.linear { 'Линейный' }
+		.radial { i18n.tr('Радиальный') }
+		.brush { i18n.tr('Кисть') }
+		.linear { i18n.tr('Линейный') }
 	}
 }
 
@@ -206,7 +207,7 @@ fn kind_name(k pipeline.MaskKind) string {
 // «выкл»
 fn mask_name(m pipeline.Mask, i int) string {
 	kind := if m.name != '' { m.name } else { kind_name(m.kind) }
-	off := if m.on { '' } else { '  (выкл)' }
+	off := if m.on { '' } else { i18n.tr('  (выкл)') }
 	parts := if m.parts.len > 0 { ' +${m.parts.len}' } else { '' }
 	return '${i + 1}. ${kind}${parts}${off}'
 }
@@ -299,11 +300,11 @@ fn add_mask(mut st State, kind pipeline.MaskKind) {
 	st.mask_sel = st.edit.params.masks.len - 1
 	st.mask_part = -1
 	name := match kind {
-		.radial { 'радиальный' }
-		.brush { 'кисть' }
-		.linear { 'линейный' }
+		.radial { i18n.tr('радиальный') }
+		.brush { i18n.tr('кисть') }
+		.linear { i18n.tr('линейный') }
 	}
-	mask_changed(mut st, 'mask_add', 'Фильтр: добавлен ${name}')
+	mask_changed(mut st, 'mask_add', i18n.trf('Фильтр: добавлен {0}', '${name}'))
 }
 
 // ── Части фильтра (сложение масок) ──
@@ -348,17 +349,17 @@ fn op_of(i int) pipeline.MaskOp {
 
 fn kind_word(k pipeline.MaskKind) string {
 	return match k {
-		.radial { 'радиальная' }
-		.brush { 'кисть' }
-		.linear { 'линейная' }
+		.radial { i18n.tr('радиальная') }
+		.brush { i18n.tr('кисть') }
+		.linear { i18n.tr('линейная') }
 	}
 }
 
 // shape_names - пункты выбора формы выделенного фильтра
 fn shape_names(m pipeline.Mask) []string {
-	mut names := ['Основа: ${kind_word(m.kind)}']
+	mut names := [i18n.trf('Основа: {0}', '${kind_word(m.kind)}')]
 	for i, pt in m.parts {
-		names << '${i + 1}. ${mask_ops[op_index(pt.op)]}: ${kind_word(pt.kind)}'
+		names << '${i + 1}. ${i18n.tr(mask_ops[op_index(pt.op)])}: ${kind_word(pt.kind)}'
 	}
 	return names
 }
@@ -367,9 +368,9 @@ fn shape_names(m pipeline.Mask) []string {
 // часть 1»
 fn shape_label(st &State) string {
 	if st.mask_part < 0 {
-		return 'Фильтр ${st.mask_sel + 1}'
+		return i18n.trf('Фильтр {0}', '${st.mask_sel + 1}')
 	}
-	return 'Фильтр ${st.mask_sel + 1}, часть ${st.mask_part + 1}'
+	return i18n.trf('Фильтр {0}, часть {1}', '${st.mask_sel + 1}', '${st.mask_part + 1}')
 }
 
 // select_part - выделить форму выделенного фильтра (-1 - основа)
@@ -401,7 +402,7 @@ fn add_part(mut st State, kind pipeline.MaskKind, op pipeline.MaskOp) {
 	m.parts << s
 	st.edit.params.masks[st.mask_sel] = m
 	st.mask_part = m.parts.len - 1
-	mask_changed(mut st, 'mask_part', '${shape_label(st)}: ${mask_ops[op_index(op)].to_lower()} ${kind_word(kind)}')
+	mask_changed(mut st, 'mask_part', '${shape_label(st)}: ${i18n.tr(mask_ops[op_index(op)]).to_lower()} ${kind_word(kind)}')
 }
 
 // delete_part - удалить выделенную часть (основу удаляет delete_mask)
@@ -417,7 +418,7 @@ fn delete_part(mut st State) {
 	m.parts.delete(st.mask_part)
 	st.edit.params.masks[st.mask_sel] = m
 	st.mask_part = -1
-	mask_changed(mut st, 'mask_part_del', '${label}: удалена')
+	mask_changed(mut st, 'mask_part_del', i18n.trf('{0}: удалена', '${label}'))
 }
 
 // set_part_op - операция выделенной части
@@ -432,7 +433,7 @@ fn set_part_op(mut st State, op pipeline.MaskOp) {
 	mut m := st.edit.params.masks[st.mask_sel].copy()
 	m.parts[st.mask_part].op = op
 	st.edit.params.masks[st.mask_sel] = m
-	mask_changed(mut st, 'mask_part_op', '${shape_label(st)}: ${mask_ops[op_index(op)].to_lower()}')
+	mask_changed(mut st, 'mask_part_op', '${shape_label(st)}: ${i18n.tr(mask_ops[op_index(op)]).to_lower()}')
 }
 
 fn delete_mask(mut st State) {
@@ -444,7 +445,7 @@ fn delete_mask(mut st State) {
 		st.mask_sel = st.edit.params.masks.len - 1
 	}
 	st.mask_part = -1
-	mask_changed(mut st, 'mask_del', 'Фильтр: удалён')
+	mask_changed(mut st, 'mask_del', i18n.tr('Фильтр: удалён'))
 }
 
 // mask_name_max - длина имени фильтра, символов
@@ -472,8 +473,8 @@ fn rename_mask(mut st State, text string) {
 		return
 	}
 	st.edit.params.masks[i].name = name
-	what := if name == '' { 'имя по виду' } else { 'имя «${name}»' }
-	mask_changed(mut st, 'mask_name', 'Фильтр ${i + 1}: ${what}')
+	what := if name == '' { i18n.tr('имя по виду') } else { i18n.trf('имя «{0}»', '${name}') }
+	mask_changed(mut st, 'mask_name', i18n.trf('Фильтр {0}: {1}', '${i + 1}', '${what}'))
 }
 
 fn toggle_mask(mut st State) {
@@ -482,7 +483,7 @@ fn toggle_mask(mut st State) {
 	}
 	i := st.mask_sel
 	st.edit.params.masks[i].on = !st.edit.params.masks[i].on
-	mask_changed(mut st, 'mask_on', 'Фильтр ${i + 1}: ${on_off(st.edit.params.masks[i].on)}')
+	mask_changed(mut st, 'mask_on', i18n.trf('Фильтр {0}: {1}', '${i + 1}', '${on_off(st.edit.params.masks[i].on)}'))
 }
 
 // set_mask_show - заливка маски выделенного фильтра (вид, не правка)
@@ -750,7 +751,7 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 		.pointer_up {
 			if st.brush_paint {
 				st.brush_paint = false
-				mask_changed(mut st, 'mask_stroke', '${shape_label(st)}: мазок')
+				mask_changed(mut st, 'mask_stroke', i18n.trf('{0}: мазок', '${shape_label(st)}'))
 				return true
 			}
 			d := st.mask_drag
@@ -760,9 +761,9 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			}
 			if d.moved {
 				name := match d.kind {
-					.move { 'перенос' }
-					.axis { 'размер' }
-					else { 'переход' }
+					.move { i18n.tr('перенос') }
+					.axis { i18n.tr('размер') }
+					else { i18n.tr('переход') }
 				}
 				mask_changed(mut st, 'mask_shape', '${shape_label(st)}: ${name}')
 			}
@@ -1103,7 +1104,7 @@ fn sync_mask_ui(mut st State) {
 		mut fcb := u.form_cb
 		was0 := st.suppress
 		st.suppress = true
-		fcb.set_items(if valid { shape_names(st.edit.params.masks[st.mask_sel]) } else { ['Основа'] })
+		fcb.set_items(if valid { shape_names(st.edit.params.masks[st.mask_sel]) } else { [i18n.tr('Основа')] })
 		fcb.set_selected(st.mask_part + 1)
 		st.suppress = was0
 		fcb.enabled = valid
@@ -1134,9 +1135,9 @@ fn sync_mask_ui(mut st State) {
 	if !isnil(u.sel_cb) {
 		mut cb := u.sel_cb
 		mut names := [if st.edit.params.masks.len == 0 {
-			'Фильтров нет'
+			i18n.tr('Фильтров нет')
 		} else {
-			'Выберите фильтр'
+			i18n.tr('Выберите фильтр')
 		}]
 		for i, m in st.edit.params.masks {
 			names << mask_name(m, i)
@@ -1243,11 +1244,11 @@ fn sync_mask_ui(mut st State) {
 	if !isnil(u.name_in) {
 		mut ni := u.name_in
 		ni.enabled = valid
-		ni.placeholder = 'По виду: «${if valid {
+		ni.placeholder = i18n.trf('По виду: «{0}»', if valid {
 			kind_name(st.edit.params.masks[st.mask_sel].kind)
 		} else {
-			'Линейный'
-		}}»'
+			i18n.tr('Линейный')
+		})
 		if !ni.focused {
 			ni.set_text(if valid { st.edit.params.masks[st.mask_sel].name } else { '' })
 		}
@@ -1364,7 +1365,7 @@ fn mask_slider(mut st State, spec MaskSliderSpec) EditSlider {
 	def := spec.def
 	s := edit_slider(mut st, SliderCfg{
 		label:  spec.label
-		hname:  'Фильтр: ${spec.label.to_lower()}'
+		hname:  i18n.trf('Фильтр: {0}', '${spec.label.to_lower()}')
 		min:    spec.min
 		max:    spec.max
 		def:    def
@@ -1406,19 +1407,19 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut u := &MaskUi{}
 	st.mask_ui = u
 
-	mut add_l := vgui.button('Линейный')
+	mut add_l := vgui.button(i18n.tr('Линейный'))
 	add_l.icon_name = 'square-split-vertical'
 	add_l.style = .outline
 	add_l.on_click = fn [mut st] () {
 		add_mask(mut st, .linear)
 	}
-	mut add_r := vgui.button('Радиальный')
+	mut add_r := vgui.button(i18n.tr('Радиальный'))
 	add_r.icon_name = 'circle-dashed'
 	add_r.style = .outline
 	add_r.on_click = fn [mut st] () {
 		add_mask(mut st, .radial)
 	}
-	mut add_b := vgui.button('Кисть')
+	mut add_b := vgui.button(i18n.tr('Кисть'))
 	add_b.icon_name = 'brush'
 	add_b.style = .outline
 	add_b.on_click = fn [mut st] () {
@@ -1430,12 +1431,12 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	add_row.add(add_r, flex: 1)
 	add_row.add(add_b, flex: 1)
 
-	mut on_b := icon_button(mut st, 'eye', 'Включить / выключить фильтр')
+	mut on_b := icon_button(mut st, 'eye', i18n.tr('Включить / выключить фильтр'))
 	on_b.on_click = fn [mut st] () {
 		toggle_mask(mut st)
 	}
 	u.on_btn = on_b
-	mut del_b := icon_button(mut st, 'trash-2', 'Удалить фильтр')
+	mut del_b := icon_button(mut st, 'trash-2', i18n.tr('Удалить фильтр'))
 	del_b.on_click = fn [mut st] () {
 		delete_mask(mut st)
 	}
@@ -1451,33 +1452,33 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	u.sel_cb = sel_cb
 	mut sel_row := vgui.create_hbox_fill()
 	sel_row.set_spacing(6)
-	sel_row.add(vgui.label('Фильтр'), min: lbl_w)
+	sel_row.add(vgui.label(i18n.tr('Фильтр')), min: lbl_w)
 	sel_row.add(sel_cb, flex: 1)
 	sel_row.add(on_b)
 	sel_row.add(del_b)
 	// Имя фильтра в списке: Enter - применить, пусто - по виду
-	mut name_in := vgui.text_input('По виду: «Линейный»')
+	mut name_in := vgui.text_input(i18n.tr('По виду: «Линейный»'))
 	name_in.max_len = mask_name_max
 	name_in.on_submit = fn [mut st] (s string) {
 		rename_mask(mut st, s)
 	}
 	u.name_in = name_in
-	mut name_tip := vgui.tooltip('Имя фильтра в списке: введите и нажмите Enter')
+	mut name_tip := vgui.tooltip(i18n.tr('Имя фильтра в списке: введите и нажмите Enter'))
 	name_tip.attach(name_in)
 	st.tips << name_tip
 	mut name_row := vgui.create_hbox_fill()
 	name_row.set_spacing(6)
-	name_row.add(vgui.label('Имя'), min: lbl_w)
+	name_row.add(vgui.label(i18n.tr('Имя')), min: lbl_w)
 	name_row.add(name_in, flex: 1)
 
-	mut done_b := icon_button(mut st, 'check', 'Готово: снять выделение (Esc)')
+	mut done_b := icon_button(mut st, 'check', i18n.tr('Готово: снять выделение (Esc)'))
 	done_b.on_click = fn [mut st] () {
 		select_mask(mut st, -1)
 	}
 	u.done_btn = done_b
-	mut show_cb := vgui.checkbox('Показать маску')
+	mut show_cb := vgui.checkbox(i18n.tr('Показать маску'))
 	st.hk_texts << fn [st, mut show_cb] () {
-		show_cb.text = 'Показать маску${hk_paren(st, 'view.mask')}'
+		show_cb.text = i18n.trf('Показать маску{0}', '${hk_paren(st, 'view.mask')}')
 	}
 	show_cb.on_change = fn [mut st] (v bool) {
 		if v != st.mask_show {
@@ -1500,18 +1501,18 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		select_part(mut st, idx - 1)
 	}
 	u.form_cb = form_cb
-	mut pdel_b := icon_button(mut st, 'trash-2', 'Удалить часть')
+	mut pdel_b := icon_button(mut st, 'trash-2', i18n.tr('Удалить часть'))
 	pdel_b.on_click = fn [mut st] () {
 		delete_part(mut st)
 	}
 	u.pdel_btn = pdel_b
 	mut form_row := vgui.create_hbox_fill()
 	form_row.set_spacing(6)
-	form_row.add(vgui.label('Форма'), min: lbl_w)
+	form_row.add(vgui.label(i18n.tr('Форма')), min: lbl_w)
 	form_row.add(form_cb, flex: 1)
 	form_row.add(pdel_b)
 	mut padd_cb := vgui.combo_box()
-	padd_cb.set_items(part_adds.map(it.label))
+	padd_cb.set_items(part_adds.map(i18n.tr(it.label)))
 	padd_cb.on_change = fn [mut st] (idx int, text string) {
 		if st.suppress || idx <= 0 || idx >= part_adds.len {
 			return
@@ -1520,7 +1521,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	u.padd_cb = padd_cb
 	mut op_cb := vgui.combo_box()
-	op_cb.set_items(mask_ops)
+	op_cb.set_items(i18n.tr_all(mask_ops))
 	op_cb.on_change = fn [mut st] (idx int, text string) {
 		if st.suppress {
 			return
@@ -1541,12 +1542,12 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	sbox.set_spacing(6)
 	u.shape_box = sbox
 	rows << SectionRow{sbox}
-	for i, lbl in ['Размер', 'Мягкость', 'Сила'] {
+	for i, lbl in [i18n.tr('Размер'), i18n.tr('Мягкость'), i18n.tr('Сила')] {
 		u.brush_rows << brush_slider(mut st, lbl, i, lbl_w, val_w)
 	}
 	// Автомаска выделенной кисти - правка (история): все её мазки красят
 	// только похожий цвет (цвета под кистью записаны у каждого мазка)
-	mut auto_cb := vgui.checkbox('Автомаска: только похожий цвет')
+	mut auto_cb := vgui.checkbox(i18n.tr('Автомаска: только похожий цвет'))
 	auto_cb.on_change = fn [mut st] (v bool) {
 		if st.suppress || !mask_valid(st) {
 			return
@@ -1559,14 +1560,14 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		mut m := st.edit.params.masks[st.mask_sel].copy()
 		m.set_shape(st.mask_part, sh)
 		st.edit.params.masks[st.mask_sel] = m
-		mask_changed(mut st, 'mask_auto', '${shape_label(st)}: автомаска ${on_off(v)}')
+		mask_changed(mut st, 'mask_auto', i18n.trf('{0}: автомаска {1}', '${shape_label(st)}', '${on_off(v)}'))
 	}
 	u.auto_cb = auto_cb
 	u.brush_rows << auto_cb
 	// Радиальная: размер (большая полуось, % высоты кадра) и поворот -
 	// то же, что ручки на снимке
 	mut rs := mask_slider(mut st, MaskSliderSpec{
-		label:  'Размер'
+		label:  i18n.tr('Размер')
 		f:      .size
 		min:    1
 		max:    150
@@ -1575,7 +1576,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	})
 	u.radial_rows << edit_row(mut st, mut rs, lbl_w, val_w)
 	mut ra := mask_slider(mut st, MaskSliderSpec{
-		label: 'Поворот'
+		label: i18n.tr('Поворот')
 		f:     .angle
 		min:   -90
 		max:   90
@@ -1583,42 +1584,42 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	u.radial_rows << edit_row(mut st, mut ra, lbl_w, val_w)
 	for spec in [
 		MaskSliderSpec{
-			label:  'Экспозиция'
+			label:  i18n.tr('Экспозиция')
 			f:      .exposure
 			min:    -4
 			max:    4
 			digits: 2
 		},
 		MaskSliderSpec{
-			label: 'Контраст'
+			label: i18n.tr('Контраст')
 			f:     .contrast
 		},
 		MaskSliderSpec{
-			label: 'Чёткость'
+			label: i18n.tr('Чёткость')
 			f:     .clarity
 		},
 		MaskSliderSpec{
-			label: 'Резкость'
+			label: i18n.tr('Резкость')
 			f:     .sharpness
 		},
 		MaskSliderSpec{
-			label: 'Света'
+			label: i18n.tr('Света')
 			f:     .highlights
 		},
 		MaskSliderSpec{
-			label: 'Тени'
+			label: i18n.tr('Тени')
 			f:     .shadows
 		},
 		MaskSliderSpec{
-			label: 'Насыщенность'
+			label: i18n.tr('Насыщенность')
 			f:     .saturation
 		},
 		MaskSliderSpec{
-			label: 'Температура'
+			label: i18n.tr('Температура')
 			f:     .temp
 		},
 		MaskSliderSpec{
-			label: 'Оттенок'
+			label: i18n.trc('ББ', 'Оттенок')
 			f:     .tint
 		},
 	] {
@@ -1628,19 +1629,19 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	rows << SectionRow{vgui.separator()}
 	// Расширить / сузить - вся форма фильтра (минус - сузить)
 	mut gr := mask_slider(mut st, MaskSliderSpec{
-		label: 'Расширить'
+		label: i18n.tr('Расширить')
 		f:     .grow
 	})
 	rows << SectionRow{edit_row(mut st, mut gr, lbl_w, val_w)}
 	mut fe := mask_slider(mut st, MaskSliderSpec{
-		label:  'Растушёвка'
+		label:  i18n.tr('Растушёвка')
 		f:      .feather
 		min:    0
 		def:    50
 		signed: false
 	})
 	u.radial_rows << edit_row(mut st, mut fe, lbl_w, val_w)
-	mut inv_cb := vgui.checkbox('Действие снаружи эллипса')
+	mut inv_cb := vgui.checkbox(i18n.tr('Действие снаружи эллипса'))
 	// (растушёвка и «снаружи» - у выделенной формы: основы или части)
 	inv_cb.on_change = fn [mut st] (v bool) {
 		if st.suppress || !mask_valid(st) {
@@ -1654,21 +1655,21 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		mut m := st.edit.params.masks[st.mask_sel].copy()
 		m.set_shape(st.mask_part, sh)
 		st.edit.params.masks[st.mask_sel] = m
-		mask_changed(mut st, 'mask_inv', '${shape_label(st)}: снаружи ${on_off(v)}')
+		mask_changed(mut st, 'mask_inv', i18n.trf('{0}: снаружи {1}', '${shape_label(st)}', '${on_off(v)}'))
 	}
 	u.inv_cb = inv_cb
 	u.radial_rows << inv_cb
 	rows << SectionRow{vgui.separator()}
 	rows << build_range_rows(mut st, lbl_w, val_w)
-	mut hint := vgui.label('Точки на снимке: перенос, переход, размер и поворот')
+	mut hint := vgui.label(i18n.tr('Точки на снимке: перенос, переход, размер и поворот'))
 	hint.font_size = 12
 	st.hint_labels << hint
 	rows << SectionRow{hint}
-	mut hint3 := vgui.label('Кисть: левая кнопка рисует, ластик - «Вычесть: кистью»')
+	mut hint3 := vgui.label(i18n.tr('Кисть: левая кнопка рисует, ластик - «Вычесть: кистью»'))
 	hint3.font_size = 12
 	st.hint_labels << hint3
 	rows << SectionRow{hint3}
-	mut hint2 := vgui.label('Метки частей: зелёная добавляет, красная вычитает, синяя пересекает')
+	mut hint2 := vgui.label(i18n.tr('Метки частей: зелёная добавляет, красная вычитает, синяя пересекает'))
 	hint2.font_size = 12
 	st.hint_labels << hint2
 	rows << SectionRow{hint2}
@@ -1726,14 +1727,14 @@ fn range_index(m pipeline.Mask) int {
 fn hue_name(deg f32) string {
 	h := int(math.round(deg)) % 360
 	name := match true {
-		h < 15 || h >= 345 { 'красный' }
-		h < 45 { 'оранжевый' }
-		h < 70 { 'жёлтый' }
-		h < 160 { 'зелёный' }
-		h < 200 { 'голубой' }
-		h < 255 { 'синий' }
-		h < 290 { 'фиолетовый' }
-		else { 'пурпурный' }
+		h < 15 || h >= 345 { i18n.tr('красный') }
+		h < 45 { i18n.tr('оранжевый') }
+		h < 70 { i18n.tr('жёлтый') }
+		h < 160 { i18n.tr('зелёный') }
+		h < 200 { i18n.tr('голубой') }
+		h < 255 { i18n.tr('синий') }
+		h < 290 { i18n.tr('фиолетовый') }
+		else { i18n.tr('пурпурный') }
 	}
 	return '${h}° ${name}'
 }
@@ -1741,7 +1742,7 @@ fn hue_name(deg f32) string {
 fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut u := st.mask_ui
 	mut rcb := vgui.combo_box()
-	rcb.set_items(range_modes)
+	rcb.set_items(i18n.tr_all(range_modes))
 	rcb.set_selected(0)
 	rcb.on_change = fn [mut st] (idx int, text string) {
 		if st.suppress || !mask_valid(st) || idx < 0 || idx >= range_modes.len {
@@ -1759,36 +1760,36 @@ fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 			st.mask_show = true
 			sync_mask_show_ui(mut st)
 		}
-		mask_changed(mut st, 'mask_range', 'Фильтр ${i + 1}: ограничение - ${range_modes[idx].to_lower()}')
+		mask_changed(mut st, 'mask_range', i18n.trf('Фильтр {0}: ограничение - {1}', '${i + 1}', i18n.tr(range_modes[idx]).to_lower()))
 	}
 	u.range_cb = rcb
-	mut pick := icon_button(mut st, 'pipette', 'Пипетка цвета: щёлкните по цвету на снимке')
+	mut pick := icon_button(mut st, 'pipette', i18n.tr('Пипетка цвета: щёлкните по цвету на снимке'))
 	pick.on_click = fn [mut st] () {
 		set_mask_pick(mut st, !st.mask_pick && mask_active(st))
 	}
 	u.pick_btn = pick
 	mut r_row := vgui.create_hbox_fill()
 	r_row.set_spacing(6)
-	r_row.add(vgui.label('Диапазон'), min: lbl_w)
+	r_row.add(vgui.label(i18n.tr('Диапазон')), min: lbl_w)
 	r_row.add(rcb, flex: 1)
 	r_row.add(pick)
 	mut rows := [SectionRow{r_row}]
 	for spec in [
 		MaskSliderSpec{
-			label:  'Яркость от'
+			label:  i18n.tr('Яркость от')
 			f:      .lum_lo
 			min:    0
 			signed: false
 		},
 		MaskSliderSpec{
-			label:  'Яркость до'
+			label:  i18n.tr('Яркость до')
 			f:      .lum_hi
 			min:    0
 			def:    100
 			signed: false
 		},
 		MaskSliderSpec{
-			label:  'Мягкость'
+			label:  i18n.tr('Мягкость')
 			f:      .lum_soft
 			min:    0
 			max:    50
@@ -1801,7 +1802,7 @@ fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	// Цвет - оттенок в градусах (в истории - с названием)
 	mut hue := mask_slider(mut st, MaskSliderSpec{
-		label:  'Цвет'
+		label:  i18n.tr('Цвет')
 		f:      .hue
 		min:    0
 		max:    359
@@ -1812,7 +1813,7 @@ fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	})
 	rows << SectionRow{edit_row(mut st, mut hue, lbl_w, val_w)}
 	mut hw := mask_slider(mut st, MaskSliderSpec{
-		label:  'Ширина'
+		label:  i18n.tr('Ширина')
 		f:      .hue_w
 		min:    5
 		max:    90
@@ -1872,7 +1873,7 @@ fn mask_pick_at(mut st State, x int, y int) {
 	if pr.sat < 0.05 {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('Пипетка: место почти серое - у него нет цвета')
+			nm.show_warning(i18n.tr('Пипетка: место почти серое - у него нет цвета'))
 		}
 		return
 	}
@@ -1883,5 +1884,5 @@ fn mask_pick_at(mut st State, x int, y int) {
 		st.mask_show = true
 		sync_mask_show_ui(mut st)
 	}
-	mask_changed(mut st, 'mask_hue', 'Фильтр ${i + 1}: цвет ${hue_name(st.edit.params.masks[i].hue)}')
+	mask_changed(mut st, 'mask_hue', i18n.trf('Фильтр {0}: цвет {1}', '${i + 1}', '${hue_name(st.edit.params.masks[i].hue)}'))
 }

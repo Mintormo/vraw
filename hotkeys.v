@@ -17,6 +17,7 @@ module main
 // Клавиши навигации и окна (стрелки, Home/End, Enter, Esc, пробел,
 // Tab, удержание «\», Ctrl+Y) не настраиваются - hk_reserved.
 import vgui
+import i18n
 
 // HotItem - действие: ключ в настройках, раздел (меню) и название для
 // окна, сочетание по умолчанию, пункт меню
@@ -270,7 +271,7 @@ fn hk_set(mut st State, idx int, sc string) string {
 		return ''
 	}
 	if hk_is_reserved(sc) {
-		return 'Сочетание ${sc} занято навигацией - выберите другое'
+		return i18n.trf('Сочетание {0} занято навигацией - выберите другое', '${sc}')
 	}
 	mut msg := ''
 	other := hk_find(st, sc)
@@ -279,7 +280,7 @@ fn hk_set(mut st State, idx int, sc string) string {
 		mut oi := o.item
 		oi.shortcut = ''
 		st.settings.hotkeys = hk_with(st.settings.hotkeys, o.id, '', o.def)
-		msg = '${sc} было у «${o.name}» - там снято'
+		msg = i18n.trf('{0} было у «{1}» - там снято', '${sc}', '${o.name}')
 	}
 	h := st.hk[idx]
 	mut it := h.item

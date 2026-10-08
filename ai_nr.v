@@ -26,6 +26,7 @@ module main
 import time
 import vgui
 import ai
+import i18n
 
 // AiCtl - один прогон модели по превью. cancel пишет главный
 // поток, читает воркер между плитками без синхронизации (опоздание на
@@ -108,13 +109,13 @@ fn ai_cache_for(mut st State, id string) !&ai.Cache {
 	if c := st.ai_caches[id] {
 		return c
 	}
-	info := ai.find_model_info(id) or { return error('неизвестная модель ${id}') }
+	info := ai.find_model_info(id) or { return error(i18n.trf('неизвестная модель {0}', '${id}')) }
 	lib := ai.runtime_lib(st.ai_places)
 	if lib == '' {
-		return error('не скачан ONNX Runtime (Правка - Настройки)')
+		return error(i18n.tr('не скачан ONNX Runtime (Правка - Настройки)'))
 	}
 	if !info.installed(st.ai_places) {
-		return error('не скачана модель ${info.title} (Правка - Настройки)')
+		return error(i18n.trf('не скачана модель {0} (Правка - Настройки)', '${info.title}'))
 	}
 	c := ai.new_cache(info.path(st.ai_places), lib)
 	st.ai_caches[id] = c
@@ -145,7 +146,7 @@ fn ai_estimate(st &State, id string, full bool) f64 {
 
 // fmt_dur - «40 с» / «4 мин»
 fn fmt_dur(sec f64) string {
-	return if sec < 60 { '${int(sec + 0.5)} с' } else { '${int(sec / 60 + 0.5)} мин' }
+	return if sec < 60 { i18n.trf('{0} с', '${int(sec + 0.5)}') } else { i18n.trf('{0} мин', '${int(sec / 60 + 0.5)}') }
 }
 
 // ai_ready - ai_linear посчитан по текущему raw_linear и нужной моделью
@@ -211,7 +212,7 @@ fn ai_check(mut st State, mut app vgui.App) {
 	cache := ai_cache_for(mut st, id) or {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_error('AI-шумодав: ${err.msg()}')
+			nm.show_error(i18n.trf('AI-шумодав: {0}', '${err.msg()}'))
 		}
 		st.ai_wanted = false
 		sync_ai_ui(mut st)
@@ -246,7 +247,7 @@ fn ai_tell_stale(mut st State) {
 	}
 	st.ai_told = key
 	mut nm := st.nm
-	nm.show_info('AI-шумодав: превью пока без него - «Пересчитать AI» в секции «Шумодав и ореолы» (экспорт посчитает сам)')
+	nm.show_info(i18n.tr('AI-шумодав: превью пока без него - «Пересчитать AI» в секции «Шумодав и ореолы» (экспорт посчитает сам)'))
 }
 
 // AiPoster - прогресс ai.denoise (в потоке воркера): в главный поток
@@ -370,7 +371,7 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		st.ai_wanted = false
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_error('AI-шумодав: ${res.err}')
+			nm.show_error(i18n.trf('AI-шумодав: {0}', '${res.err}'))
 		}
 		sync_ai_ui(mut st)
 		return
@@ -388,7 +389,7 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		ai_turn_on(mut st, mut app)
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_success('AI-шумодав готов (${res.secs:.0f} с)')
+			nm.show_success(i18n.trf('AI-шумодав готов ({0} с)', '${res.secs:.0f}'))
 		}
 	} else if prep_stale(st) {
 		request_prep(mut st, mut app, false)
@@ -415,7 +416,7 @@ fn ai_turn_on(mut st State, mut app vgui.App) {
 	st.edit.ai = 100
 	st.edit.ai_model = st.ai_lin_model
 	request_prep(mut st, mut app, false)
-	record(mut st, 'ai', 'AI-шумодав', false)
+	record(mut st, 'ai', i18n.tr('AI-шумодав'), false)
 	sync_ai_ui(mut st)
 }
 
@@ -428,7 +429,7 @@ fn ai_turn_off(mut st State, mut app vgui.App) {
 	st.edit.ai_model = ''
 	drop(mut st.ai_linear)
 	request_prep(mut st, mut app, false)
-	record(mut st, 'ai', 'AI-шумодав: выкл', false)
+	record(mut st, 'ai', i18n.tr('AI-шумодав: выкл'), false)
 	sync_ai_ui(mut st)
 }
 
@@ -451,12 +452,12 @@ fn ai_forget(mut st State) {
 // fmt_eta - «осталось ~25 с» / «~3 мин»
 fn fmt_eta(sec f64) string {
 	if sec < 0 {
-		return 'оценка времени...'
+		return i18n.tr('оценка времени...')
 	}
 	if sec < 60 {
-		return 'осталось ~${int(sec + 0.5)} с'
+		return i18n.trf('осталось ~{0} с', '${int(sec + 0.5)}')
 	}
-	return 'осталось ~${int(sec / 60 + 0.5)} мин'
+	return i18n.trf('осталось ~{0} мин', '${int(sec / 60 + 0.5)}')
 }
 
 // sync_ai_ui - какое состояние блока показать. Приоритет - идущий прогон
@@ -477,11 +478,11 @@ fn sync_ai_ui(mut st State) {
 	u.stale.visible = stale
 	u.idle.visible = !running && !applied && !stale
 	if running {
-		what := 'Превью'
+		what := i18n.tr('Превью')
 		if ctl.total == 0 {
 			u.bar.set_value(0)
 			u.pct.text = ''
-			u.status.text = '${what} · загрузка модели...'
+			u.status.text = i18n.trf('{0} · загрузка модели...', '${what}')
 		} else {
 			u.bar.set_value(f32(ctl.done) / f32(ctl.total))
 			u.pct.text = '${ctl.done * 100 / ctl.total}%'
@@ -490,7 +491,7 @@ fn sync_ai_ui(mut st State) {
 	}
 	if applied {
 		mut l := u.ok_label
-		l.text = 'AI-шумодав применён · ${model_title(st.edit.ai_model)}'
+		l.text = i18n.trf('AI-шумодав применён · {0}', '${model_title(st.edit.ai_model)}')
 	}
 	// Пересчёт AI кадра - его моделью; нет её - «Скачать модель...»
 	if stale {
@@ -498,15 +499,15 @@ fn sync_ai_ui(mut st State) {
 		mut rb := u.redo
 		mut rh := u.redo_hint
 		if ai_usable(st, sid) {
-			rb.text = 'Пересчитать AI'
+			rb.text = i18n.tr('Пересчитать AI')
 			rb.icon_name = 'refresh-cw'
 			rb.enabled = !isnil(st.dev) && !st.loading
-			rh.text = '${model_title(sid)} · превью пока без AI, пересчёт ~${fmt_dur(ai_estimate(st, sid, false))}'
+			rh.text = i18n.trf('{0} · превью пока без AI, пересчёт ~{1}', '${model_title(sid)}', '${fmt_dur(ai_estimate(st, sid, false))}')
 		} else {
-			rb.text = 'Скачать модель...'
+			rb.text = i18n.tr('Скачать модель...')
 			rb.icon_name = 'download'
 			rb.enabled = true
-			rh.text = 'Модель ${model_title(sid)} не скачана - Правка - Настройки'
+			rh.text = i18n.trf('Модель {0} не скачана - Правка - Настройки', '${model_title(sid)}')
 		}
 	}
 	// Кнопка: модель готова - запуск; нет - «Скачать модель...» (окно
@@ -516,15 +517,15 @@ fn sync_ai_ui(mut st State) {
 	mut b := u.start
 	mut hint := u.hint
 	if ready {
-		b.text = 'Убрать шум (AI)'
+		b.text = i18n.tr('Убрать шум (AI)')
 		b.icon_name = 'sparkles'
 		b.enabled = !isnil(st.dev) && !st.loading
-		hint.text = '${model_title(id)} · превью ~${fmt_dur(ai_estimate(st, id, false))}, экспорт ~${fmt_dur(ai_estimate(st, id, true))}'
+		hint.text = i18n.trf('{0} · превью ~{1}, экспорт ~{2}', '${model_title(id)}', '${fmt_dur(ai_estimate(st, id, false))}', '${fmt_dur(ai_estimate(st, id, true))}')
 	} else {
-		b.text = 'Скачать модель...'
+		b.text = i18n.tr('Скачать модель...')
 		b.icon_name = 'download'
 		b.enabled = true
-		hint.text = 'Модель ${model_title(id)} не скачана - Правка - Настройки'
+		hint.text = i18n.trf('Модель {0} не скачана - Правка - Настройки', '${model_title(id)}')
 	}
 }
 
@@ -535,7 +536,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	mut u := &AiUi{}
 	st.ai_ui = u
 	// Кнопка запуска и подсказка
-	mut start := vgui.button('Убрать шум (AI)')
+	mut start := vgui.button(i18n.tr('Убрать шум (AI)'))
 	start.icon_name = 'sparkles'
 	start.icon_size = 15
 	start.style = .accent
@@ -560,7 +561,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	u.bar = bar
 	mut pct := value_label('')
 	u.pct = pct
-	mut cancel := icon_button(mut st, 'circle-x', 'Отменить')
+	mut cancel := icon_button(mut st, 'circle-x', i18n.tr('Отменить'))
 	cancel.on_click = fn [mut st] () {
 		ctl := st.ai_prev
 		if !isnil(ctl) {
@@ -568,7 +569,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 			c.cancel = true
 			if !isnil(st.ai_ui) {
 				mut s := st.ai_ui.status
-				s.text = 'Отмена...'
+				s.text = i18n.tr('Отмена...')
 			}
 		}
 	}
@@ -595,7 +596,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	// не «сила по умолчанию», а выключение AI: как у классических
 	// ползунков, где сброс = 0 = шумодава нет (сила 100 и так по умолчанию,
 	// обычный сброс ничего бы не делал). Результат модели выбрасывается.
-	mut off := reset_button(mut st, 'Сбросить AI-шумодав')
+	mut off := reset_button(mut st, i18n.tr('Сбросить AI-шумодав'))
 	off.on_click = fn [mut st, mut app] () {
 		if st.edit.ai > 0 {
 			ai_turn_off(mut st, mut app)
@@ -611,7 +612,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	mut ok_icon := vgui.icon('circle-check')
 	ok_icon.set_size(14)
 	u.ok_icon = ok_icon
-	mut ok_lb := vgui.label('AI-шумодав применён')
+	mut ok_lb := vgui.label(i18n.tr('AI-шумодав применён'))
 	st.secondary_labels << ok_lb
 	u.ok_label = ok_lb
 	mut orow := vgui.create_hbox_fill()
@@ -627,7 +628,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 
 	// Устарел: AI кадра включён, результата под текущее сырьё нет -
 	// пересчёт по кнопке (сам не запускается) или выключение
-	mut redo := vgui.button('Пересчитать AI')
+	mut redo := vgui.button(i18n.tr('Пересчитать AI'))
 	redo.icon_name = 'refresh-cw'
 	redo.icon_size = 15
 	redo.style = .accent
@@ -635,7 +636,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 		ai_start(mut st, mut app)
 	}
 	u.redo = redo
-	mut off2 := reset_button(mut st, 'Сбросить AI-шумодав')
+	mut off2 := reset_button(mut st, i18n.tr('Сбросить AI-шумодав'))
 	off2.on_click = fn [mut st, mut app] () {
 		if st.edit.ai > 0 {
 			ai_turn_off(mut st, mut app)

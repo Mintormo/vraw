@@ -22,6 +22,7 @@ module main
 import vgui
 import raw
 import lens
+import i18n
 
 const pf_nice = 10
 
@@ -81,7 +82,7 @@ fn prefetch_worker(job PfJob, mut app vgui.App, on_done fn (PfResult)) {
 	if job.stop.stop && res.err.len == 0 {
 		res = LoadResult{
 			...res
-			err: 'отменено'
+			err: i18n.tr('отменено')
 		}
 	}
 	out = PfResult{

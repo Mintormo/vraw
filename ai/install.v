@@ -16,6 +16,7 @@ import os
 import time
 import net.http
 import crypto.sha256
+import i18n
 
 const fetch_attempts = 5
 
@@ -54,7 +55,7 @@ fn (mut s Sink) chunk(chunk []u8, status int) ! {
 	s.got += chunk.len
 	if !s.progress(s.base + s.got, s.total) {
 		s.cancelled = true
-		return error('отменено')
+		return error(i18n.tr('отменено'))
 	}
 }
 
@@ -152,43 +153,43 @@ fn fetch(f ModelFile, dest string, base i64, total i64, progress fn (done i64, t
 			if resp.status_code == 416 {
 				// Range за концом файла - .part не тот, заново
 				os.rm(part)!
-				last_err = 'сервер отверг докачку'
+				last_err = i18n.tr('сервер отверг докачку')
 				continue
 			}
 			if resp.status_code != 200 && resp.status_code != 206 {
-				return error('${f.name}: сервер ответил ${resp.status_code}')
+				return error(i18n.trf('{0}: сервер ответил {1}', '${f.name}', '${resp.status_code}'))
 			}
 			if part_size(part) < f.size {
-				last_err = 'соединение оборвалось'
+				last_err = i18n.tr('соединение оборвалось')
 				continue
 			}
 		}
 		got := part_size(part)
 		if got != f.size {
 			os.rm(part)!
-			return error('${f.name}: размер ${got} байт вместо ${f.size}')
+			return error(i18n.trf('{0}: размер {1} байт вместо {2}', '${f.name}', '${got}', '${f.size}'))
 		}
 		if file_sha256(part)! != f.sha256 {
 			os.rm(part)!
 			if resumed {
 				// Порченый хвост прошлой попытки - один раз с нуля
 				resumed = false
-				last_err = 'контрольная сумма не совпала'
+				last_err = i18n.tr('контрольная сумма не совпала')
 				continue
 			}
-			return error('${f.name}: контрольная сумма не совпала, файл удалён')
+			return error(i18n.trf('{0}: контрольная сумма не совпала, файл удалён', '${f.name}'))
 		}
 		os.mv(part, dest)!
 		return
 	}
-	return error('${f.name}: ${last_err} (скачанное сохранено - докачается при следующей попытке)')
+	return error(i18n.trf('{0}: {1} (скачанное сохранено - докачается при следующей попытке)', '${f.name}', '${last_err}'))
 }
 
 // install_model - скачать файлы модели в папку моделей (уже лежащие
 // целыми - пропускаются). Ошибка Cancelled - отменил пользователь.
 pub fn install_model(p Places, m ModelInfo, progress fn (done i64, total i64) bool) ! {
 	if !m.downloadable() {
-		return error('модель ${m.title} не скачивается')
+		return error(i18n.trf('модель {0} не скачивается', '${m.title}'))
 	}
 	os.mkdir_all(p.models)!
 	total := m.size()
@@ -224,11 +225,11 @@ pub fn install_runtime(p Places, progress fn (done i64, total i64) bool) ! {
 	res := os.exec(['tar', '-xzf', tgz, '-C', tmp, '--strip-components=1'])
 	if res.exit_code != 0 {
 		os.rmdir_all(tmp) or {}
-		return error('не удалось распаковать ${f.name}: ${res.output.trim_space()}')
+		return error(i18n.trf('не удалось распаковать {0}: {1}', '${f.name}', '${res.output.trim_space()}'))
 	}
 	if !os.exists(os.join_path(tmp, 'lib', 'libonnxruntime.so.1')) {
 		os.rmdir_all(tmp) or {}
-		return error('в архиве ${f.name} нет lib/libonnxruntime.so.1')
+		return error(i18n.trf('в архиве {0} нет lib/libonnxruntime.so.1', '${f.name}'))
 	}
 	// Папка без библиотеки (обрывок прошлой установки) - заменяется
 	if os.exists(p.runtime) {

@@ -25,6 +25,7 @@ import vgui
 import raw
 import stbi
 import pipeline
+import i18n
 
 // Расширения RAW для сканирования папки (без учёта регистра)
 const raw_exts = ['cr3', 'cr2', 'crw', 'nef', 'arw', 'dng', 'raf', 'orf', 'rw2']
@@ -532,11 +533,11 @@ fn strip_info_text(mut st State) {
 	mut info := st.strip_info
 	// С фильтром - номер и число кадров фильтра, всего в папке - в скобках
 	row := row_of(st, st.frame_idx)
-	total := if st.filter != 'all' { ' (в папке ${st.frames.len})' } else { '' }
+	total := if st.filter != 'all' { i18n.trf(' (в папке {0})', '${st.frames.len}') } else { '' }
 	pos := if row >= 0 {
-		'${row + 1} из ${st.shown.len}${total}'
+		i18n.trf('{0} из {1}{2}', '${row + 1}', '${st.shown.len}', '${total}')
 	} else {
-		'${st.shown.len} ${plural(st.shown.len, 'кадр', 'кадра', 'кадров')}${total}'
+		'${st.shown.len} ${i18n.pl(st.shown.len, 'кадр|кадра|кадров')}${total}'
 	}
 	mut text := '${os.file_name(st.folder)}  ·  ${pos}'
 	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
@@ -547,7 +548,7 @@ fn strip_info_text(mut st State) {
 	}
 	n := st.strip.get_selection().len
 	if n > 1 {
-		text += '  ·  выделено ${n}'
+		text += i18n.trf('  ·  выделено {0}', '${n}')
 	}
 	info.text = text
 }
@@ -687,7 +688,7 @@ fn layout_strip(mut st State) {
 	}
 	if !isnil(st.strip_toggle) {
 		mut b := st.strip_toggle
-		b.text = if st.strip_open { 'Свернуть ленту' } else { 'Развернуть ленту' }
+		b.text = if st.strip_open { i18n.tr('Свернуть ленту') } else { i18n.tr('Развернуть ленту') }
 	}
 }
 

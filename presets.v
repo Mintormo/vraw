@@ -18,6 +18,7 @@ module main
 import os
 import json2
 import vgui
+import i18n
 
 // Группы настроек: ключи (settings.json, файлы пресетов) и названия в окне
 const copy_groups = ['tone', 'color', 'curves', 'hsl', 'bw', 'grade', 'nr', 'sharp', 'haze', 'fx', 'lens',
@@ -137,20 +138,7 @@ fn known_groups(groups []string) []string {
 
 // groups_text - «3 группы из 8» для тостов
 fn groups_text(n int) string {
-	return '${n} ${plural(n, 'группа', 'группы', 'групп')} из ${copy_groups.len}'
-}
-
-// plural - русское окончание: 1 кадр, 2 кадра, 5 кадров
-fn plural(n int, one string, few string, many string) string {
-	m10 := n % 10
-	m100 := n % 100
-	if m10 == 1 && m100 != 11 {
-		return one
-	}
-	if m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) {
-		return few
-	}
-	return many
+	return i18n.trf('{0} {1} из {2}', '${n}', i18n.pl(n, 'группа|группы|групп'), '${copy_groups.len}')
 }
 
 // ── Вставка в кадры ──
@@ -178,12 +166,12 @@ fn paste_targets(st &State) []string {
 // уже такие, записывать нечего. Испорченный сайдкар не перезаписывается.
 fn paste_to_file(raw_path string, src EditState, groups []string, name string) !bool {
 	side := sidecar_path(raw_path)
-	loaded := load_sidecar(side) or { return error('сайдкар не прочитан (${err.msg()})') }
+	loaded := load_sidecar(side) or { return error(i18n.trf('сайдкар не прочитан ({0})', '${err.msg()}')) }
 	mut hist := loaded.history.clone()
 	mut cur := loaded.current
 	if hist.len == 0 {
 		hist = [HistEntry{
-			name:  'Открыт файл'
+			name:  i18n.tr('Открыт файл')
 			state: neutral_edit()
 		}]
 		cur = 0
@@ -210,7 +198,7 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 	}
 	targets := paste_targets(st)
 	if targets.len == 0 {
-		nm.show_warning('Откройте кадр или выделите кадры в ленте')
+		nm.show_warning(i18n.tr('Откройте кадр или выделите кадры в ленте'))
 		return
 	}
 	mut done := 0
@@ -241,13 +229,13 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 		}
 	}
 	if failed.len > 0 {
-		nm.show_error('Не удалось вставить в ${failed.len} ${plural(failed.len, 'кадр', 'кадра', 'кадров')}: ${failed[0]}')
+		nm.show_error(i18n.trf('Не удалось вставить в {0} {1}: {2}', '${failed.len}', i18n.pl(failed.len, 'кадр|кадра|кадров'), failed[0]))
 		return
 	}
 	if targets.len > 1 {
-		nm.show_success('${name}: ${done} ${plural(done, 'кадр', 'кадра', 'кадров')} из ${targets.len}')
+		nm.show_success(i18n.trf('{0}: {1} {2} из {3}', name, '${done}', i18n.pl(done, 'кадр|кадра|кадров'), '${targets.len}'))
 	} else if done == 0 {
-		nm.show_info('${name}: настройки кадра уже такие')
+		nm.show_info(i18n.trf('{0}: настройки кадра уже такие', '${name}'))
 	}
 }
 
@@ -286,7 +274,7 @@ fn copy_settings(mut st State, groups []string) {
 	}
 	if !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_info('Скопировано: ${groups_text(groups.len)}')
+		nm.show_info(i18n.trf('Скопировано: {0}', '${groups_text(groups.len)}'))
 	}
 }
 
@@ -347,7 +335,7 @@ fn list_presets(dir string) []Preset {
 fn save_preset(dir string, name string, e EditState, groups []string) !string {
 	file := preset_file_name(name)
 	if file.len == 0 {
-		return error('пустое имя')
+		return error(i18n.tr('пустое имя'))
 	}
 	os.mkdir_all(dir)!
 	path := os.join_path(dir, file)
@@ -364,12 +352,12 @@ fn save_preset(dir string, name string, e EditState, groups []string) !string {
 // неверные массивы - ошибка
 fn load_preset(path string) !(EditState, []string) {
 	text := os.read_file(path)!
-	f := json2.decode[PresetFile](text) or { return error('не пресет vraw') }
+	f := json2.decode[PresetFile](text) or { return error(i18n.tr('не пресет vraw')) }
 	if f.app != preset_app {
-		return error('не пресет vraw')
+		return error(i18n.tr('не пресет vraw'))
 	}
 	if f.version > preset_version {
-		return error('версия ${f.version} новее программы')
+		return error(i18n.trf('версия {0} новее программы', '${f.version}'))
 	}
 	return edit_state(f.state)!, known_groups(f.groups)
 }
@@ -407,7 +395,7 @@ fn free_path(dir string, stem string, same string) string {
 fn import_preset(src string, dir string) !string {
 	e, groups := load_preset(src)!
 	base := preset_file_name(preset_display_name(src))
-	stem := if base.len > 0 { base.all_before_last('.json') } else { 'Пресет' }
+	stem := if base.len > 0 { base.all_before_last('.json') } else { i18n.tr('Пресет') }
 	f := PresetFile{
 		name:   stem
 		groups: groups
@@ -453,7 +441,7 @@ fn delete_preset(p Preset) ! {
 fn rename_preset(p Preset, name string) !string {
 	file := preset_file_name(name)
 	if file.len == 0 {
-		return error('пустое имя')
+		return error(i18n.tr('пустое имя'))
 	}
 	load_preset(p.path)! // чужой файл или новая версия - не трогаем
 	mut f := json2.decode[PresetFile](os.read_file(p.path)!)!
@@ -462,7 +450,7 @@ fn rename_preset(p Preset, name string) !string {
 	// То же имя без учёта регистра - тот же файл (Windows, macOS)
 	same := path.to_lower() == p.path.to_lower()
 	if !same && os.exists(path) {
-		return error('пресет «${file.all_before_last('.json')}» уже есть')
+		return error(i18n.trf('пресет «{0}» уже есть', '${file.all_before_last('.json')}'))
 	}
 	if path != p.path {
 		os.mv(p.path, path)!
@@ -480,12 +468,12 @@ fn apply_preset(mut st State, p Preset) {
 	e, groups := load_preset(p.path) or {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_error('Пресет «${p.name}» не прочитан: ${err.msg()}')
+			nm.show_error(i18n.trf('Пресет «{0}» не прочитан: {1}', '${p.name}', '${err.msg()}'))
 		}
 		return
 	}
 	if !isnil(st.paste_fn) {
-		st.paste_fn(e, groups, 'Пресет: ${p.name}')
+		st.paste_fn(e, groups, i18n.trf('Пресет: {0}', '${p.name}'))
 	}
 }
 
@@ -506,19 +494,19 @@ fn rebuild_presets_menu(mut st State) {
 		items << it
 	}
 	if presets.len == 0 {
-		mut none_ := vgui.menu_action('Пресетов нет')
+		mut none_ := vgui.menu_action(i18n.tr('Пресетов нет'))
 		none_.enabled = false
 		items << none_
 	}
 	items << vgui.menu_separator()
-	mut m_save := vgui.menu_action('Сохранить пресет...')
+	mut m_save := vgui.menu_action(i18n.tr('Сохранить пресет...'))
 	m_save.on_click = fn [mut st] () {
 		if !isnil(st.show_groups) {
 			st.show_groups(true)
 		}
 	}
 	items << m_save
-	mut m_manage := vgui.menu_action('Управление пресетами...')
+	mut m_manage := vgui.menu_action(i18n.tr('Управление пресетами...'))
 	m_manage.on_click = fn [mut st] () {
 		if !isnil(st.show_presets) {
 			st.show_presets()
@@ -555,7 +543,7 @@ fn show_groups(mut st State, mut app vgui.App, parent &vgui.Window, preset bool)
 	if st.history.len == 0 {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('Сначала откройте RAW-файл')
+			nm.show_warning(i18n.tr('Сначала откройте RAW-файл'))
 		}
 		return
 	}
@@ -563,7 +551,7 @@ fn show_groups(mut st State, mut app vgui.App, parent &vgui.Window, preset bool)
 		build_groups_ui(mut st, mut app, parent) or {
 			if !isnil(st.nm) {
 				mut nm := st.nm
-				nm.show_error('Не удалось открыть окно: ${err.msg()}')
+				nm.show_error(i18n.trf('Не удалось открыть окно: {0}', '${err.msg()}'))
 			}
 			return
 		}
@@ -572,18 +560,18 @@ fn show_groups(mut st State, mut app vgui.App, parent &vgui.Window, preset bool)
 	u.preset = preset
 	mut d := u.dlg
 	d.set_title(if preset {
-		'Сохранить пресет'
+		i18n.tr('Сохранить пресет')
 	} else {
-		'Копировать настройки'
+		i18n.tr('Копировать настройки')
 	})
 	mut t := u.title
 	t.text = if preset {
-		'Группы настроек кадра, которые войдут в пресет:'
+		i18n.tr('Группы настроек кадра, которые войдут в пресет:')
 	} else {
-		'Группы настроек кадра, которые будут скопированы:'
+		i18n.tr('Группы настроек кадра, которые будут скопированы:')
 	}
 	mut ok := u.ok
-	ok.text = if preset { 'Сохранить' } else { 'Копировать' }
+	ok.text = if preset { i18n.tr('Сохранить') } else { i18n.tr('Копировать') }
 	mut name := u.name
 	name.set_text('')
 	layout_groups(mut u)
@@ -610,7 +598,7 @@ fn groups_confirm(mut st State) {
 	}
 	mut nm := st.nm
 	if groups.len == 0 {
-		nm.show_warning('Не выбрано ни одной группы')
+		nm.show_warning(i18n.tr('Не выбрано ни одной группы'))
 		return
 	}
 	if !u.preset {
@@ -621,19 +609,19 @@ fn groups_confirm(mut st State) {
 	}
 	name := u.name.get_text().trim_space()
 	if preset_file_name(name).len == 0 {
-		nm.show_warning('Введите имя пресета')
+		nm.show_warning(i18n.tr('Введите имя пресета'))
 		return
 	}
 	existed := os.exists(os.join_path(presets_dir(), preset_file_name(name)))
 	save_preset(presets_dir(), name, st.edit, groups) or {
-		nm.show_error('Пресет не сохранён: ${err.msg()}')
+		nm.show_error(i18n.trf('Пресет не сохранён: {0}', '${err.msg()}'))
 		return
 	}
 	st.settings.copy_groups = groups.clone()
 	save_settings(st.settings)
 	rebuild_presets_menu(mut st)
-	verb := if existed { 'обновлён' } else { 'сохранён' }
-	nm.show_success('Пресет «${name}» ${verb}: ${groups_text(groups.len)}')
+	verb := if existed { i18n.tr('обновлён') } else { i18n.tr('сохранён') }
+	nm.show_success(i18n.trf('Пресет «{0}» {1}: {2}', '${name}', '${verb}', '${groups_text(groups.len)}'))
 	mut d := u.dlg
 	d.close_with_result(1)
 }
@@ -657,7 +645,7 @@ fn layout_groups(mut u GroupsUi) {
 fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &GroupsUi{}
 	mut dlg := vgui.create_dialog(
-		title:     'Копировать настройки'
+		title:     i18n.tr('Копировать настройки')
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -670,8 +658,8 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	)!
 	u.dlg = dlg
 
-	mut name_l := vgui.label('Имя пресета')
-	mut name := vgui.text_input('Например: Пейзаж, пасмурно')
+	mut name_l := vgui.label(i18n.tr('Имя пресета'))
+	mut name := vgui.text_input(i18n.tr('Например: Пейзаж, пасмурно'))
 	name.on_submit = fn [mut st] (s string) {
 		groups_confirm(mut st)
 	}
@@ -685,30 +673,30 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut title := vgui.label('')
 	u.title = title
 	for g in copy_group_names {
-		u.cbs << vgui.checkbox(g)
+		u.cbs << vgui.checkbox(i18n.tr(g))
 	}
 
 	// «Все» / «Ничего» - слева, «Отмена» и главная кнопка - справа
-	mut b_all := vgui.button('Все')
+	mut b_all := vgui.button(i18n.tr('Все'))
 	b_all.style = .outline
 	b_all.on_click = fn [mut u] () {
 		for mut cb in u.cbs {
 			cb.set_checked(true)
 		}
 	}
-	mut b_none := vgui.button('Ничего')
+	mut b_none := vgui.button(i18n.tr('Ничего'))
 	b_none.style = .outline
 	b_none.on_click = fn [mut u] () {
 		for mut cb in u.cbs {
 			cb.set_checked(false)
 		}
 	}
-	mut b_cancel := vgui.button('Отмена')
+	mut b_cancel := vgui.button(i18n.tr('Отмена'))
 	b_cancel.style = .outline
 	b_cancel.on_click = fn [mut dlg] () {
 		dlg.close_with_result(0)
 	}
-	mut ok := vgui.button('Копировать')
+	mut ok := vgui.button(i18n.tr('Копировать'))
 	ok.style = .accent
 	ok.on_click = fn [mut st] () {
 		groups_confirm(mut st)
@@ -756,7 +744,7 @@ fn show_presets(mut st State, mut app vgui.App, parent &vgui.Window) {
 		build_presets_ui(mut st, mut app, parent) or {
 			if !isnil(st.nm) {
 				mut nm := st.nm
-				nm.show_error('Не удалось открыть окно: ${err.msg()}')
+				nm.show_error(i18n.trf('Не удалось открыть окно: {0}', '${err.msg()}'))
 			}
 			return
 		}
@@ -822,14 +810,14 @@ fn presets_rename(mut st State) {
 	mut nm := st.nm
 	name := u.name.get_text().trim_space()
 	if preset_file_name(name).len == 0 {
-		nm.show_warning('Введите имя пресета')
+		nm.show_warning(i18n.tr('Введите имя пресета'))
 		return
 	}
 	if name == old.name {
 		return
 	}
 	path := rename_preset(old, name) or {
-		nm.show_warning('Пресет не переименован: ${err.msg()}')
+		nm.show_warning(i18n.trf('Пресет не переименован: {0}', '${err.msg()}'))
 		return
 	}
 	new_name := os.file_name(path).all_before_last('.json')
@@ -842,7 +830,7 @@ fn presets_rename(mut st State) {
 			select_preset_row(mut u, i)
 		}
 	}
-	nm.show_success('Пресет «${old.name}» переименован в «${new_name}»')
+	nm.show_success(i18n.trf('Пресет «{0}» переименован в «{1}»', '${old.name}', '${new_name}'))
 }
 
 // presets_delete - «Удалить» с подтверждением
@@ -851,10 +839,10 @@ fn presets_delete(mut st State) {
 	p := selected_preset(u) or { return }
 	mut app := u.app
 	answer := vgui.message_box(u.dlg.win, mut app, vgui.MessageBoxConfig{
-		title:          'Удалить пресет'
-		message:        'Удалить пресет «${p.name}»? Файл пресета будет удалён.'
+		title:          i18n.tr('Удалить пресет')
+		message:        i18n.trf('Удалить пресет «{0}»? Файл пресета будет удалён.', '${p.name}')
 		kind:           .warning
-		buttons:        ['Удалить', 'Отмена']
+		buttons:        [i18n.tr('Удалить'), i18n.tr('Отмена')]
 		default_button: 1
 		cancel_button:  1
 	})
@@ -863,11 +851,11 @@ fn presets_delete(mut st State) {
 	}
 	mut nm := st.nm
 	delete_preset(p) or {
-		nm.show_error('Пресет «${p.name}» не удалён: ${err.msg()}')
+		nm.show_error(i18n.trf('Пресет «{0}» не удалён: {1}', '${p.name}', '${err.msg()}'))
 		return
 	}
 	rebuild_presets_menu(mut st)
-	nm.show_success('Пресет «${p.name}» удалён')
+	nm.show_success(i18n.trf('Пресет «{0}» удалён', '${p.name}'))
 }
 
 fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
@@ -875,7 +863,7 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		app: unsafe { &app }
 	}
 	mut dlg := vgui.create_dialog(
-		title:     'Управление пресетами'
+		title:     i18n.tr('Управление пресетами')
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -901,13 +889,13 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.list = list
 
-	mut b_delete := vgui.button('Удалить')
+	mut b_delete := vgui.button(i18n.tr('Удалить'))
 	b_delete.style = .outline
 	b_delete.on_click = fn [mut st] () {
 		presets_delete(mut st)
 	}
 	u.b_delete = b_delete
-	mut b_export := vgui.button('Экспорт...')
+	mut b_export := vgui.button(i18n.tr('Экспорт...'))
 	b_export.style = .outline
 	b_export.on_click = fn [mut st, mut u] () {
 		p := selected_preset(u) or { return }
@@ -916,14 +904,14 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		}
 	}
 	u.b_export = b_export
-	mut b_import := vgui.button('Импорт...')
+	mut b_import := vgui.button(i18n.tr('Импорт...'))
 	b_import.style = .outline
 	b_import.on_click = fn [mut st] () {
 		if !isnil(st.import_presets) {
 			st.import_presets()
 		}
 	}
-	mut b_all := vgui.button('Экспорт всех...')
+	mut b_all := vgui.button(i18n.tr('Экспорт всех...'))
 	b_all.style = .outline
 	b_all.on_click = fn [mut st] () {
 		if !isnil(st.export_presets) {
@@ -947,13 +935,13 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	top.add(side, min: 150)
 
 	// Переименование: имя выбранного пресета в поле, Enter - переименовать
-	mut name_l := vgui.label('Имя')
-	mut name := vgui.text_input('Имя пресета')
+	mut name_l := vgui.label(i18n.tr('Имя'))
+	mut name := vgui.text_input(i18n.tr('Имя пресета'))
 	name.on_submit = fn [mut st] (s string) {
 		presets_rename(mut st)
 	}
 	u.name = name
-	mut b_rename := vgui.button('Переименовать')
+	mut b_rename := vgui.button(i18n.tr('Переименовать'))
 	b_rename.style = .outline
 	b_rename.on_click = fn [mut st] () {
 		presets_rename(mut st)
@@ -966,7 +954,7 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	name_row.add(name, flex: 1)
 	name_row.add(b_rename, min: 150)
 
-	mut b_close := vgui.button('Закрыть')
+	mut b_close := vgui.button(i18n.tr('Закрыть'))
 	b_close.style = .accent
 	b_close.on_click = fn [mut dlg] () {
 		dlg.close_with_result(0)

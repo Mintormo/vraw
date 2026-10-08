@@ -8,12 +8,13 @@ module main
 // проявка). Переключение - обычный apply: всё в таблицах пайплайна.
 import vgui
 import pipeline
+import i18n
 
 // profile_names - пункты списка: 0 - нейтральный, 1 - как JPEG камеры,
 // дальше - стили pipeline.style_keys
 fn profile_names() []string {
-	mut a := ['Нейтральный', 'Как JPEG камеры']
-	a << pipeline.style_names
+	mut a := [i18n.tr('Нейтральный'), i18n.tr('Как JPEG камеры')]
+	a << i18n.tr_all(pipeline.style_names)
 	return a
 }
 
@@ -35,7 +36,7 @@ fn set_profile(mut st State, idx int) {
 	st.edit.profile = if idx >= 2 { pipeline.style_keys[idx - 2] } else { '' }
 	st.edit = with_derived(st.edit, st.look, st.cam)
 	st.tone_fx()
-	record(mut st, 'profile', 'Профиль: ${profile_names()[idx]}', false)
+	record(mut st, 'profile', i18n.trf('Профиль: {0}', '${profile_names()[idx]}'), false)
 }
 
 // profile_row - ряд «Профиль» со списком
@@ -49,7 +50,7 @@ fn profile_row(mut st State, lbl_w f32) &vgui.HBox {
 	st.prof_cb = cb
 	mut row := vgui.create_hbox_fill()
 	row.set_spacing(6)
-	row.add(vgui.label('Профиль'), min: lbl_w)
+	row.add(vgui.label(i18n.tr('Профиль')), min: lbl_w)
 	row.add(cb, flex: 1)
 	return row
 }

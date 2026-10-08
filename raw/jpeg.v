@@ -5,6 +5,7 @@ module raw
 // 24 Мп (72 МБ) в куче сборщика на каждое открытие кадра, а сборщик
 // освобождённое системе не отдаёт.
 import bigbuf
+import i18n
 
 #flag -ljpeg
 #include "@VMODROOT/raw/jpeg_shim.h"
@@ -28,18 +29,18 @@ pub fn (mut j Jpeg) free() {
 // decode_jpeg - JPEG из памяти в RGB (вне сборщика)
 pub fn decode_jpeg(data []u8) !Jpeg {
 	if data.len < 4 {
-		return error('не JPEG')
+		return error(i18n.tr('не JPEG'))
 	}
 	mut w := 0
 	mut h := 0
 	if C.vraw_jpeg_decode(data.data, u64(data.len), &w, &h, unsafe { nil }) != 0 || w <= 0
 		|| h <= 0 {
-		return error('не JPEG')
+		return error(i18n.tr('не JPEG'))
 	}
 	mut pix := bigbuf.new_u8(w * h * 3)
 	if C.vraw_jpeg_decode(data.data, u64(data.len), &w, &h, pix.data) != 0 {
 		bigbuf.free(mut pix)
-		return error('испорченный JPEG')
+		return error(i18n.tr('испорченный JPEG'))
 	}
 	return Jpeg{
 		width:  w

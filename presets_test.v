@@ -146,12 +146,9 @@ fn test_presets_files() {
 	assert false
 }
 
-fn test_plural() {
-	assert plural(1, 'кадр', 'кадра', 'кадров') == 'кадр'
-	assert plural(3, 'кадр', 'кадра', 'кадров') == 'кадра'
-	assert plural(11, 'кадр', 'кадра', 'кадров') == 'кадров'
-	assert plural(22, 'кадр', 'кадра', 'кадров') == 'кадра'
+fn test_groups_text() {
 	assert groups_text(8) == '8 групп из 14'
+	assert groups_text(1) == '1 группа из 14'
 }
 
 // Импорт и экспорт: чужой файл отвергается, одноимённый пресет с другими

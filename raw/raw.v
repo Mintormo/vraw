@@ -1,5 +1,7 @@
 module raw
 
+import i18n
+
 // Обёртка над LibRaw. Ключевое свойство для GUI: один Developer можно
 // проявлять повторно с разными параметрами — libraw_unpack выполняется
 // один раз, дальше меняются params и перезапускается dcraw_process.
@@ -157,12 +159,12 @@ mut:
 pub fn open(path string) !&Developer {
 	lr := C.libraw_init(0)
 	if isnil(lr) {
-		return error('не удалось инициализировать LibRaw')
+		return error(i18n.tr('не удалось инициализировать LibRaw'))
 	}
 	code := C.libraw_open_file(lr, path.str)
 	if code != 0 {
 		C.libraw_close(lr)
-		return error('открытие «${path}»: ${err_text(code)}')
+		return error(i18n.trf('открытие «{0}»: {1}', '${path}', '${err_text(code)}'))
 	}
 	mut fw := int(lr.sizes.width)
 	mut fh := int(lr.sizes.height)
@@ -179,7 +181,7 @@ pub fn open(path string) !&Developer {
 
 pub fn (mut d Developer) develop(p DevParams) !DevImage {
 	if isnil(d.lr) {
-		return error('файл не открыт')
+		return error(i18n.tr('файл не открыт'))
 	}
 	unsafe {
 		d.lr.params.use_camera_wb = if p.use_camera_wb { 1 } else { 0 }
@@ -193,18 +195,18 @@ pub fn (mut d Developer) develop(p DevParams) !DevImage {
 	if !d.unpacked {
 		code := C.libraw_unpack(d.lr)
 		if code != 0 {
-			return error('распаковка RAW: ${err_text(code)}')
+			return error(i18n.trf('распаковка RAW: {0}', '${err_text(code)}'))
 		}
 		d.unpacked = true
 	}
 	code := C.libraw_dcraw_process(d.lr)
 	if code != 0 {
-		return error('проявка: ${err_text(code)}')
+		return error(i18n.trf('проявка: {0}', '${err_text(code)}'))
 	}
 	errc := 0
 	img := C.libraw_dcraw_make_mem_image(d.lr, &errc)
 	if errc != 0 || isnil(img) {
-		return error('получение RGB-изображения: ${err_text(errc)}')
+		return error(i18n.trf('получение RGB-изображения: {0}', '${err_text(errc)}'))
 	}
 	mut w := int(img.width)
 	mut h := int(img.height)
@@ -330,14 +332,14 @@ pub fn (d &Developer) color() ColorData {
 // (так GUI строил камерную кривую не по тому превью).
 pub fn (mut d Developer) thumb() ![]u8 {
 	if isnil(d.lr) {
-		return error('файл не открыт')
+		return error(i18n.tr('файл не открыт'))
 	}
 	if d.lr.thumbs_list.thumbcount > 0 {
 		return d.thumb_min(1 << 30)
 	}
 	code := C.libraw_unpack_thumb(d.lr)
 	if code != 0 {
-		return error('извлечение превью: ${err_text(code)}')
+		return error(i18n.trf('извлечение превью: {0}', '${err_text(code)}'))
 	}
 	return d.thumb_jpeg()
 }
@@ -349,7 +351,7 @@ pub fn (mut d Developer) thumb() ![]u8 {
 // полный JPEG) считается самым большим. Без списка превью - thumb().
 pub fn (mut d Developer) thumb_min(min_side int) ![]u8 {
 	if isnil(d.lr) {
-		return error('файл не открыт')
+		return error(i18n.tr('файл не открыт'))
 	}
 	tl := d.lr.thumbs_list
 	mut best := -1
@@ -393,7 +395,7 @@ pub fn (mut d Developer) thumb_min(min_side int) ![]u8 {
 		return t.thumb_min(min_side)
 	}
 	if code != 0 {
-		return error('извлечение превью: ${err_text(code)}')
+		return error(i18n.trf('извлечение превью: {0}', '${err_text(code)}'))
 	}
 	return d.thumb_jpeg()
 }
@@ -418,7 +420,7 @@ fn (mut d Developer) thumb_jpeg() ![]u8 {
 	errc := 0
 	img := C.libraw_dcraw_make_mem_thumb(d.lr, &errc)
 	if errc != 0 || isnil(img) {
-		return error('получение превью: ${err_text(errc)}')
+		return error(i18n.trf('получение превью: {0}', '${err_text(errc)}'))
 	}
 	defer {
 		C.libraw_dcraw_clear_mem(img)
@@ -426,7 +428,7 @@ fn (mut d Developer) thumb_jpeg() ![]u8 {
 	// Поле type в C-структуре недоступно (type - ключевое слово V),
 	// поэтому JPEG распознаём по сигнатуре потока.
 	if img.data_size < 4 || unsafe { img.data[0] } != 0xff || unsafe { img.data[1] } != 0xd8 {
-		return error('встроенное превью - не JPEG')
+		return error(i18n.tr('встроенное превью - не JPEG'))
 	}
 	mut out := []u8{len: int(img.data_size)}
 	unsafe { vmemcpy(out.data, img.data, int(img.data_size)) }

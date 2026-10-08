@@ -22,6 +22,7 @@ module main
 import math
 import vgui
 import pipeline
+import i18n
 
 const spot_sel_line = vgui.Color{255, 255, 255, 240}
 const spot_src_line = vgui.Color{120, 200, 255, 230}
@@ -184,7 +185,7 @@ fn add_spot(mut st State, mm pipeline.MaskMap, bx f32, by f32) {
 		mode:    st.spot_kind
 	}
 	st.spot_sel = st.edit.spots.len - 1
-	spot_changed(mut st, 'spot_add', 'Пятно ${st.spot_sel + 1}: добавлено')
+	spot_changed(mut st, 'spot_add', i18n.trf('Пятно {0}: добавлено', '${st.spot_sel + 1}'))
 }
 
 fn delete_spot(mut st State) {
@@ -195,7 +196,7 @@ fn delete_spot(mut st State) {
 	st.edit.spots.delete(st.spot_sel)
 	st.spot_sel = -1
 	st.spot_drag = SpotDrag{}
-	spot_changed(mut st, 'spot_del', 'Пятно ${n}: удалено')
+	spot_changed(mut st, 'spot_del', i18n.trf('Пятно {0}: удалено', '${n}'))
 }
 
 fn clear_spots(mut st State) {
@@ -205,7 +206,7 @@ fn clear_spots(mut st State) {
 	st.edit.spots = []pipeline.Spot{}
 	st.spot_sel = -1
 	st.spot_drag = SpotDrag{}
-	spot_changed(mut st, 'spot_clear', 'Пятна: удалены все')
+	spot_changed(mut st, 'spot_clear', i18n.tr('Пятна: удалены все'))
 }
 
 // spot_new_source - выделенному пятну - другой источник: лучший из
@@ -221,7 +222,7 @@ fn spot_new_source(mut st State) {
 	n.sx = sx
 	n.sy = sy
 	st.edit.spots[st.spot_sel] = n
-	spot_changed(mut st, 'spot_src', 'Пятно ${st.spot_sel + 1}: другой источник')
+	spot_changed(mut st, 'spot_src', i18n.trf('Пятно {0}: другой источник', '${st.spot_sel + 1}'))
 }
 
 // healed - сырьё превью (w x h RGB) с пятнами: без пятен - тот же массив
@@ -371,11 +372,11 @@ fn spot_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 					st.edit.spots[st.spot_sel] = spot_refit(st, st.edit.spots[st.spot_sel])
 				}
 				name := match d.kind {
-					.source { 'источник' }
-					.size { 'размер' }
-					else { 'перенос' }
+					.source { i18n.tr('источник') }
+					.size { i18n.tr('размер') }
+					else { i18n.tr('перенос') }
 				}
-				spot_changed(mut st, 'spot_drag', 'Пятно ${st.spot_sel + 1}: ${name}')
+				spot_changed(mut st, 'spot_drag', i18n.trf('Пятно {0}: {1}', '${st.spot_sel + 1}', '${name}'))
 			}
 			return true
 		}
@@ -505,15 +506,15 @@ fn sync_spot_ui(mut st State) {
 	mut u := st.spot_ui
 	mut mb := u.mode_btn
 	mb.style = if st.spot_mode { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.outline }
-	mb.text = if st.spot_mode { 'Готово (Enter)' } else { 'Убрать пятна' }
+	mb.text = if st.spot_mode { i18n.tr('Готово (Enter)') } else { i18n.tr('Убрать пятна') }
 	n := st.edit.spots.len
 	mut cl := u.count_lb
 	cl.text = if n == 0 {
-		'Пятен нет'
+		i18n.tr('Пятен нет')
 	} else if spot_valid(st) {
-		'Пятно ${st.spot_sel + 1} из ${n}'
+		i18n.trf('Пятно {0} из {1}', '${st.spot_sel + 1}', '${n}')
 	} else {
-		'${n} ${plural(n, 'пятно', 'пятна', 'пятен')}'
+		'${n} ${i18n.pl(n, 'пятно|пятна|пятен')}'
 	}
 	mut db := u.del_btn
 	db.enabled = spot_valid(st)
@@ -541,7 +542,7 @@ fn sync_spot_ui(mut st State) {
 fn spot_slider(mut st State, label string, which int, lbl_w f32, val_w f32) &vgui.HBox {
 	mut s := edit_slider(mut st, SliderCfg{
 		label:  label
-		hname:  'Пятно: ${label.to_lower()}'
+		hname:  i18n.trf('Пятно: {0}', '${label.to_lower()}')
 		min:    if which == 1 { f32(0) } else { f32(1) }
 		max:    100
 		def:    [f32(35), 20, 100][which]
@@ -589,14 +590,14 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	st.spot_ui = u
 	mut rows := []SectionRow{}
 
-	mut mode := vgui.button('Убрать пятна')
+	mut mode := vgui.button(i18n.tr('Убрать пятна'))
 	mode.icon_name = 'bandage'
 	mode.style = .outline
 	mode.on_click = fn [mut st] () {
 		set_spot_mode(mut st, !st.spot_mode)
 	}
 	u.mode_btn = mode
-	mut clr := icon_button(mut st, 'trash-2', 'Удалить все пятна')
+	mut clr := icon_button(mut st, 'trash-2', i18n.tr('Удалить все пятна'))
 	clr.on_click = fn [mut st] () {
 		clear_spots(mut st)
 	}
@@ -608,15 +609,15 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	rows << SectionRow{mode_row}
 
 	// Выделенное пятно: подпись, другой источник, удалить
-	mut count := vgui.label('Пятен нет')
+	mut count := vgui.label(i18n.tr('Пятен нет'))
 	st.secondary_labels << count
 	u.count_lb = count
-	mut src := icon_button(mut st, 'shuffle', 'Другой источник для пятна')
+	mut src := icon_button(mut st, 'shuffle', i18n.tr('Другой источник для пятна'))
 	src.on_click = fn [mut st] () {
 		spot_new_source(mut st)
 	}
 	u.src_btn = src
-	mut del := icon_button(mut st, 'x', 'Удалить пятно (Delete)')
+	mut del := icon_button(mut st, 'x', i18n.tr('Удалить пятно (Delete)'))
 	del.on_click = fn [mut st] () {
 		delete_spot(mut st)
 	}
@@ -629,7 +630,7 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	rows << SectionRow{sel_row}
 
 	mut kind_cb := vgui.combo_box()
-	kind_cb.set_items(spot_modes)
+	kind_cb.set_items(i18n.tr_all(spot_modes))
 	kind_cb.on_change = fn [mut st] (idx int, text string) {
 		if st.suppress {
 			return
@@ -638,23 +639,23 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		st.spot_kind = k
 		if spot_valid(st) && st.edit.spots[st.spot_sel].mode != k {
 			st.edit.spots[st.spot_sel].mode = k
-			spot_changed(mut st, 'spot_mode', 'Пятно ${st.spot_sel + 1}: ${spot_modes[idx].to_lower()}')
+			spot_changed(mut st, 'spot_mode', i18n.trf('Пятно {0}: {1}', '${st.spot_sel + 1}', i18n.tr(spot_modes[idx]).to_lower()))
 		}
 	}
 	u.kind_cb = kind_cb
 	mut kind_row := vgui.create_hbox_fill()
 	kind_row.set_spacing(6)
-	kind_row.add(vgui.label('Режим'), min: lbl_w)
+	kind_row.add(vgui.label(i18n.tr('Режим')), min: lbl_w)
 	kind_row.add(kind_cb, flex: 1)
 	kind_row.add(icon_slot(), min: icon_slot_w)
 	rows << SectionRow{kind_row}
 
-	rows << SectionRow{spot_slider(mut st, 'Размер', 0, lbl_w, val_w)}
-	rows << SectionRow{spot_slider(mut st, 'Растушёвка', 1, lbl_w, val_w)}
-	rows << SectionRow{spot_slider(mut st, 'Сила', 2, lbl_w, val_w)}
+	rows << SectionRow{spot_slider(mut st, i18n.tr('Размер'), 0, lbl_w, val_w)}
+	rows << SectionRow{spot_slider(mut st, i18n.tr('Растушёвка'), 1, lbl_w, val_w)}
+	rows << SectionRow{spot_slider(mut st, i18n.tr('Сила'), 2, lbl_w, val_w)}
 
 	// Показ пыли: флажок и усиление карты (вид, не правка)
-	mut dust_cb := vgui.checkbox('Показать пыль')
+	mut dust_cb := vgui.checkbox(i18n.tr('Показать пыль'))
 	dust_cb.on_change = fn [mut st] (v bool) {
 		if !st.suppress && v != st.dust_show {
 			set_dust_show(mut st, v)
@@ -662,7 +663,7 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	u.dust_cb = dust_cb
 	rows << SectionRow{dust_cb}
-	lb := vgui.label('Контраст карты')
+	lb := vgui.label(i18n.tr('Контраст карты'))
 	mut vl := value_label('${int(st.dust_amt)}')
 	mut sl := vgui.slider_horizontal(0, 100, st.dust_amt)
 	sl.step = 1
@@ -676,11 +677,11 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	rows << SectionRow{slider_row(mut st, lb, mut sl, vl, 50, lbl_w, val_w)}
 
-	mut hint := vgui.label('Щелчок по снимку - пятно, источник ищется сам')
+	mut hint := vgui.label(i18n.tr('Щелчок по снимку - пятно, источник ищется сам'))
 	hint.font_size = 12
 	st.hint_labels << hint
 	rows << SectionRow{hint}
-	mut hint2 := vgui.label('Тяните круг, его край или голубой источник')
+	mut hint2 := vgui.label(i18n.tr('Тяните круг, его край или голубой источник'))
 	hint2.font_size = 12
 	st.hint_labels << hint2
 	rows << SectionRow{hint2}

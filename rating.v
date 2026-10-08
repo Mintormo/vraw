@@ -14,6 +14,7 @@ module main
 import os
 import math
 import vgui
+import i18n
 
 const filter_keys = ['all', 'picked', 'unrejected', 'rejected', 'r1', 'r2', 'r3', 'r4', 'r5']
 const filter_names = ['Все кадры', 'Отобранные', 'Без отклонённых', 'Отклонённые',
@@ -144,7 +145,7 @@ fn set_mark(mut st State, change MarkEdit) {
 	if targets.len == 0 {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('Откройте кадр или выделите кадры в ленте')
+			nm.show_warning(i18n.tr('Откройте кадр или выделите кадры в ленте'))
 		}
 		return
 	}
@@ -168,7 +169,7 @@ fn set_mark(mut st State, change MarkEdit) {
 	}
 	if failed.len > 0 && !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_error('Пометка не сохранена: ${failed[0]}')
+		nm.show_error(i18n.trf('Пометка не сохранена: {0}', '${failed[0]}'))
 	}
 	advance := st.settings.auto_advance && targets == [st.frame_idx]
 	if st.filter != 'all' {
@@ -201,12 +202,12 @@ fn set_flag(mut st State, f int) {
 fn mark_text(m Mark) string {
 	mut parts := []string{}
 	if m.rating > 0 {
-		parts << '${m.rating} ${plural(m.rating, 'звезда', 'звезды', 'звёзд')}'
+		parts << '${m.rating} ${i18n.pl(m.rating, 'звезда|звезды|звёзд')}'
 	}
 	if m.flag > 0 {
-		parts << 'отобран'
+		parts << i18n.tr('отобран')
 	} else if m.flag < 0 {
-		parts << 'отклонён'
+		parts << i18n.tr('отклонён')
 	}
 	return parts.join(', ')
 }

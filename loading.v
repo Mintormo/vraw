@@ -9,6 +9,7 @@ module main
 // доли по ним шли рывками.
 import math
 import vgui
+import i18n
 
 const load_ring_r = f32(26)
 // Доля акцентного цвета темы в центре градиента - лёгкое свечение за
@@ -37,7 +38,7 @@ fn make_load_overlay(th vgui.Theme) &LoadOverlay {
 	ring.radius = load_ring_r
 	ring.thickness = 4
 	ring.anim_speed = 0.8
-	mut label := vgui.label('Обработка')
+	mut label := vgui.label(i18n.tr('Обработка'))
 	label.align = .center
 	mut col := vgui.create_vbox_fill()
 	col.set_spacing(14)

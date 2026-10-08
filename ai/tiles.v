@@ -9,6 +9,7 @@ module ai
 // TileCache - при прокрутке модель считает только новые плитки.
 import math
 import bigbuf
+import i18n
 
 // Rect - прямоугольник в пикселях кадра
 pub struct Rect {
@@ -225,7 +226,7 @@ pub fn (c &TileCache) compose(r Rect) ![]u16 {
 	g := &c.grid
 	t := g.cover(r)
 	if c.missing(t) > 0 {
-		return error('не все плитки посчитаны')
+		return error(i18n.tr('не все плитки посчитаны'))
 	}
 	mut acc := bigbuf.new_f32(r.w * r.h * 3)
 	defer {

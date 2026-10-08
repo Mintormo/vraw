@@ -39,6 +39,7 @@ import vgui
 import lens
 import ai
 import pipeline { Region }
+import i18n
 
 // Запас вокруг видимой части, в долях её размера: прокрутка на четверть
 // экрана - без пересчёта
@@ -603,7 +604,7 @@ fn detail_done(mut st State, res DetailRes) {
 		dt.pending = false
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_warning('1:1 без AI: ${res.err}')
+			nm.show_warning(i18n.trf('1:1 без AI: {0}', '${res.err}'))
 		}
 		detail_check(mut st)
 		return
@@ -665,7 +666,7 @@ fn detail_overlay(st &State, mut ctx vgui.RenderContext) {
 		return
 	}
 	cv := st.cv
-	text := 'AI 1:1: плитка ${st.dt.ai_done + 1} из ${st.dt.ai_total}'
+	text := i18n.trf('AI 1:1: плитка {0} из {1}', '${st.dt.ai_done + 1}', '${st.dt.ai_total}')
 	ba_label(mut ctx, text, cv.bounds.x + 10, cv.bounds.y + cv.bounds.h - 30)
 }
 

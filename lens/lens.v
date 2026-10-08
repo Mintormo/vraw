@@ -4,6 +4,7 @@ import math
 import runtime
 import bigbuf
 import pipeline { Region }
+import i18n
 
 // Обёртка над lensfun: поиск профиля объектива по метаданным кадра и
 // коррекция виньетирования на линейном 16-битном RGB-буфере.
@@ -120,7 +121,7 @@ mut:
 pub fn load_db() !&Database {
 	db := C.lf_db_new()
 	if isnil(db) {
-		return error('не удалось создать базу lensfun')
+		return error(i18n.tr('не удалось создать базу lensfun'))
 	}
 	C.lf_db_load(db)
 	return &Database{
@@ -134,11 +135,11 @@ pub fn load_db() !&Database {
 pub fn load_db_dir(dir string) !&Database {
 	db := C.lf_db_new()
 	if isnil(db) {
-		return error('не удалось создать базу lensfun')
+		return error(i18n.tr('не удалось создать базу lensfun'))
 	}
 	if !C.lf_db_load_directory(db, &char(dir.str)) {
 		C.lf_db_destroy(db)
-		return error('нет профилей lensfun в ${dir}')
+		return error(i18n.trf('нет профилей lensfun в {0}', '${dir}'))
 	}
 	return &Database{
 		db: db

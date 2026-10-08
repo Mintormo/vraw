@@ -12,6 +12,7 @@ module main
 import vgui
 import ai
 import imgio
+import i18n
 
 // DlCtl - одно скачивание (ORT и/или модель). cancel пишет главный поток,
 // читает воркер между порциями данных; posted - только воркер (сколько
@@ -88,19 +89,19 @@ struct SecRow {
 // fmt_title - формат в списке настроек: название и что это
 fn fmt_title(f imgio.Format) string {
 	return match f {
-		.jpeg { 'JPEG - компактный' }
-		.png { 'PNG - без потерь' }
-		.tiff { 'TIFF - для других программ' }
-		.bmp { 'BMP - без сжатия' }
-		.qoi { 'QOI - без потерь, быстрый' }
-		.gif { 'GIF - 256 цветов' }
+		.jpeg { i18n.tr('JPEG - компактный') }
+		.png { i18n.tr('PNG - без потерь') }
+		.tiff { i18n.tr('TIFF - для других программ') }
+		.bmp { i18n.tr('BMP - без сжатия') }
+		.qoi { i18n.tr('QOI - без потерь, быстрый') }
+		.gif { i18n.tr('GIF - 256 цветов') }
 	}
 }
 
 const set_path_max = 76 // символов в строке пути (ширина окна минус поля)
 
 fn fmt_mb(bytes i64) string {
-	return '${f64(bytes) / 1e6:.0f} МБ'
+	return i18n.trf('{0} МБ', '${f64(bytes) / 1e6:.0f}')
 }
 
 // show_settings - открыть окно настроек (создать при первом вызове)
@@ -109,7 +110,7 @@ fn show_settings(mut st State, mut app vgui.App, parent &vgui.Window) {
 		build_settings(mut st, mut app, parent) or {
 			if !isnil(st.nm) {
 				mut nm := st.nm
-				nm.show_error('Не удалось открыть настройки: ${err.msg()}')
+				nm.show_error(i18n.trf('Не удалось открыть настройки: {0}', '${err.msg()}'))
 			}
 			return
 		}
@@ -231,7 +232,7 @@ fn labeled(text string, w &vgui.Widget, col f32, w_min f32) &vgui.HBox {
 fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &SettingsUi{}
 	mut dlg := vgui.create_dialog(
-		title:     'Настройки'
+		title:     i18n.tr('Настройки')
 		parent:    unsafe { parent }
 		theme:     parent.ctx.theme
 		font_path: parent.config.font_path
@@ -246,20 +247,20 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 
 	// ── Оформление ──
 	mut theme_cb := vgui.combo_box()
-	theme_cb.set_items(theme_names)
+	theme_cb.set_items(i18n.tr_all(theme_names))
 	theme_cb.on_change = fn [mut st, mut app] (i int, _ string) {
 		apply_theme(mut st, mut app, i)
 	}
 	u.theme_cb = theme_cb
 	mut bg_cb := vgui.combo_box()
-	bg_cb.set_items(bg_names)
+	bg_cb.set_items(i18n.tr_all(bg_names))
 	bg_cb.on_change = fn [mut st] (i int, _ string) {
 		set_viewer_bg(mut st, i)
 	}
 	u.bg_cb = bg_cb
 
 	// ── Память: кэш кадров ──
-	mut cache_ck := vgui.checkbox('Держать недавние кадры в памяти')
+	mut cache_ck := vgui.checkbox(i18n.tr('Держать недавние кадры в памяти'))
 	cache_ck.on_change = fn [mut st] (v bool) {
 		st.settings.no_frame_cache = !v
 		frame_trim(mut st)
@@ -282,18 +283,18 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	// Колонки состояния и кнопок у строк ORT и моделей - по самым длинным
 	// их текстам (шрифтом окна): кнопки стоят ровной колонкой
 	mut dw := &dlg.win
-	state_col := column_width(mut dw, ['установлен', 'нет · 11.0 МБ', 'скачана · 117.0 МБ',
-		'нет в папке моделей'], 8)
-	btn_col := column_width(mut dw, ['Скачать', 'Удалить', 'Точно?', 'Готов'], 0) +
+	state_col := column_width(mut dw, [i18n.tr('установлен'), i18n.tr('нет · 11.0 МБ'), i18n.tr('скачана · 117.0 МБ'),
+		i18n.tr('нет в папке моделей')], 8)
+	btn_col := column_width(mut dw, [i18n.tr('Скачать'), i18n.tr('Удалить'), i18n.tr('Точно?'), i18n.tr('Готов')], 0) +
 		2 * vgui.measure_pad_x
-	look_col := column_width(mut dw, ['Тема', 'Фон вокруг снимка', 'Не больше'], 8)
+	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Не больше')], 8)
 	// Списки оформления - одной ширины, по самому длинному пункту обоих
 	// (24 - стрелка ComboBox, как в его measure)
-	mut look_items := theme_names.clone()
-	look_items << bg_names
+	mut look_items := i18n.tr_all(theme_names)
+	look_items << i18n.tr_all(bg_names)
 	look_w := column_width(mut dw, look_items, 0) +
 		2 * theme_cb.pad + 24
-	mut rt_btn := vgui.button('Скачать')
+	mut rt_btn := vgui.button(i18n.tr('Скачать'))
 	rt_btn.on_click = fn [mut st, mut app] () {
 		start_download(mut st, mut app, '')
 	}
@@ -308,24 +309,24 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 
 	// ── Вкладка «Общие» ──
 	mut general := tab_page()
-	general.add(caption('Оформление'))
-	general.add(labeled('Тема', theme_cb, look_col, look_w))
-	general.add(labeled('Фон вокруг снимка', bg_cb, look_col, look_w))
+	general.add(caption(i18n.tr('Оформление')))
+	general.add(labeled(i18n.tr('Тема'), theme_cb, look_col, look_w))
+	general.add(labeled(i18n.tr('Фон вокруг снимка'), bg_cb, look_col, look_w))
 
-	general.add(caption('Память'))
+	general.add(caption(i18n.tr('Память')))
 	general.add(cache_ck)
-	general.add(labeled('Не больше', cache_cb, look_col, look_w))
-	general.add(note(mut u, 'Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)'))
+	general.add(labeled(i18n.tr('Не больше'), cache_cb, look_col, look_w))
+	general.add(note(mut u, i18n.tr('Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)')))
 
 	// ── Вкладка «Интерфейс» ──
 	iface, secs := build_iface_tab(mut st, mut u, mut dw)
 
 	// ── Вкладка «AI-шумодав» ──
 	mut body := tab_page()
-	body.add(caption('AI-шумодав'))
+	body.add(caption(i18n.tr('AI-шумодав')))
 	body.add(rt_row)
-	body.add(note(mut u, 'Движок нейросетей (открытый, MIT) - нужен всем моделям'))
-	body.add(vgui.label('Модель (для новых прогонов; кадр помнит свою):'))
+	body.add(note(mut u, i18n.tr('Движок нейросетей (открытый, MIT) - нужен всем моделям')))
+	body.add(vgui.label(i18n.tr('Модель (для новых прогонов; кадр помнит свою):')))
 
 	// ── Модели каталога: переключатель, состояние, кнопка ──
 	for info in ai.models {
@@ -343,7 +344,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		mut state := vgui.label('')
 		// Одна кнопка: нет модели - «Скачать», есть - «Удалить» (вторым
 		// нажатием: первое спрашивает «Точно?»)
-		mut btn := vgui.button('Скачать')
+		mut btn := vgui.button(i18n.tr('Скачать'))
 		btn.on_click = fn [mut st, mut app, id] () {
 			info := ai.find_model_info(id) or { return }
 			if !info.installed(st.ai_places) {
@@ -361,7 +362,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		row.add(state, min: state_col)
 		row.add(btn, min: btn_col)
 		body.add(row)
-		body.add(indented(note(mut u, info.note), radio.circle_size + radio.gap))
+		body.add(indented(note(mut u, i18n.tr(info.note)), radio.circle_size + radio.gap))
 		u.rows << ModelRow{
 			id:    id
 			radio: radio
@@ -376,14 +377,14 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut dl_bar := vgui.progress_bar_linear()
 	dl_bar.thickness = 6
 	u.dl_bar = dl_bar
-	mut dl_stop := vgui.button('Отменить')
+	mut dl_stop := vgui.button(i18n.tr('Отменить'))
 	dl_stop.on_click = fn [mut st] () {
 		if !isnil(st.dl) {
 			mut c := st.dl
 			c.cancel = true
 			if !isnil(st.sui) {
 				mut t := st.sui.dl_text
-				t.text = 'Отмена...'
+				t.text = i18n.tr('Отмена...')
 			}
 		}
 	}
@@ -400,24 +401,24 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(u.dl_box)
 
 	mut tabs := vgui.tab_box()
-	tabs.add_tab('Общие', general)
-	tabs.add_tab('Интерфейс', iface)
-	tabs.add_tab('Разделы панели', secs)
-	tabs.add_tab('Горячие клавиши', build_hotkeys_tab(mut st, mut u, mut dw))
-	tabs.add_tab('AI-шумодав', body)
+	tabs.add_tab(i18n.tr('Общие'), general)
+	tabs.add_tab(i18n.tr('Интерфейс'), iface)
+	tabs.add_tab(i18n.tr('Разделы панели'), secs)
+	tabs.add_tab(i18n.tr('Горячие клавиши'), build_hotkeys_tab(mut st, mut u, mut dw))
+	tabs.add_tab(i18n.tr('AI-шумодав'), body)
 
 	// ── Где что лежит, закрыть ──
 	mut outer := vgui.create_vbox_fill()
 	outer.set_padding(16)
 	outer.set_spacing(6)
 	outer.add(tabs, flex: 1)
-	paths := [path_note('Настройки: ', settings_path(), set_path_max),
-		path_note('Модели: ', st.ai_places.models, set_path_max)]
+	paths := [path_note(i18n.tr('Настройки: '), settings_path(), set_path_max),
+		path_note(i18n.tr('Модели: '), st.ai_places.models, set_path_max)]
 	for p in paths {
 		u.notes << p.label
 		outer.add(p.label)
 	}
-	mut close := vgui.button('Закрыть')
+	mut close := vgui.button(i18n.tr('Закрыть'))
 	close.style = .accent
 	close.on_click = fn [mut dlg] () {
 		dlg.close_with_result(0)
@@ -450,52 +451,84 @@ fn tab_page() &vgui.VBox {
 	return v
 }
 
+// build_lang_row - язык интерфейса: «Как в системе» и языки i18n.langs
+// самоназваниями. Окно строится один раз, поэтому новый язык - после
+// перезапуска; подпись об этом - сразу на выбранном языке.
+fn build_lang_row(mut st State) &vgui.VBox {
+	sys := i18n.system()
+	sys_name := i18n.langs.filter(it.code == sys)[0].name
+	mut items := ['${i18n.tr('Как в системе')} (${sys_name})']
+	items << i18n.langs.map(it.name)
+	mut cb := vgui.combo_box()
+	cb.set_items(items)
+	idx := i18n.langs.map(it.code).index(st.settings.lang)
+	cb.set_selected(idx + 1)
+	mut restart := vgui.label('')
+	restart.visible = false
+	cb.on_change = fn [mut st, mut restart] (i int, _ string) {
+		code := if i <= 0 { '' } else { i18n.langs[i - 1].code }
+		if code == st.settings.lang {
+			return
+		}
+		st.settings.lang = code
+		save_settings(st.settings)
+		shown := if code == '' { i18n.system() } else { code }
+		restart.text = i18n.tr_in(shown, 'Язык сменится после перезапуска программы')
+		restart.visible = shown != i18n.current()
+	}
+	mut v := vgui.create_vbox_fill()
+	v.set_spacing(4)
+	v.add(cb)
+	v.add(restart)
+	return v
+}
+
 // build_iface_tab - вкладки «Интерфейс» (видимость панели инструментов
 // и ленты в окне и в полноэкранном режиме, их стороны) и «Разделы
 // панели» (показывать ли, порядок кнопками вверх/вниз; отдельной
 // вкладкой - иначе окно выше экрана). Ряды разделов создаются один раз,
 // порядок - пересборкой sec_box (sync_settings_ui).
 fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VBox, &vgui.VBox) {
-	mut panel_ck := vgui.checkbox('Показывать панель инструментов (F8)')
+	mut panel_ck := vgui.checkbox(i18n.tr('Показывать панель инструментов (F8)'))
 	panel_ck.on_change = fn [mut st] (v bool) {
 		set_panel_visible(mut st, false, v)
 	}
 	u.panel_ck = panel_ck
 	mut side_cb := vgui.combo_box()
-	side_cb.set_items(panel_side_names)
+	side_cb.set_items(i18n.tr_all(panel_side_names))
 	side_cb.on_change = fn [mut st] (i int, _ string) {
 		set_panel_left(mut st, i == 1)
 	}
 	u.side_cb = side_cb
-	mut strip_ck := vgui.checkbox('Показывать ленту кадров (F6)')
+	mut strip_ck := vgui.checkbox(i18n.tr('Показывать ленту кадров (F6)'))
 	strip_ck.on_change = fn [mut st] (v bool) {
 		set_strip_visible(mut st, false, v)
 	}
 	u.strip_ck = strip_ck
 	mut top_cb := vgui.combo_box()
-	top_cb.set_items(strip_side_names)
+	top_cb.set_items(i18n.tr_all(strip_side_names))
 	top_cb.on_change = fn [mut st] (i int, _ string) {
 		set_strip_top(mut st, i == 1)
 	}
 	u.top_cb = top_cb
-	mut fs_panel := vgui.checkbox('Панель инструментов')
+	mut fs_panel := vgui.checkbox(i18n.tr('Панель инструментов'))
 	fs_panel.on_change = fn [mut st] (v bool) {
 		set_panel_visible(mut st, true, v)
 	}
 	u.fs_panel = fs_panel
-	mut fs_strip := vgui.checkbox('Лента кадров')
+	mut fs_strip := vgui.checkbox(i18n.tr('Лента кадров'))
 	fs_strip.on_change = fn [mut st] (v bool) {
 		set_strip_visible(mut st, true, v)
 	}
 	u.fs_strip = fs_strip
-	side_col := column_width(mut dw, ['Расположение панели', 'Расположение ленты'], 8)
-	mut side_items := panel_side_names.clone()
-	side_items << strip_side_names
+	side_col := column_width(mut dw, [i18n.tr('Расположение панели'), i18n.tr('Расположение ленты')], 8)
+	mut side_items := i18n.tr_all(panel_side_names)
+	side_items << i18n.tr_all(strip_side_names)
 	side_w := column_width(mut dw, side_items, 0) + 2 * side_cb.pad + 24
 
 	for sec in panel_sections {
 		key := sec.key
-		mut ck := vgui.checkbox(sec.title)
+		mut ck := vgui.checkbox(i18n.tr(sec.title))
 		ck.on_change = fn [mut st, key] (v bool) {
 			mut hidden := st.settings.panel_hidden.filter(it != key)
 			if !v {
@@ -534,7 +567,7 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 	mut sec_box := vgui.create_vbox_fill()
 	sec_box.set_spacing(2)
 	u.sec_box = sec_box
-	mut reset := vgui.button('Как было')
+	mut reset := vgui.button(i18n.tr('Как было'))
 	reset.on_click = fn [mut st] () {
 		set_panel_sections(mut st, panel_default_order(), [])
 	}
@@ -543,20 +576,22 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 	reset_row.add(vgui.create_spacer(), flex: 1)
 
 	mut v := tab_page()
-	v.add(caption('Окно'))
+	v.add(caption(i18n.tr('Язык')))
+	v.add(build_lang_row(mut st))
+	v.add(caption(i18n.tr('Окно')))
 	v.add(panel_ck)
-	v.add(labeled('Расположение панели', side_cb, side_col, side_w))
+	v.add(labeled(i18n.tr('Расположение панели'), side_cb, side_col, side_w))
 	v.add(strip_ck)
-	v.add(labeled('Расположение ленты', top_cb, side_col, side_w))
-	u.fs_cap = caption('Полноэкранный режим')
+	v.add(labeled(i18n.tr('Расположение ленты'), top_cb, side_col, side_w))
+	u.fs_cap = caption(i18n.tr('Полноэкранный режим'))
 	v.add(u.fs_cap)
 	u.fs_note = note(mut u, '')
 	v.add(u.fs_note)
 	v.add(fs_panel)
 	v.add(fs_strip)
 	mut secs := tab_page()
-	secs.add(caption('Разделы панели инструментов'))
-	secs.add(note(mut u, 'Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.'))
+	secs.add(caption(i18n.tr('Разделы панели инструментов')))
+	secs.add(note(mut u, i18n.tr('Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.')))
 	secs.add(sec_box)
 	secs.add(reset_row)
 	return v, secs
@@ -622,10 +657,10 @@ fn sync_settings_ui(mut st State) {
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''
 	mut rs := u.rt_state
-	rs.text = if have_rt { 'установлен' } else { 'нет · ${fmt_mb(ai.runtime_file.size)}' }
+	rs.text = if have_rt { i18n.tr('установлен') } else { i18n.trf('нет · {0}', '${fmt_mb(ai.runtime_file.size)}') }
 	mut rb := u.rt_btn
 	rb.enabled = !have_rt && !busy
-	rb.text = if have_rt { 'Готов' } else { 'Скачать' }
+	rb.text = if have_rt { i18n.tr('Готов') } else { i18n.tr('Скачать') }
 	for r in u.rows {
 		info := ai.find_model_info(r.id) or { continue }
 		ok := info.installed(p)
@@ -634,9 +669,9 @@ fn sync_settings_ui(mut st State) {
 		mut s := r.state
 		mut b := r.btn
 		if ok {
-			s.text = 'скачана · ${fmt_mb(info.size())}'
+			s.text = i18n.trf('скачана · {0}', '${fmt_mb(info.size())}')
 			armed := st.del_armed == r.id
-			b.text = if armed { 'Точно?' } else { 'Удалить' }
+			b.text = if armed { i18n.tr('Точно?') } else { i18n.tr('Удалить') }
 			b.style = if armed { .danger } else { .normal }
 			// Пока идёт скачивание или прогон AI - модель может быть в работе
 			b.enabled = !busy && isnil(st.ai_prev) && isnil(st.exp)
@@ -644,12 +679,12 @@ fn sync_settings_ui(mut st State) {
 			// Вместе с моделью докачается и движок, если его нет
 			extra := if have_rt { i64(0) } else { ai.runtime_file.size }
 			s.text = fmt_mb(info.size() + extra)
-			b.text = 'Скачать'
+			b.text = i18n.tr('Скачать')
 			b.style = .normal
 			b.enabled = !busy
 		} else {
-			s.text = 'нет в папке моделей'
-			b.text = 'Скачать'
+			s.text = i18n.tr('нет в папке моделей')
+			b.text = i18n.tr('Скачать')
 			b.style = .normal
 			b.enabled = false
 		}
@@ -662,7 +697,7 @@ fn sync_settings_ui(mut st State) {
 		bar.set_value(if c.total > 0 { f32(f64(c.done) / f64(c.total)) } else { 0 })
 		if !c.cancel {
 			mut t := u.dl_text
-			t.text = 'Скачивание: ${c.what} · ${fmt_mb(c.done)} из ${fmt_mb(c.total)}'
+			t.text = i18n.trf('Скачивание: {0} · {1} из {2}', '${c.what}', '${fmt_mb(c.done)}', '${fmt_mb(c.total)}')
 		}
 	}
 }
@@ -686,13 +721,13 @@ fn delete_model(mut st State, info ai.ModelInfo) {
 	ai.remove_model(st.ai_places, info) or {
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_error('Не удалось удалить ${info.title}: ${err.msg()}')
+			nm.show_error(i18n.trf('Не удалось удалить {0}: {1}', '${info.title}', '${err.msg()}'))
 		}
 	}
 	st.ai_caches.delete(info.id)
 	if !isnil(st.nm) && !info.installed(st.ai_places) {
 		mut nm := st.nm
-		nm.show_info('Модель ${info.title} удалена')
+		nm.show_info(i18n.trf('Модель {0} удалена', '${info.title}'))
 	}
 	sync_settings_ui(mut st)
 	sync_ai_ui(mut st)
@@ -798,11 +833,11 @@ fn dl_take(mut st State, res DlResult) {
 	if !isnil(st.nm) {
 		mut nm := st.nm
 		if res.cancelled {
-			nm.show_warning('Скачивание отменено')
+			nm.show_warning(i18n.tr('Скачивание отменено'))
 		} else if res.err != '' {
-			nm.show_error('Не удалось скачать: ${res.err}')
+			nm.show_error(i18n.trf('Не удалось скачать: {0}', '${res.err}'))
 		} else {
-			nm.show_success('Скачано: ${res.ctl.what}')
+			nm.show_success(i18n.trf('Скачано: {0}', '${res.ctl.what}'))
 		}
 	}
 	sync_settings_ui(mut st)
@@ -811,7 +846,7 @@ fn dl_take(mut st State, res DlResult) {
 
 // fmt_cache_mb - предел кэша кадров в списке настроек
 fn fmt_cache_mb(mb int) string {
-	return if mb < 1024 { '${mb} МБ' } else if mb % 1024 == 0 { '${mb / 1024} ГБ' } else { '${f64(mb) / 1024:.1f} ГБ' }
+	return if mb < 1024 { i18n.trf('{0} МБ', '${mb}') } else if mb % 1024 == 0 { i18n.trf('{0} ГБ', '${mb / 1024}') } else { i18n.trf('{0} ГБ', '${f64(mb) / 1024:.1f}') }
 }
 
 // sync_hk_texts - подписи вкладки «Интерфейс» с текущими сочетаниями
@@ -821,18 +856,18 @@ fn sync_hk_texts(mut u SettingsUi, st &State) {
 		return
 	}
 	mut pck := u.panel_ck
-	pck.text = 'Показывать панель инструментов${hk_paren(st, 'view.panel')}'
+	pck.text = i18n.trf('Показывать панель инструментов{0}', '${hk_paren(st, 'view.panel')}')
 	mut sck := u.strip_ck
-	sck.text = 'Показывать ленту кадров${hk_paren(st, 'view.strip')}'
+	sck.text = i18n.trf('Показывать ленту кадров{0}', '${hk_paren(st, 'view.strip')}')
 	mut cap := u.fs_cap
-	cap.text = 'Полноэкранный режим${hk_paren(st, 'view.full')}'
+	cap.text = i18n.trf('Полноэкранный режим{0}', '${hk_paren(st, 'view.full')}')
 	kp := hk_key(st, 'view.panel')
 	ks := hk_key(st, 'view.strip')
 	keys := [kp, ks].filter(it.len > 0)
 	mut n := u.fs_note
 	n.text = if keys.len > 0 {
-		'Что показывать вокруг снимка; ${keys.join(' и ')} в режиме - то же'
+		i18n.trf('Что показывать вокруг снимка; {0} в режиме - то же', keys.join(i18n.tr(' и ')))
 	} else {
-		'Что показывать вокруг снимка'
+		i18n.tr('Что показывать вокруг снимка')
 	}
 }

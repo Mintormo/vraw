@@ -16,6 +16,7 @@ import pipeline
 import ai
 import bigbuf
 import imgio
+import i18n
 
 // lens_full - коррекция объектива всего кадра на месте: профиль c (nil -
 // без него; виньетирование с силой vign, кадр увеличен в zoom раз - «как
@@ -119,15 +120,15 @@ enum ExportStage {
 
 fn stage_title(s ExportStage) string {
 	return match s {
-		.decode { 'Демозаика (LibRaw)' }
-		.lens { 'Коррекция объектива' }
-		.ai { 'AI-шумодав' }
-		.impulse { 'Импульсный шум' }
-		.denoise { 'Шумодав' }
-		.defringe { 'Ореолы' }
-		.capture { 'Capture-резкость' }
-		.tone { 'Тон и цвет' }
-		.write { 'Запись файла' }
+		.decode { i18n.tr('Демозаика (LibRaw)') }
+		.lens { i18n.tr('Коррекция объектива') }
+		.ai { i18n.tr('AI-шумодав') }
+		.impulse { i18n.tr('Импульсный шум') }
+		.denoise { i18n.tr('Шумодав') }
+		.defringe { i18n.tr('Ореолы') }
+		.capture { i18n.tr('Capture-резкость') }
+		.tone { i18n.tr('Тон и цвет') }
+		.write { i18n.tr('Запись файла') }
 	}
 }
 
@@ -198,7 +199,7 @@ struct ExportCancelled {
 }
 
 fn (e ExportCancelled) msg() string {
-	return 'экспорт отменён'
+	return i18n.tr('экспорт отменён')
 }
 
 // StageProgress - прогресс экспорта: stage(этап, done, total) зовётся в
@@ -292,7 +293,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
 	if e.ai > 0 {
 		if isnil(o.ai_cache) {
-			return error('AI-шумодав недоступен')
+			return error(i18n.tr('AI-шумодав недоступен'))
 		}
 		if !progress.stage(.ai, 0, 0) {
 			return ExportCancelled{}

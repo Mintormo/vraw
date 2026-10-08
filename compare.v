@@ -27,6 +27,7 @@ module main
 import vgui
 import pipeline
 import lens
+import i18n
 
 // Шторка: линия, ручка, подписи
 const ba_line = vgui.Color{255, 255, 255, 230}
@@ -373,7 +374,7 @@ fn set_ba_split(mut st State, on bool) {
 	}
 	if on && st.history.len > 0 && st.crop_mode && !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_info('До/после - после выхода из кадрирования')
+		nm.show_info(i18n.tr('До/после - после выхода из кадрирования'))
 	}
 	ba_refresh(mut st)
 }
@@ -410,7 +411,7 @@ fn set_ba_sbs(mut st State, on bool) {
 	}
 	if on && st.history.len > 0 && st.crop_mode && !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_info('До/после - после выхода из кадрирования')
+		nm.show_info(i18n.tr('До/после - после выхода из кадрирования'))
 	}
 	ba_refresh(mut st)
 }
@@ -438,10 +439,10 @@ fn sync_ba_ui(mut st State) {
 	}
 	mut lb := st.ba_lb
 	lb.text = if st.history.len == 0 {
-		'До: первая запись'
+		i18n.tr('До: первая запись')
 	} else {
 		i := ba_index(st)
-		'До: ${i + 1}. ${st.history[i].name}'
+		i18n.trf('До: {0}. {1}', '${i + 1}', '${st.history[i].name}')
 	}
 }
 
@@ -544,11 +545,11 @@ fn ba_overlay(mut st State, mut ctx vgui.RenderContext) {
 	ly := (if y0 > cv.bounds.y { y0 } else { cv.bounds.y }) + 10
 	lx := if x0 > cv.bounds.x { x0 } else { cv.bounds.x }
 	if st.ba_hold {
-		ba_label(mut ctx, 'До', lx + 10, ly)
+		ba_label(mut ctx, i18n.tr('До'), lx + 10, ly)
 		return
 	}
 	if st.ba_sbs {
-		ba_label(mut ctx, 'После', cv.bounds.x + 10, cv.bounds.y + 10)
+		ba_label(mut ctx, i18n.tr('После'), cv.bounds.x + 10, cv.bounds.y + 10)
 		return
 	}
 	sx, _ := cv.buf_to_screen(f32(ba_split_x(st)), 0)
@@ -560,10 +561,10 @@ fn ba_overlay(mut st State, mut ctx vgui.RenderContext) {
 	ctx.fill_triangle(sx - 6, my, sx - 2, my - 4, sx - 2, my + 4, ba_line_dark)
 	ctx.fill_triangle(sx + 6, my, sx + 2, my - 4, sx + 2, my + 4, ba_line_dark)
 	if sx - lx > 60 {
-		ba_label(mut ctx, 'До', sx - 10 - label_w(ctx, 'До'), ly)
+		ba_label(mut ctx, i18n.tr('До'), sx - 10 - label_w(ctx, i18n.tr('До')), ly)
 	}
 	if x1 - sx > 80 && sx + 80 < cv.bounds.x + cv.bounds.w {
-		ba_label(mut ctx, 'После', sx + 10, ly)
+		ba_label(mut ctx, i18n.tr('После'), sx + 10, ly)
 	}
 }
 
@@ -574,7 +575,7 @@ fn ba_overlay_b(st &State, mut ctx vgui.RenderContext) {
 	}
 	cb := st.cv_b
 	i := ba_index(st)
-	text := if i == 0 { 'До' } else { 'До: ${i + 1}. ${st.history[i].name}' }
+	text := if i == 0 { i18n.tr('До') } else { i18n.trf('До: {0}. {1}', '${i + 1}', '${st.history[i].name}') }
 	ba_label(mut ctx, text, cb.bounds.x + 10, cb.bounds.y + 10)
 }
 

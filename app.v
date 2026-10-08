@@ -20,6 +20,7 @@ import raw
 import lens
 import pipeline
 import ai
+import i18n
 
 const raw_patterns = 'CR3;CR2;CRW;NEF;ARW;DNG;RAF;ORF;RW2;cr3;cr2;crw;nef;arw;dng;raf;orf;rw2'
 
@@ -834,9 +835,9 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		size:     job.size
 	) or {
 		if err is ExportCancelled {
-			report(mut app, on_done, .cancelled, 'Экспорт отменён')
+			report(mut app, on_done, .cancelled, i18n.tr('Экспорт отменён'))
 		} else {
-			report(mut app, on_done, .failed, 'Ошибка проявки: ${err.msg()}')
+			report(mut app, on_done, .failed, i18n.trf('Ошибка проявки: {0}', '${err.msg()}'))
 		}
 		return
 	}
@@ -844,18 +845,18 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		img.free()
 	}
 	if !progress.stage(.write, 0, 0) {
-		report(mut app, on_done, .cancelled, 'Экспорт отменён')
+		report(mut app, on_done, .cancelled, i18n.tr('Экспорт отменён'))
 		return
 	}
 	write_image(job.dst, job.format, img, job.quality, &job.settings) or {
-		report(mut app, on_done, .failed, 'Не удалось сохранить: ${err}')
+		report(mut app, on_done, .failed, i18n.trf('Не удалось сохранить: {0}', '${err}'))
 		return
 	}
 	size_mb := f64(os.file_size(job.dst)) / 1024 / 1024
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	q := if job.format == .jpeg { ', качество ${job.quality}' } else { '' }
-	no_ai := if job.no_ai { ', без AI-шумодава' } else { '' }
-	report(mut app, on_done, .saved, 'Сохранено: ${job.dst} (${job.format.name()}, ${img.width}x${img.height}, ${size_mb:.1f} МБ${q}${no_ai}, ${sec:.1f} с)')
+	q := if job.format == .jpeg { i18n.trf(', качество {0}', '${job.quality}') } else { '' }
+	no_ai := if job.no_ai { i18n.tr(', без AI-шумодава') } else { '' }
+	report(mut app, on_done, .saved, i18n.trf('Сохранено: {0} ({1}, {2}x{3}, {4} МБ{5}{6}, {7} с)', '${job.dst}', '${job.format.name()}', '${img.width}', '${img.height}', '${size_mb:.1f}', '${q}', '${no_ai}', '${sec:.1f}'))
 }
 
 // render_histogram считает и рисует RGB-гистограмму по 8-битному результату
@@ -972,7 +973,7 @@ const lens_no_info = 'Информации нет'
 // найденному профилю (после загрузки кадра, load_done)
 fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
 	if isnil(st.corr) {
-		lens_lb.text = 'профиль объектива не найден'
+		lens_lb.text = i18n.tr('профиль объектива не найден')
 		lens_cb.enabled = false
 	} else {
 		lens_lb.text = st.corr.lens_name
@@ -984,6 +985,16 @@ fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
 // всплывающей подсказкой. Подсказка - отдельный виджет vgui.Tooltip:
 // копится в st.tips, в окно добавляется после корневого контейнера
 // (рисуется поверх всего). Button.tooltip в vgui не рисуется.
+// update_title - заголовок окна: «IMG_0817.CR3 - vraw», без кадра - «vraw»
+// (длинное тире в заголовках vgui нельзя)
+fn update_title(mut st State) {
+	if isnil(st.win) {
+		return
+	}
+	mut w := st.win
+	w.set_title(if st.raw_path == '' { 'vraw' } else { '${os.file_name(st.raw_path)} - vraw' })
+}
+
 fn icon_button(mut st State, icon string, tip string) &vgui.Button {
 	mut b := vgui.button('')
 	b.icon_name = icon
@@ -1008,7 +1019,7 @@ fn reset_button(mut st State, tip string) &vgui.Button {
 // Ширины колонок подписи/значения общие на всю панель - считаются в main
 // через column_width, чтобы колонки рядов были выровнены.
 fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32) &vgui.HBox {
-	mut b := reset_button(mut st, 'Сбросить')
+	mut b := reset_button(mut st, i18n.tr('Сбросить'))
 	b.on_click = fn [mut sl, def] () {
 		sl.set_value(def)
 	}
@@ -1166,7 +1177,7 @@ mut:
 	fmts  &vgui.Label  = unsafe { nil }
 	edge  vgui.Color // цвет края градиента - им же поле вокруг заглушки
 	// подсказка открытия с текущими сочетаниями (hotkeys.v, hk_texts)
-	open_hint string = 'Меню «Файл»: Ctrl+O - файл, Ctrl+Shift+O - папка'
+	open_hint string = i18n.tr('Меню «Файл»: Ctrl+O - файл, Ctrl+Shift+O - папка')
 }
 
 fn make_placeholder(th vgui.Theme) &Placeholder {
@@ -1264,10 +1275,10 @@ fn set_placeholder_text(mut ph Placeholder, folder bool) {
 	mut title := ph.title
 	mut hint := ph.hint
 	if folder {
-		title.text = 'Выберите кадр'
-		hint.text = 'Двойной щелчок по миниатюре в ленте'
+		title.text = i18n.tr('Выберите кадр')
+		hint.text = i18n.tr('Двойной щелчок по миниатюре в ленте')
 	} else {
-		title.text = 'Откройте RAW-файл или папку'
+		title.text = i18n.tr('Откройте RAW-файл или папку')
 		hint.text = ph.open_hint
 	}
 }
@@ -1434,24 +1445,27 @@ fn section(rows []SectionRow) &vgui.VBox {
 fn main() {
 	// Настройки прошлого запуска: тема, фон вокруг снимка, лента
 	settings := load_settings()
+	// Язык - до всего, что пишет текст (окно, State с подписями, потоки)
+	i18n.set(if settings.lang != '' { settings.lang } else { i18n.system() })
+	vgui.set_locale(i18n.current())
 	// Тема приложения (меняется в меню «Вид - Тема»); из неё же -
 	// палитра vraw и цвета заглушки
 	theme := theme_by_key(settings.theme)
 	mut app := vgui.create_app(theme: theme)!
 	// Тема приложения: окно без своей темы получит её в add_window
 	// Размер по умолчанию - золотое сечение: 1440 / 890 ~ 1.618
-	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1440, height: 890)! // = State.work_w
+	mut win := vgui.create_window(title: 'vraw', width: 1440, height: 890)! // = State.work_w
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
 	// второй - самые длинные варианты значений (крайние числа
 	// ползунков). Новая подпись длиннее нынешних просто
 	// расширит колонку - наездов на ползунок не будет.
-	lbl_w := column_width(mut win, ['Экспозиция', 'Тени',
-		'Контраст', 'Сочность', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
-		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
-		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв',
-		'Смешение', 'Баланс', 'Дисторсия', 'ХА: красный', 'ХА: синий', 'Виньетка'], 8)
+	lbl_w := column_width(mut win, [i18n.tr('Экспозиция'), i18n.tr('Тени'),
+		i18n.tr('Контраст'), i18n.tr('Сочность'), i18n.tr('Насыщенность'), i18n.tr('Света'), i18n.tr('Чёрные'), i18n.tr('Средние'), i18n.tr('Белые'),
+		i18n.tr('Импульсный'), i18n.tr('Яркостный'), i18n.tr('Цветовой'), i18n.tr('Ореолы'), i18n.tr('Оранжевый'), i18n.tr('Фиолетовый'), i18n.tr('Пурпурный'), i18n.tr('Сила'),
+		i18n.tr('Режим'), i18n.tr('Температура'), i18n.tr('Оттенок'), i18n.trc('ББ', 'Оттенок'), i18n.tr('Глубина'), i18n.tr('Величина'), i18n.tr('Радиус'), i18n.tr('Порог'), i18n.tr('Маска краёв'),
+		i18n.tr('Смешение'), i18n.tr('Баланс'), i18n.tr('Дисторсия'), i18n.tr('ХА: красный'), i18n.tr('ХА: синий'), i18n.tr('Виньетка')], 8)
 	val_w := column_width(mut win, ['-4.00', '100', '12000 K', '-150', '3.00 px', '360°'], 8)
 
 	mut st := &State{}
@@ -1510,7 +1524,7 @@ fn main() {
 			else {}
 		}
 	}
-	mut hist_tip := vgui.tooltip('Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба')
+	mut hist_tip := vgui.tooltip(i18n.tr('Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба'))
 	hist_tip.attach(hist)
 	st.tips << hist_tip
 
@@ -1665,15 +1679,15 @@ fn main() {
 	// пайплайна. Переключение пересчитывает сырьё из dev_linear (без
 	// LibRaw) в фоне, ~0.6 с + шумодав - окно не замирает.
 	// Подпись под чекбоксом - найденный профиль.
-	mut lens_cb := vgui.checkbox('Коррекция объектива')
+	mut lens_cb := vgui.checkbox(i18n.tr('Коррекция объектива'))
 	lens_cb.checked = true
 	lens_cb.on_change = fn [mut st, mut app] (v bool) {
 		st.edit.lens_corr = v
 		request_prep(mut st, mut app, true)
-		record(mut st, 'lens', 'Коррекция объектива: ${on_off(v)}', false)
+		record(mut st, 'lens', i18n.trf('Коррекция объектива: {0}', '${on_off(v)}'), false)
 	}
 	st.lens_cb = lens_cb
-	mut lens_lb := vgui.label(lens_no_info)
+	mut lens_lb := vgui.label(i18n.tr(lens_no_info))
 	st.secondary_labels << lens_lb
 
 	// «Как JPEG камеры»: тональная кривая и множитель насыщенности,
@@ -1687,8 +1701,8 @@ fn main() {
 
 	// Шумодав и ореолы: в «Сброс» не входят (подготовка сырья, не тон)
 	mut imp := edit_slider(mut st, SliderCfg{
-		label:  'Импульсный'
-		hname:  'Импульсный шум'
+		label:  i18n.tr('Импульсный')
+		hname:  i18n.tr('Импульсный шум')
 		max:    100
 		digits: 0
 		signed: false
@@ -1701,8 +1715,8 @@ fn main() {
 		fx:     prep_fx
 	})
 	mut nrl := edit_slider(mut st, SliderCfg{
-		label:  'Яркостный'
-		hname:  'Шумодав: яркостный'
+		label:  i18n.tr('Яркостный')
+		hname:  i18n.tr('Шумодав: яркостный')
 		max:    100
 		digits: 0
 		signed: false
@@ -1715,8 +1729,8 @@ fn main() {
 		fx:     prep_fx
 	})
 	mut nrc := edit_slider(mut st, SliderCfg{
-		label:  'Цветовой'
-		hname:  'Шумодав: цветовой'
+		label:  i18n.tr('Цветовой')
+		hname:  i18n.tr('Шумодав: цветовой')
 		max:    100
 		digits: 0
 		signed: false
@@ -1729,7 +1743,7 @@ fn main() {
 		fx:     prep_fx
 	})
 	mut df := edit_slider(mut st, SliderCfg{
-		label:  'Ореолы'
+		label:  i18n.tr('Ореолы')
 		max:    100
 		digits: 0
 		signed: false
@@ -1745,7 +1759,7 @@ fn main() {
 	// Тональные ползунки: пайплайн (~60 мс на превью) - по отпусканию,
 	// чтобы драг не подтормаживал; при перетаскивании только подпись.
 	mut exp := edit_slider(mut st, SliderCfg{
-		label: 'Экспозиция'
+		label: i18n.tr('Экспозиция')
 		min:   -4
 		max:   4
 		get:   fn (e &EditState) f32 {
@@ -1757,7 +1771,7 @@ fn main() {
 		fx:    tone_fx
 	})
 	mut sh := edit_slider(mut st, SliderCfg{
-		label: 'Тени'
+		label: i18n.tr('Тени')
 		min:   -4
 		max:   4
 		get:   fn (e &EditState) f32 {
@@ -1769,7 +1783,7 @@ fn main() {
 		fx:    tone_fx
 	})
 	mut con := edit_slider(mut st, SliderCfg{
-		label: 'Контраст'
+		label: i18n.tr('Контраст')
 		min:   -4
 		max:   4
 		get:   fn (e &EditState) f32 {
@@ -1783,7 +1797,7 @@ fn main() {
 	// Чёткость (Clarity, pipeline/clarity.v) - локальный контраст средних
 	// деталей; минус смягчает
 	mut clr := edit_slider(mut st, SliderCfg{
-		label:  'Чёткость'
+		label:  i18n.tr('Чёткость')
 		min:    -100
 		max:    100
 		digits: 0
@@ -1798,7 +1812,7 @@ fn main() {
 	// Текстура (pipeline/texture.v) - средняя детализация: листва, кора,
 	// ткань; минус смягчает (кожа)
 	mut txr := edit_slider(mut st, SliderCfg{
-		label:  'Текстура'
+		label:  i18n.tr('Текстура')
 		min:    -100
 		max:    100
 		digits: 0
@@ -1813,7 +1827,7 @@ fn main() {
 	// Сочность - бережная насыщенность (pipeline.vibrance_pixel): блёклые
 	// цвета сильнее насыщенных, тона кожи защищены
 	mut vib := edit_slider(mut st, SliderCfg{
-		label:  'Сочность'
+		label:  i18n.tr('Сочность')
 		min:    -100
 		max:    100
 		digits: 0
@@ -1826,7 +1840,7 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut sat := edit_slider(mut st, SliderCfg{
-		label:  'Насыщенность'
+		label:  i18n.tr('Насыщенность')
 		max:    4
 		def:    1
 		signed: false
@@ -1843,8 +1857,8 @@ fn main() {
 	// поэтому подъём теней сохраняет локальный контраст и не даёт плоской
 	// картинки, а приглушение светов не серит мелкие блики.
 	mut hlt := edit_slider(mut st, SliderCfg{
-		label:  'Света'
-		hname:  'Тени/Света: света'
+		label:  i18n.tr('Света')
+		hname:  i18n.tr('Тени/Света: света')
 		max:    100
 		digits: 0
 		signed: false
@@ -1857,8 +1871,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut sht := edit_slider(mut st, SliderCfg{
-		label:  'Тени'
-		hname:  'Тени/Света: тени'
+		label:  i18n.tr('Тени')
+		hname:  i18n.tr('Тени/Света: тени')
 		max:    100
 		digits: 0
 		signed: false
@@ -1872,12 +1886,12 @@ fn main() {
 	})
 
 	// Тон-эквалайзер: пять полос по яркости
-	eq_names := ['Чёрные', 'Тени', 'Средние', 'Света', 'Белые']
+	eq_names := [i18n.tr('Чёрные'), i18n.tr('Тени'), i18n.tr('Средние'), i18n.tr('Света'), i18n.tr('Белые')]
 	mut eq_rows := []&vgui.HBox{}
 	for i in 0 .. 5 {
 		mut s := edit_slider(mut st, SliderCfg{
 			label: eq_names[i]
-			hname: 'Эквалайзер: ${eq_names[i]}'
+			hname: i18n.trf('Эквалайзер: {0}', '${eq_names[i]}')
 			min:   -4
 			max:   4
 			get:   fn [i] (e &EditState) f32 {
@@ -1900,7 +1914,7 @@ fn main() {
 		st.edit.curve_pts[st.curve_ch] = ed.points.clone()
 		curves_to_params(mut st)
 		apply_pipeline(mut st, mut cv, mut hist)
-		record(mut st, 'curve${st.curve_ch}', 'Кривая ${curve_names[st.curve_ch]}', false)
+		record(mut st, 'curve${st.curve_ch}', i18n.trf('Кривая {0}', '${curve_names[st.curve_ch]}'), false)
 	}
 	// Обработчик ставится на только что созданную кнопку. НЕ через
 	// `mut b := массив[c]; b.on_click = fn ...` - это ошибка компилятора V:
@@ -1925,17 +1939,17 @@ fn main() {
 		st.curve_btns << b
 		ch_row.add(b, flex: 1)
 	}
-	mut curve_reset := reset_button(mut st, 'Сбросить кривую канала')
+	mut curve_reset := reset_button(mut st, i18n.tr('Сбросить кривую канала'))
 	curve_reset.on_click = fn [mut st, mut cv, mut hist] () {
 		st.edit.curve_pts[st.curve_ch] = identity_curve()
 		curves_to_params(mut st)
 		sync_curve_editor(mut st)
 		apply_pipeline(mut st, mut cv, mut hist)
-		record(mut st, 'curve${st.curve_ch}', 'Кривая ${curve_names[st.curve_ch]}: сброс',
+		record(mut st, 'curve${st.curve_ch}', i18n.trf('Кривая {0}: сброс', '${curve_names[st.curve_ch]}'),
 			false)
 	}
 	ch_row.add(curve_reset)
-	mut curve_hint := vgui.label('Щелчок - точка, правая кнопка - удалить, двойной - сброс')
+	mut curve_hint := vgui.label(i18n.tr('Щелчок - точка, правая кнопка - удалить, двойной - сброс'))
 	st.hint_labels << curve_hint
 	curve_hint.font_size = 12
 	sync_curve_editor(mut st)
@@ -1946,8 +1960,8 @@ fn main() {
 		mut rows := []SectionRow{}
 		for i in 0 .. 8 {
 			mut s := edit_slider(mut st, SliderCfg{
-				label:  hsl_names[i]
-				hname:  'HSL ${hsl_modes[m].to_lower()}: ${hsl_names[i]}'
+				label:  i18n.tr(hsl_names[i])
+				hname:  'HSL ${i18n.tr(hsl_modes[m]).to_lower()}: ${i18n.tr(hsl_names[i])}'
 				min:    -100
 				max:    100
 				digits: 0
@@ -1971,15 +1985,15 @@ fn main() {
 			st.hsl_labels << lb // цвет диапазона, под тему - paint_ui
 			rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w)}
 		}
-		hsl_tabs.add_tab(hsl_modes[m], section(rows))
+		hsl_tabs.add_tab(i18n.tr(hsl_modes[m]), section(rows))
 	}
 
 	// ── Резкость: unsharp mask по люме (pipeline/sharpen.v) - последний
 	// шаг пайплайна, тональный пересчёт по отпусканию. Радиус - в
 	// пикселях полного кадра (на превью половинного размера - вдвое меньше)
 	mut sh_amount := edit_slider(mut st, SliderCfg{
-		label:  'Величина'
-		hname:  'Резкость: величина'
+		label:  i18n.tr('Величина')
+		hname:  i18n.tr('Резкость: величина')
 		max:    150
 		digits: 0
 		signed: false
@@ -1993,8 +2007,8 @@ fn main() {
 		drag_view: .detail
 	})
 	mut sh_radius := edit_slider(mut st, SliderCfg{
-		label:  'Радиус'
-		hname:  'Резкость: радиус'
+		label:  i18n.tr('Радиус')
+		hname:  i18n.tr('Резкость: радиус')
 		min:    0.5
 		max:    3
 		def:    1
@@ -2012,8 +2026,8 @@ fn main() {
 		drag_view: .detail
 	})
 	mut sh_detail := edit_slider(mut st, SliderCfg{
-		label:  'Порог'
-		hname:  'Резкость: порог'
+		label:  i18n.tr('Порог')
+		hname:  i18n.tr('Резкость: порог')
 		max:    100
 		digits: 0
 		signed: false
@@ -2027,8 +2041,8 @@ fn main() {
 		drag_view: .detail
 	})
 	mut sh_mask := edit_slider(mut st, SliderCfg{
-		label:  'Маска краёв'
-		hname:  'Резкость: маска краёв'
+		label:  i18n.tr('Маска краёв')
+		hname:  i18n.tr('Резкость: маска краёв')
 		max:    100
 		digits: 0
 		signed: false
@@ -2042,28 +2056,28 @@ fn main() {
 		drag_view: .mask
 	})
 	// По каналам RGB - правка кадра (история, сайдкар)
-	mut sh_rgb_cb := vgui.checkbox('По каналам RGB')
+	mut sh_rgb_cb := vgui.checkbox(i18n.tr('По каналам RGB'))
 	sh_rgb_cb.on_change = fn [mut st, tone_fx] (v bool) {
 		st.edit.params.sharp.rgb = v
 		tone_fx()
-		record(mut st, 'sharp_rgb', 'Резкость по каналам RGB: ${on_off(v)}', false)
+		record(mut st, 'sharp_rgb', i18n.trf('Резкость по каналам RGB: {0}', '${on_off(v)}'), false)
 	}
 	st.sharp_rgb_cb = sh_rgb_cb
 	// Маска краёв вместо снимка - вид, не правка (в историю не пишется)
-	mut sh_show_cb := vgui.checkbox('Показать маску краёв')
+	mut sh_show_cb := vgui.checkbox(i18n.tr('Показать маску краёв'))
 	sh_show_cb.on_change = fn [mut st, tone_fx] (v bool) {
 		st.sharp_show = v
 		tone_fx()
 	}
-	mut sharp_hint := vgui.label('Оценивать в 100%. Alt при перетаскивании - маска или детали')
+	mut sharp_hint := vgui.label(i18n.tr('Оценивать в 100%. Alt при перетаскивании - маска или детали'))
 	st.hint_labels << sharp_hint
 	sharp_hint.font_size = 12
 	// ── Capture-резкость: деконволюция Ричардсона-Люси по линейному сырью
 	// (pipeline/deconv.v) - подготовка сырья, как шумодав: пересчёт в фоне
 	// по отпусканию (prep_fx)
 	mut dc_amount := edit_slider(mut st, SliderCfg{
-		label:  'Сила'
-		hname:  'Capture-резкость: сила'
+		label:  i18n.tr('Сила')
+		hname:  i18n.tr('Capture-резкость: сила')
 		max:    100
 		digits: 0
 		signed: false
@@ -2076,8 +2090,8 @@ fn main() {
 		fx:     prep_fx
 	})
 	mut dc_radius := edit_slider(mut st, SliderCfg{
-		label:  'Радиус'
-		hname:  'Capture-резкость: радиус'
+		label:  i18n.tr('Радиус')
+		hname:  i18n.tr('Capture-резкость: радиус')
 		min:    0.4
 		max:    1.5
 		def:    0.75
@@ -2094,8 +2108,8 @@ fn main() {
 		fx:     prep_fx
 	})
 	mut dc_contrast := edit_slider(mut st, SliderCfg{
-		label:  'Порог'
-		hname:  'Capture-резкость: порог'
+		label:  i18n.tr('Порог')
+		hname:  i18n.tr('Capture-резкость: порог')
 		max:    100
 		def:    10
 		digits: 0
@@ -2108,18 +2122,18 @@ fn main() {
 		}
 		fx:     prep_fx
 	})
-	mut usm_caption := vgui.label('Нерезкое маскирование')
+	mut usm_caption := vgui.label(i18n.tr('Нерезкое маскирование'))
 	usm_caption.font_style = .bold
-	mut dc_caption := vgui.label('Capture-резкость (деконволюция)')
+	mut dc_caption := vgui.label(i18n.tr('Capture-резкость (деконволюция)'))
 	dc_caption.font_style = .bold
-	mut dc_hint := vgui.label('Возвращает резкость оптики; порог бережёт ровное и шум')
+	mut dc_hint := vgui.label(i18n.tr('Возвращает резкость оптики; порог бережёт ровное и шум'))
 	st.hint_labels << dc_hint
 	dc_hint.font_size = 12
 	// ── Удаление дымки (как в RawTherapee): тёмный канал, pipeline/dehaze.v.
 	// Карта дымки - по сырью кадра, сила и глубина - живые (apply)
 	mut hz_str := edit_slider(mut st, SliderCfg{
-		label:  'Сила'
-		hname:  'Дымка: сила'
+		label:  i18n.tr('Сила')
+		hname:  i18n.tr('Дымка: сила')
 		min:    -100
 		max:    100
 		digits: 0
@@ -2132,8 +2146,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut hz_depth := edit_slider(mut st, SliderCfg{
-		label:  'Глубина'
-		hname:  'Дымка: глубина'
+		label:  i18n.tr('Глубина')
+		hname:  i18n.tr('Дымка: глубина')
 		max:    100
 		def:    25
 		digits: 0
@@ -2147,24 +2161,24 @@ fn main() {
 		fx:     tone_fx
 	})
 	// Карта глубины вместо снимка - вид, не правка (в историю не пишется)
-	mut hz_map_cb := vgui.checkbox('Показать карту глубины')
+	mut hz_map_cb := vgui.checkbox(i18n.tr('Показать карту глубины'))
 	hz_map_cb.on_change = fn [mut st, tone_fx] (v bool) {
 		st.haze_show = v
 		tone_fx()
 	}
-	mut hz_hint := vgui.label('Минус - добавить дымку; глубина - насколько близко к камере')
+	mut hz_hint := vgui.label(i18n.tr('Минус - добавить дымку; глубина - насколько близко к камере'))
 	st.hint_labels << hz_hint
 	hz_hint.font_size = 12
 
 	// ── Эффекты (pipeline/effects.v): виньетка после кадрирования и
 	// плёночное зерно - по тону в конце проявки, живые (apply)
-	mut vig_caption := vgui.label('Виньетка')
+	mut vig_caption := vgui.label(i18n.tr('Виньетка'))
 	vig_caption.font_style = .bold
-	mut grain_caption := vgui.label('Зерно')
+	mut grain_caption := vgui.label(i18n.tr('Зерно'))
 	grain_caption.font_style = .bold
 	mut vig_amt := edit_slider(mut st, SliderCfg{
-		label:  'Величина'
-		hname:  'Виньетка'
+		label:  i18n.tr('Величина')
+		hname:  i18n.tr('Виньетка')
 		min:    -100
 		max:    100
 		def:    0
@@ -2179,8 +2193,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut vig_mid := edit_slider(mut st, SliderCfg{
-		label:  'Средняя точка'
-		hname:  'Виньетка: средняя точка'
+		label:  i18n.tr('Средняя точка')
+		hname:  i18n.tr('Виньетка: средняя точка')
 		min:    0
 		max:    100
 		def:    50
@@ -2195,8 +2209,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut vig_rnd := edit_slider(mut st, SliderCfg{
-		label:  'Округлость'
-		hname:  'Виньетка: округлость'
+		label:  i18n.tr('Округлость')
+		hname:  i18n.tr('Виньетка: округлость')
 		min:    -100
 		max:    100
 		def:    0
@@ -2211,8 +2225,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut vig_fth := edit_slider(mut st, SliderCfg{
-		label:  'Растушёвка'
-		hname:  'Виньетка: растушёвка'
+		label:  i18n.tr('Растушёвка')
+		hname:  i18n.tr('Виньетка: растушёвка')
 		min:    0
 		max:    100
 		def:    50
@@ -2227,8 +2241,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut grn_amt := edit_slider(mut st, SliderCfg{
-		label:  'Величина'
-		hname:  'Зерно'
+		label:  i18n.tr('Величина')
+		hname:  i18n.tr('Зерно')
 		min:    0
 		max:    100
 		def:    0
@@ -2243,8 +2257,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut grn_size := edit_slider(mut st, SliderCfg{
-		label:  'Размер'
-		hname:  'Зерно: размер'
+		label:  i18n.tr('Размер')
+		hname:  i18n.tr('Зерно: размер')
 		min:    0
 		max:    100
 		def:    25
@@ -2259,8 +2273,8 @@ fn main() {
 		fx:     tone_fx
 	})
 	mut grn_rough := edit_slider(mut st, SliderCfg{
-		label:  'Грубость'
-		hname:  'Зерно: грубость'
+		label:  i18n.tr('Грубость')
+		hname:  i18n.tr('Зерно: грубость')
 		min:    0
 		max:    100
 		def:    50
@@ -2274,7 +2288,7 @@ fn main() {
 		}
 		fx:     tone_fx
 	})
-	mut fx_hint := vgui.label('Минус - тёмные края, плюс - светлые; зерно точно видно на 1:1')
+	mut fx_hint := vgui.label(i18n.tr('Минус - тёмные края, плюс - светлые; зерно точно видно на 1:1'))
 	st.hint_labels << fx_hint
 	fx_hint.font_size = 12
 
@@ -2305,21 +2319,21 @@ fn main() {
 	st.hist_lb = hist_lb
 	// «До» для сравнения (compare.v) - выделенная запись: подпись, кнопка
 	// и сброс к первой записи
-	mut ba_lb := vgui.label('До: первая запись')
+	mut ba_lb := vgui.label(i18n.tr('До: первая запись'))
 	st.secondary_labels << ba_lb
 	st.ba_lb = ba_lb
-	mut b_ba := icon_button(mut st, 'git-compare', 'Выделенная запись - «до» для сравнения')
+	mut b_ba := icon_button(mut st, 'git-compare', i18n.tr('Выделенная запись - «до» для сравнения'))
 	mut ba_tip := st.tips.last()
 	st.hk_texts << fn [st, mut ba_tip] () {
 		keys := [hk_key(st, 'view.split'), hk_key(st, 'view.sbs')]
-		mut t := 'Выделенная запись - «до» для сравнения'
+		mut t := i18n.tr('Выделенная запись - «до» для сравнения')
 		if keys[0].len > 0 || keys[1].len > 0 {
 			mut parts := []string{}
 			if keys[0].len > 0 {
-				parts << 'шторка ${keys[0]}'
+				parts << i18n.trf('шторка {0}', '${keys[0]}')
 			}
 			if keys[1].len > 0 {
-				parts << 'бок о бок ${keys[1]}'
+				parts << i18n.trf('бок о бок {0}', '${keys[1]}')
 			}
 			t += ' (${parts.join(', ')})'
 		}
@@ -2331,7 +2345,7 @@ fn main() {
 		}
 		set_ba_ref(mut st, st.hist_lb.selected)
 	}
-	mut b_ba0 := reset_button(mut st, '«До» - первая запись')
+	mut b_ba0 := reset_button(mut st, i18n.tr('«До» - первая запись'))
 	b_ba0.on_click = fn [mut st] () {
 		set_ba_ref(mut st, 0)
 	}
@@ -2340,12 +2354,12 @@ fn main() {
 	ba_row.add(ba_lb, flex: 1)
 	ba_row.add(b_ba)
 	ba_row.add(b_ba0)
-	mut hist_hint := vgui.label('Двойной щелчок - перейти')
+	mut hist_hint := vgui.label(i18n.tr('Двойной щелчок - перейти'))
 	st.hint_labels << hist_hint
 	hist_hint.font_size = 12
 	st.hk_texts << fn [st, mut hist_hint] () {
 		keys := [hk_key(st, 'edit.undo'), hk_key(st, 'edit.redo')].filter(it.len > 0)
-		hist_hint.text = 'Двойной щелчок - перейти' + if keys.len > 0 {
+		hist_hint.text = i18n.tr('Двойной щелчок - перейти') + if keys.len > 0 {
 			', ${keys.join(' / ')}'
 		} else {
 			''
@@ -2369,7 +2383,7 @@ fn main() {
 		// Полный путь: по нему лента ищет кадр и узнаёт смену папки
 		path := os.real_path(path_arg)
 		mut nd := raw.open(path) or {
-			nm.show_error('Ошибка: ${err.msg()}')
+			nm.show_error(i18n.trf('Ошибка: {0}', '${err.msg()}'))
 			return
 		}
 		// Открывают левый кадр сравнения - левым станет уходящий (pair.v)
@@ -2418,7 +2432,7 @@ fn main() {
 		st.look = CamLook{}
 		drop(mut st.cam_view)
 		st.lens_dirty = false
-		lens_lb.text = 'поиск профиля объектива...'
+		lens_lb.text = i18n.tr('поиск профиля объектива...')
 		lens_cb.enabled = false
 		// Цвет камеры - сразу (есть после open): ББ снимков и ползунков
 		set_cam_color(mut st, cam_color(nd.color()))
@@ -2427,10 +2441,11 @@ fn main() {
 		// камерной кривой - заполнит on_load_done)
 		st.side_path = sidecar_path(path)
 		st.raw_path = path
+		update_title(mut st)
 		st.side_err = false
 		st.load_msg = ''
 		side := load_sidecar(st.side_path) or {
-			st.load_msg = '${os.file_name(path)}: правки не прочитаны (${err.msg()})'
+			st.load_msg = i18n.trf('{0}: правки не прочитаны ({1})', '${os.file_name(path)}', '${err.msg()}')
 			LoadedSidecar{}
 		}
 		st.mark = side.mark
@@ -2468,7 +2483,7 @@ fn main() {
 		show_loading(mut st, false)
 		if res.err.len > 0 {
 			free_load(res)
-			lens_lb.text = lens_no_info
+			lens_lb.text = i18n.tr(lens_no_info)
 			show_placeholder(mut cv, mut placeholder)
 			sync_view_bg(mut st)
 			nm.show_error(res.err)
@@ -2578,7 +2593,7 @@ fn main() {
 	mut strip_info := vgui.label('')
 	st.secondary_labels << strip_info
 	st.strip_info = strip_info
-	mut strip_toggle := vgui.button('Свернуть ленту')
+	mut strip_toggle := vgui.button(i18n.tr('Свернуть ленту'))
 	strip_toggle.style = .outline
 	strip_toggle.on_click = fn [mut st] () {
 		set_strip_open(mut st, !st.strip_open)
@@ -2586,7 +2601,7 @@ fn main() {
 	st.strip_toggle = strip_toggle
 	// Фильтр ленты по пометкам отбора (rating.v)
 	mut filter_cb := vgui.combo_box()
-	filter_cb.set_items(filter_names)
+	filter_cb.set_items(i18n.tr_all(filter_names))
 	filter_cb.set_selected(0)
 	filter_cb.on_change = fn [mut st] (i int, _ string) {
 		if i >= 0 && i < filter_keys.len && filter_keys[i] != st.filter {
@@ -2658,7 +2673,7 @@ fn main() {
 	// ── Файл: открыть файл или папку, экспорт (меню «Файл») ──
 	open_file_dialog := fn [mut app, win, open_file] () {
 		path := vgui.native_open_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
-			filter_names:    ['RAW-файлы', 'Все файлы']
+			filter_names:    [i18n.tr('RAW-файлы'), i18n.tr('Все файлы')]
 			filter_patterns: [raw_patterns, '*']
 		})
 		if path.len > 0 {
@@ -2706,6 +2721,7 @@ fn main() {
 		drop(mut st.cam_view)
 		st.side_path = ''
 		st.raw_path = ''
+		update_title(mut st)
 		st.mark = Mark{}
 		set_cam_color(mut st, pipeline.CamColor{})
 		set_wb_pick(mut st, false)
@@ -2714,7 +2730,7 @@ fn main() {
 		st.hist_pos = 0
 		refresh_history(mut st)
 		st.frame_idx = -1
-		lens_lb.text = lens_no_info
+		lens_lb.text = i18n.tr(lens_no_info)
 		lens_cb.enabled = false
 		clear_histogram(mut st, mut hist)
 		show_loading(mut st, false)
@@ -2731,7 +2747,7 @@ fn main() {
 		mut ph := st.holder
 		set_placeholder_text(mut ph, st.frames.len > 0)
 		if st.frames.len == 0 {
-			nm.show_warning('В папке нет RAW-файлов')
+			nm.show_warning(i18n.tr('В папке нет RAW-файлов'))
 		}
 	}
 	open_folder_dialog := fn [mut app, win, open_folder] () {
@@ -2747,7 +2763,7 @@ fn main() {
 	// экспорт идёт, пункт меню не запускает второй, а снова открывает
 	// диалог; ползунки остаются живыми. Прогресс и результат воркер
 	// доставляет через app.post() - цикл vgui спит как обычно.
-	mut m_export := vgui.menu_action('Экспорт...')
+	mut m_export := vgui.menu_action(i18n.tr('Экспорт...'))
 	m_export.shortcut = 'Ctrl+E'
 	st.exp_progress = fn [mut st] (ctl &ExportCtl, stage ExportStage, done int, total int, eta f64) {
 		mut c := unsafe { ctl }
@@ -2786,11 +2802,11 @@ fn main() {
 			return
 		}
 		if st.loading {
-			nm.show_warning('Кадр ещё загружается')
+			nm.show_warning(i18n.tr('Кадр ещё загружается'))
 			return
 		}
 		if isnil(st.dev) && st.frames.len == 0 {
-			nm.show_warning('Сначала откройте RAW-файл или папку')
+			nm.show_warning(i18n.tr('Сначала откройте RAW-файл или папку'))
 			return
 		}
 		show_export_setup(mut st, mut app, win)
@@ -2811,7 +2827,7 @@ fn main() {
 		if edit.ai > 0 {
 			// Модель кадра (которой считано превью) - без неё не проявить
 			ai_cache = ai_cache_for(mut st, edit.ai_model) or {
-				nm.show_error('Экспорт с AI-шумодавом: ${err.msg()}')
+				nm.show_error(i18n.trf('Экспорт с AI-шумодавом: {0}', '${err.msg()}'))
 				return
 			}
 			ai_secs = ai_estimate(st, edit.ai_model, true)
@@ -2871,14 +2887,14 @@ fn main() {
 			m := it.edit.ai_model
 			if m !in caches {
 				caches[m] = ai_cache_for(mut st, m) or {
-					nm.show_error('Экспорт с AI-шумодавом (${os.file_name(it.src)}): ${err.msg()}')
+					nm.show_error(i18n.trf('Экспорт с AI-шумодавом ({0}): {1}', '${os.file_name(it.src)}', '${err.msg()}'))
 					return
 				}
 				secs[m] = ai_estimate(st, m, true)
 			}
 		}
 		if bad.len > 0 {
-			nm.show_warning('Правки не прочитаны, кадр без них: ${bad.join(', ')}')
+			nm.show_warning(i18n.trf('Правки не прочитаны, кадр без них: {0}', '${bad.join(', ')}'))
 		}
 		ctl := &ExportCtl{
 			src:     items[0].src
@@ -2917,14 +2933,14 @@ fn main() {
 		}
 		e.curve_pts = neutral_edit().curve_pts
 		restore_edit(mut st, e, mut cv, mut hist, mut app)
-		record(mut st, 'reset', 'Сброс', false)
+		record(mut st, 'reset', i18n.tr('Сброс'), false)
 	}
 	// «Автотон» (autotone.v): экспозиция, контраст, «Тени/Света», чёрные и
 	// белые по гистограмме кадра - одной записью истории, отменяется Ctrl+Z.
 	// Кнопка в секции «Экспозиция и тон» и «Правка - Автотон».
 	auto_tone_fn := fn [mut st, mut cv, mut hist, mut nm, mut app] () {
 		if st.linear.len == 0 {
-			nm.show_warning('Сначала откройте RAW-файл')
+			nm.show_warning(i18n.tr('Сначала откройте RAW-файл'))
 			return
 		}
 		// По кадру после кадрирования (glin), до первого apply - по всему
@@ -2936,45 +2952,45 @@ fn main() {
 		mut e := st.edit.clone()
 		e.params = t.put(e.params)
 		restore_edit(mut st, e, mut cv, mut hist, mut app)
-		record(mut st, 'autotone', 'Автотон', false)
+		record(mut st, 'autotone', i18n.tr('Автотон'), false)
 	}
 
 	// ── Меню вверху окна ──
 	// Сочетания клавиш пунктов обрабатывает само меню (MenuBar)
 	mut bar := vgui.menu_bar()
-	mut m_open := vgui.menu_action('Открыть файл...')
+	mut m_open := vgui.menu_action(i18n.tr('Открыть файл...'))
 	m_open.shortcut = 'Ctrl+O'
 	m_open.on_click = open_file_dialog
-	mut m_open_dir := vgui.menu_action('Открыть папку...')
+	mut m_open_dir := vgui.menu_action(i18n.tr('Открыть папку...'))
 	m_open_dir.shortcut = 'Ctrl+Shift+O'
 	m_open_dir.on_click = open_folder_dialog
-	mut m_quit := vgui.menu_action('Выход')
+	mut m_quit := vgui.menu_action(i18n.tr('Выход'))
 	m_quit.shortcut = 'Ctrl+Q'
 	m_quit.on_click = fn [mut app] () {
 		app.quit()
 	}
-	bar.add_menu('Файл', [m_open, m_open_dir, vgui.menu_separator(), m_export,
+	bar.add_menu(i18n.tr('Файл'), [m_open, m_open_dir, vgui.menu_separator(), m_export,
 		vgui.menu_separator(), m_quit])
 	// Горячие клавиши - настраиваемые (hotkeys.v): ключи постоянные, по
 	// умолчанию - сочетания, заданные пунктам выше
-	hk_add(mut st, 'file.open', 'Файл', mut m_open)
-	hk_add(mut st, 'file.open_dir', 'Файл', mut m_open_dir)
-	hk_add(mut st, 'file.export', 'Файл', mut m_export)
-	hk_add(mut st, 'file.quit', 'Файл', mut m_quit)
+	hk_add(mut st, 'file.open', i18n.tr('Файл'), mut m_open)
+	hk_add(mut st, 'file.open_dir', i18n.tr('Файл'), mut m_open_dir)
+	hk_add(mut st, 'file.export', i18n.tr('Файл'), mut m_export)
+	hk_add(mut st, 'file.quit', i18n.tr('Файл'), mut m_quit)
 
-	mut m_undo := vgui.menu_action('Отменить')
+	mut m_undo := vgui.menu_action(i18n.tr('Отменить'))
 	m_undo.shortcut = 'Ctrl+Z'
 	m_undo.on_click = undo
-	mut m_redo := vgui.menu_action('Вернуть')
+	mut m_redo := vgui.menu_action(i18n.tr('Вернуть'))
 	m_redo.shortcut = 'Ctrl+Shift+Z'
 	m_redo.on_click = redo
-	mut m_reset := vgui.menu_action('Сбросить тон')
+	mut m_reset := vgui.menu_action(i18n.tr('Сбросить тон'))
 	m_reset.shortcut = 'Ctrl+Shift+R'
 	m_reset.on_click = reset_tone
-	mut m_autotone := vgui.menu_action('Автотон')
+	mut m_autotone := vgui.menu_action(i18n.tr('Автотон'))
 	m_autotone.shortcut = 'Ctrl+U'
 	m_autotone.on_click = auto_tone_fn
-	mut m_settings := vgui.menu_action('Настройки...')
+	mut m_settings := vgui.menu_action(i18n.tr('Настройки...'))
 	m_settings.shortcut = 'Ctrl+P'
 	m_settings.on_click = fn [mut st] () {
 		st.open_settings()
@@ -2987,41 +3003,41 @@ fn main() {
 	st.show_groups = fn [mut st, mut app, win] (preset bool) {
 		show_groups(mut st, mut app, win, preset)
 	}
-	mut m_copy := vgui.menu_action('Копировать настройки...')
+	mut m_copy := vgui.menu_action(i18n.tr('Копировать настройки...'))
 	m_copy.shortcut = 'Ctrl+Shift+C'
 	m_copy.on_click = fn [mut st] () {
 		st.show_groups(false)
 	}
-	mut m_paste := vgui.menu_action('Вставить настройки')
+	mut m_paste := vgui.menu_action(i18n.tr('Вставить настройки'))
 	m_paste.shortcut = 'Ctrl+Shift+V'
 	m_paste.enabled = false
 	m_paste.on_click = fn [mut st] () {
 		if st.clip_groups.len > 0 {
-			st.paste_fn(st.clip, st.clip_groups, 'Вставка настроек')
+			st.paste_fn(st.clip, st.clip_groups, i18n.tr('Вставка настроек'))
 		}
 	}
 	st.m_paste = m_paste
 	// Режим кадрирования (crop.v): R, как в Lightroom
-	mut m_crop := vgui.menu_checkbox('Кадрирование', false)
+	mut m_crop := vgui.menu_checkbox(i18n.tr('Кадрирование'), false)
 	m_crop.shortcut = 'R'
 	m_crop.on_toggle = fn [mut st] (v bool) {
 		set_crop_mode(mut st, v)
 	}
 	st.crop_ui.m_crop = m_crop
 	// Выделить все кадры ленты (для вставки настроек и экспорта)
-	mut m_all := vgui.menu_action('Выделить все кадры')
+	mut m_all := vgui.menu_action(i18n.tr('Выделить все кадры'))
 	m_all.shortcut = 'Ctrl+A'
 	m_all.on_click = fn [mut st] () {
 		select_all_frames(mut st)
 	}
 	// Пипетка баланса белого (wb_ui.v) - как кнопка в разделе «Баланс белого»
-	mut m_pick := vgui.menu_action('Пипетка баланса белого')
+	mut m_pick := vgui.menu_action(i18n.tr('Пипетка баланса белого'))
 	m_pick.shortcut = 'W'
 	m_pick.on_click = fn [mut st] () {
 		set_wb_pick(mut st, !st.wb_pick && st.linear.len > 0)
 	}
 	// Удаление пятен (spots_ui.v): Q, как в Lightroom
-	mut m_spots := vgui.menu_checkbox('Удаление пятен', false)
+	mut m_spots := vgui.menu_checkbox(i18n.tr('Удаление пятен'), false)
 	m_spots.shortcut = 'Q'
 	m_spots.on_toggle = fn [mut st] (v bool) {
 		set_spot_mode(mut st, v)
@@ -3030,25 +3046,25 @@ fn main() {
 		mut su := st.spot_ui
 		su.m_spots = m_spots
 	}
-	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
+	bar.add_menu(i18n.tr('Правка'), [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
 		m_all, vgui.menu_separator(), m_crop, m_spots, m_pick, m_autotone, m_reset, vgui.menu_separator(),
 		m_settings])
-	hk_add(mut st, 'edit.undo', 'Правка', mut m_undo)
-	hk_add(mut st, 'edit.redo', 'Правка', mut m_redo)
-	hk_add(mut st, 'edit.copy', 'Правка', mut m_copy)
-	hk_add(mut st, 'edit.paste', 'Правка', mut m_paste)
-	hk_add(mut st, 'edit.select_all', 'Правка', mut m_all)
-	hk_add(mut st, 'edit.crop', 'Правка', mut m_crop)
-	hk_add(mut st, 'edit.spots', 'Правка', mut m_spots)
-	hk_add(mut st, 'edit.wb_pick', 'Правка', mut m_pick)
-	hk_add(mut st, 'edit.autotone', 'Правка', mut m_autotone)
-	hk_add(mut st, 'edit.reset_tone', 'Правка', mut m_reset)
-	hk_add(mut st, 'edit.settings', 'Правка', mut m_settings)
+	hk_add(mut st, 'edit.undo', i18n.tr('Правка'), mut m_undo)
+	hk_add(mut st, 'edit.redo', i18n.tr('Правка'), mut m_redo)
+	hk_add(mut st, 'edit.copy', i18n.tr('Правка'), mut m_copy)
+	hk_add(mut st, 'edit.paste', i18n.tr('Правка'), mut m_paste)
+	hk_add(mut st, 'edit.select_all', i18n.tr('Правка'), mut m_all)
+	hk_add(mut st, 'edit.crop', i18n.tr('Правка'), mut m_crop)
+	hk_add(mut st, 'edit.spots', i18n.tr('Правка'), mut m_spots)
+	hk_add(mut st, 'edit.wb_pick', i18n.tr('Правка'), mut m_pick)
+	hk_add(mut st, 'edit.autotone', i18n.tr('Правка'), mut m_autotone)
+	hk_add(mut st, 'edit.reset_tone', i18n.tr('Правка'), mut m_reset)
+	hk_add(mut st, 'edit.settings', i18n.tr('Правка'), mut m_settings)
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {
 		files := vgui.native_open_files_dialog(win, mut app, vgui.NativeFileDialogConfig{
-			filter_names:    ['Пресеты vraw', 'Все файлы']
+			filter_names:    [i18n.tr('Пресеты vraw'), i18n.tr('Все файлы')]
 			filter_patterns: ['json', '*']
 		})
 		if files.len == 0 {
@@ -3064,18 +3080,18 @@ fn main() {
 		}
 		rebuild_presets_menu(mut st)
 		if failed.len > 0 {
-			nm.show_error('Не импортировано ${failed.len} из ${files.len}: ${failed[0]}')
+			nm.show_error(i18n.trf('Не импортировано {0} из {1}: {2}', '${failed.len}', '${files.len}', '${failed[0]}'))
 		} else if names.len == 1 {
-			nm.show_success('Пресет «${names[0]}» импортирован')
+			nm.show_success(i18n.trf('Пресет «{0}» импортирован', '${names[0]}'))
 		} else {
-			nm.show_success('Импортировано пресетов: ${names.len}')
+			nm.show_success(i18n.trf('Импортировано пресетов: {0}', '${names.len}'))
 		}
 	}
 	st.export_presets = fn [mut app, win, mut nm] (p Preset) {
 		if p.path.len > 0 {
 			dst := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
 				default_name:    '${p.name}.json'
-				filter_names:    ['Пресеты vraw']
+				filter_names:    [i18n.tr('Пресеты vraw')]
 				filter_patterns: ['json']
 			})
 			if dst.len == 0 {
@@ -3083,10 +3099,10 @@ fn main() {
 			}
 			path := if dst.to_lower().ends_with('.json') { dst } else { dst + '.json' }
 			export_preset(p, path) or {
-				nm.show_error('Пресет не экспортирован: ${err.msg()}')
+				nm.show_error(i18n.trf('Пресет не экспортирован: {0}', '${err.msg()}'))
 				return
 			}
-			nm.show_success('Пресет «${p.name}» сохранён: ${os.file_name(path)}')
+			nm.show_success(i18n.trf('Пресет «{0}» сохранён: {1}', '${p.name}', '${os.file_name(path)}'))
 			return
 		}
 		all := list_presets(presets_dir())
@@ -3095,16 +3111,16 @@ fn main() {
 			return
 		}
 		n := export_presets(all, dir) or {
-			nm.show_error('Пресеты не экспортированы: ${err.msg()}')
+			nm.show_error(i18n.trf('Пресеты не экспортированы: {0}', '${err.msg()}'))
 			return
 		}
-		nm.show_success('Экспортировано пресетов: ${n} в ${os.file_name(dir)}')
+		nm.show_success(i18n.trf('Экспортировано пресетов: {0} в {1}', '${n}', '${os.file_name(dir)}'))
 	}
 	st.show_presets = fn [mut st, mut app, win] () {
 		show_presets(mut st, mut app, win)
 	}
 	st.presets_menu = bar.entries.len
-	bar.add_menu('Пресеты', []&vgui.MenuItem{})
+	bar.add_menu(i18n.tr('Пресеты'), []&vgui.MenuItem{})
 	rebuild_presets_menu(mut st)
 
 	// «Отбор» (rating.v): звёзды и флажки - клавишами, как в Lightroom;
@@ -3112,9 +3128,9 @@ fn main() {
 	mut pick_items := []&vgui.MenuItem{}
 	for r in 0 .. 6 {
 		mut it := vgui.menu_action(if r == 0 {
-			'Без звёзд'
+			i18n.tr('Без звёзд')
 		} else {
-			'${r} ${plural(r, 'звезда', 'звезды', 'звёзд')}'
+			'${r} ${i18n.pl(r, 'звезда|звезды|звёзд')}'
 		})
 		it.shortcut = '${r}'
 		it.on_click = fn [mut st, r] () {
@@ -3123,7 +3139,7 @@ fn main() {
 		pick_items << it
 	}
 	pick_items << vgui.menu_separator()
-	flag_names := ['Отобран', 'Отклонён', 'Снять флажок']
+	flag_names := [i18n.tr('Отобран'), i18n.tr('Отклонён'), i18n.tr('Снять флажок')]
 	flag_keys := ['P', 'X', 'U']
 	flag_vals := [1, -1, 0]
 	for k in 0 .. 3 {
@@ -3136,24 +3152,24 @@ fn main() {
 		pick_items << it
 	}
 	pick_items << vgui.menu_separator()
-	mut m_advance := vgui.menu_checkbox('Переходить к следующему кадру', st.settings.auto_advance)
+	mut m_advance := vgui.menu_checkbox(i18n.tr('Переходить к следующему кадру'), st.settings.auto_advance)
 	m_advance.on_toggle = fn [mut st] (v bool) {
 		st.settings.auto_advance = v
 		save_settings(st.settings)
 	}
 	pick_items << m_advance
-	bar.add_menu('Отбор', pick_items)
+	bar.add_menu(i18n.tr('Отбор'), pick_items)
 	pick_ids := ['pick.rate0', 'pick.rate1', 'pick.rate2', 'pick.rate3', 'pick.rate4',
 		'pick.rate5', '', 'pick.flag_pick', 'pick.flag_reject', 'pick.flag_none', '',
 		'pick.advance']
 	for i, id in pick_ids {
 		if id.len > 0 {
 			mut it := pick_items[i]
-			hk_add(mut st, id, 'Отбор', mut it)
+			hk_add(mut st, id, i18n.tr('Отбор'), mut it)
 		}
 	}
 
-	mut m_fit := vgui.menu_action('Вписать')
+	mut m_fit := vgui.menu_action(i18n.tr('Вписать'))
 	m_fit.shortcut = 'Ctrl+0'
 	m_fit.on_click = fn [mut cv] () {
 		cv.fit_to_view()
@@ -3172,7 +3188,7 @@ fn main() {
 		cv.set_zoom(2.0)
 	}
 	// Увеличение 100% и обратно (щелчок по снимку - то же в точку щелчка)
-	mut m_zoom := vgui.menu_action('100% / вписать')
+	mut m_zoom := vgui.menu_action(i18n.tr('100% / вписать'))
 	m_zoom.shortcut = 'Z'
 	m_zoom.on_click = fn [mut st] () {
 		toggle_zoom_center(mut st)
@@ -3181,32 +3197,32 @@ fn main() {
 		toggle_zoom_center(mut st)
 	})
 	// До/после (compare.v): шторка - Y, весь снимок «до» - пока зажата «\»
-	mut m_split := vgui.menu_checkbox('До/после: шторка', false)
+	mut m_split := vgui.menu_checkbox(i18n.tr('До/после: шторка'), false)
 	m_split.shortcut = 'Y'
 	m_split.on_toggle = fn [mut st] (v bool) {
 		set_ba_split(mut st, v)
 	}
 	st.m_split = m_split
-	mut m_sbs := vgui.menu_checkbox('До/после: бок о бок', false)
+	mut m_sbs := vgui.menu_checkbox(i18n.tr('До/после: бок о бок'), false)
 	m_sbs.shortcut = 'Shift+Y'
 	m_sbs.on_toggle = fn [mut st] (v bool) {
 		set_ba_sbs(mut st, v)
 	}
 	st.m_sbs = m_sbs
 	// Сравнение двух кадров (pair.v): C, как в Lightroom
-	mut m_pair := vgui.menu_checkbox('Сравнить с выделенным', false)
+	mut m_pair := vgui.menu_checkbox(i18n.tr('Сравнить с выделенным'), false)
 	m_pair.shortcut = 'C'
 	m_pair.on_toggle = fn [mut st] (v bool) {
 		set_pair(mut st, v)
 	}
 	st.m_pair = m_pair
-	mut m_swap := vgui.menu_action('Сравнение: поменять местами')
+	mut m_swap := vgui.menu_action(i18n.tr('Сравнение: поменять местами'))
 	m_swap.shortcut = 'Shift+C'
 	m_swap.on_click = fn [mut st] () {
 		pair_swap(mut st)
 	}
 	// JPEG камеры вместо проявки (camjpeg.v)
-	mut m_jpeg := vgui.menu_checkbox('JPEG камеры', false)
+	mut m_jpeg := vgui.menu_checkbox(i18n.tr('JPEG камеры'), false)
 	m_jpeg.shortcut = 'K'
 	m_jpeg.on_toggle = fn [mut st] (v bool) {
 		set_jpeg_show(mut st, v)
@@ -3214,44 +3230,44 @@ fn main() {
 	st.m_jpeg = m_jpeg
 	// Раскладка окна (panel.v): лента и панель скрываются целиком (F6/F8,
 	// как в Lightroom), панель - справа или слева
-	mut m_strip := vgui.menu_checkbox('Лента кадров', !st.settings.no_strip)
+	mut m_strip := vgui.menu_checkbox(i18n.tr('Лента кадров'), !st.settings.no_strip)
 	m_strip.shortcut = 'F6'
 	m_strip.on_toggle = fn [mut st] (v bool) {
 		set_strip_visible(mut st, st.fullscreen, v)
 	}
 	st.m_strip = m_strip
-	mut m_panel := vgui.menu_checkbox('Панель инструментов', !st.settings.no_panel)
+	mut m_panel := vgui.menu_checkbox(i18n.tr('Панель инструментов'), !st.settings.no_panel)
 	m_panel.shortcut = 'F8'
 	m_panel.on_toggle = fn [mut st] (v bool) {
 		set_panel_visible(mut st, st.fullscreen, v)
 	}
 	st.m_panel = m_panel
-	mut m_left := vgui.menu_checkbox('Панель слева', st.settings.panel_left)
+	mut m_left := vgui.menu_checkbox(i18n.tr('Панель слева'), st.settings.panel_left)
 	m_left.on_toggle = fn [mut st] (v bool) {
 		set_panel_left(mut st, v)
 	}
 	st.m_left = m_left
 	// Полноэкранный режим: F, выход - F или Esc (как в Lightroom)
-	mut m_full := vgui.menu_checkbox('Полноэкранный режим', false)
+	mut m_full := vgui.menu_checkbox(i18n.tr('Полноэкранный режим'), false)
 	m_full.shortcut = 'F'
 	m_full.on_toggle = fn [mut st] (v bool) {
 		set_fullscreen(mut st, v)
 	}
 	st.m_full = m_full
-	mut m_top := vgui.menu_checkbox('Лента сверху', st.settings.strip_top)
+	mut m_top := vgui.menu_checkbox(i18n.tr('Лента сверху'), st.settings.strip_top)
 	m_top.on_toggle = fn [mut st] (v bool) {
 		set_strip_top(mut st, v)
 	}
 	st.m_top = m_top
 	// Пересветы и провалы (clipping.v): J - оба сразу, как в Lightroom
-	mut m_clipwarn := vgui.menu_checkbox('Пересветы и провалы', false)
+	mut m_clipwarn := vgui.menu_checkbox(i18n.tr('Пересветы и провалы'), false)
 	m_clipwarn.shortcut = 'J'
 	m_clipwarn.on_toggle = fn [mut st] (v bool) {
 		set_clip_warn(mut st, v, v)
 	}
 	st.m_clipwarn = m_clipwarn
 	// Заливка маски выделенного градиентного фильтра (masks.v)
-	mut m_mask := vgui.menu_checkbox('Маска фильтра', false)
+	mut m_mask := vgui.menu_checkbox(i18n.tr('Маска фильтра'), false)
 	m_mask.shortcut = 'O'
 	m_mask.on_toggle = fn [mut st] (v bool) {
 		set_mask_show(mut st, v)
@@ -3259,9 +3275,9 @@ fn main() {
 	st.mask_ui.m_show = m_mask
 	// Фон вокруг снимка: пункты-флажки, работают как переключатель
 	// (отмечен ровно один - set_viewer_bg)
-	mut m_bg := vgui.menu_submenu('Фон вокруг снимка')
+	mut m_bg := vgui.menu_submenu(i18n.tr('Фон вокруг снимка'))
 	for i in 0 .. bg_keys.len {
-		mut it := vgui.menu_checkbox(bg_names[i], bg_keys[i] == st.settings.viewer_bg)
+		mut it := vgui.menu_checkbox(i18n.tr(bg_names[i]), bg_keys[i] == st.settings.viewer_bg)
 		it.on_toggle = fn [mut st, i] (v bool) {
 			set_viewer_bg(mut st, i)
 		}
@@ -3269,16 +3285,16 @@ fn main() {
 		m_bg.add(it)
 	}
 	// Тема оформления: все темы vgui, пункты-флажки как переключатель
-	mut m_themes := vgui.menu_submenu('Тема')
+	mut m_themes := vgui.menu_submenu(i18n.tr('Тема'))
 	for i in 0 .. theme_keys.len {
-		mut it := vgui.menu_checkbox(theme_names[i], theme_keys[i] == st.settings.theme)
+		mut it := vgui.menu_checkbox(i18n.tr(theme_names[i]), theme_keys[i] == st.settings.theme)
 		it.on_toggle = fn [mut st, mut app, i] (v bool) {
 			apply_theme(mut st, mut app, i)
 		}
 		st.m_theme << it
 		m_themes.add(it)
 	}
-	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
+	bar.add_menu(i18n.tr('Вид'), [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
 		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, vgui.menu_separator(), m_full, m_strip, m_top, m_panel, m_left, m_bg, m_themes])
 	view_ids := ['view.fit', 'view.z50', 'view.z100', 'view.z200', 'view.zoom', 'view.split',
 		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.full',
@@ -3287,36 +3303,36 @@ fn main() {
 		m_clipwarn, m_mask, m_full, m_strip, m_top, m_panel, m_left]
 	for i, id in view_ids {
 		mut it := view_items[i]
-		hk_add(mut st, id, 'Вид', mut it)
+		hk_add(mut st, id, i18n.tr('Вид'), mut it)
 	}
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
-	mut b_autotone := vgui.button('Автотон')
+	mut b_autotone := vgui.button(i18n.tr('Автотон'))
 	b_autotone.icon_name = 'wand-sparkles'
 	b_autotone.icon_size = 15
 	b_autotone.on_click = auto_tone_fn
-	mut at_tip := vgui.tooltip('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме')
+	mut at_tip := vgui.tooltip(i18n.tr('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме'))
 	at_tip.attach(b_autotone)
 	st.tips << at_tip
 	st.hk_texts << fn [st, mut at_tip] () {
-		at_tip.text = 'Экспозиция, контраст, тени/света, чёрные и белые по гистограмме${hk_paren(st,
-			'edit.autotone')}'
+		at_tip.text = i18n.tr('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме') +
+			hk_paren(st, 'edit.autotone')
 	}
 	st.hk_texts << fn [mut st, mut ph] () {
 		ko := hk_key(st, 'file.open')
 		kd := hk_key(st, 'file.open_dir')
 		mut parts := []string{}
 		if ko.len > 0 {
-			parts << '${ko} - файл'
+			parts << i18n.trf('{0} - файл', '${ko}')
 		}
 		if kd.len > 0 {
-			parts << '${kd} - папка'
+			parts << i18n.trf('{0} - папка', '${kd}')
 		}
 		ph.open_hint = if parts.len > 0 {
-			'Меню «Файл»: ${parts.join(', ')}'
+			i18n.trf('Меню «Файл»: {0}', '${parts.join(', ')}')
 		} else {
-			'Меню «Файл» - открыть файл или папку'
+			i18n.tr('Меню «Файл» - открыть файл или папку')
 		}
 		set_placeholder_text(mut ph, st.frames.len > 0)
 	}
@@ -3350,8 +3366,8 @@ fn main() {
 	// обычная настройка кадра (история, сайдкар): смешение с результатом
 	// модели в подготовке сырья, мгновенно - модель не пересчитывается.
 	mut ai_str := edit_slider(mut st, SliderCfg{
-		label:  'Сила'
-		hname:  'AI-шумодав: сила'
+		label:  i18n.tr('Сила')
+		hname:  i18n.tr('AI-шумодав: сила')
 		min:    1
 		max:    100
 		def:    100
@@ -3366,9 +3382,9 @@ fn main() {
 		fx:     prep_fx
 	})
 	ai_block := build_ai_block(mut st, mut app, mut ai_str, lbl_w, val_w)
-	mut ai_caption := vgui.label('Нейросеть')
+	mut ai_caption := vgui.label(i18n.tr('Нейросеть'))
 	ai_caption.font_style = .bold
-	mut classic_caption := vgui.label('Классический')
+	mut classic_caption := vgui.label(i18n.tr('Классический'))
 	classic_caption.font_style = .bold
 	// Гистограмма и кнопки файлов закреплены сверху, кнопки вида - снизу;
 	// всё остальное (чекбоксы и ползунки) прокручивается в ScrollBox
@@ -3555,6 +3571,7 @@ fn main() {
 	st.root = root
 	st.menu = bar
 	st.win = win
+	update_title(mut st)
 	// Сочетания меню - и в полноэкранном режиме, где полоса скрыта
 	bar.keys_when_hidden = true
 	layout_work(mut st)

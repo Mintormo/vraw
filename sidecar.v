@@ -15,6 +15,7 @@ import json2
 import vgui
 import pipeline
 import lens
+import i18n
 
 const sidecar_ext = '.vraw.json'
 const sidecar_version = 1
@@ -417,16 +418,16 @@ fn (s SideState) validate() ! {
 		|| s.nr.len != 4 || s.curves.len != 4 || (s.crop.len != 0 && s.crop.len != 4)
 		|| (s.grade.len != 0 && s.grade.len != 3 * pipeline.grade_zones)
 		|| (s.bw_mix.len != 0 && s.bw_mix.len != 8) {
-		return error('неверный размер массивов настроек')
+		return error(i18n.tr('неверный размер массивов настроек'))
 	}
 	// С допуском: доли у края кадра - 1 ± погрешность f32
 	if s.crop.len == 4 && !(s.crop[0] >= -0.001 && s.crop[0] < s.crop[2] && s.crop[2] <= 1.001
 		&& s.crop[1] >= -0.001 && s.crop[1] < s.crop[3] && s.crop[3] <= 1.001) {
-		return error('неверная рамка кадрирования')
+		return error(i18n.tr('неверная рамка кадрирования'))
 	}
 	for c in s.curves {
 		if c.len < 2 {
-			return error('в кривой меньше двух точек')
+			return error(i18n.tr('в кривой меньше двух точек'))
 		}
 	}
 }
@@ -706,15 +707,15 @@ struct LoadedSidecar {
 // decode_sidecar - сайдкар из JSON с проверкой: чужой файл, новая
 // версия, испорченная история или массивы - ошибка
 fn decode_sidecar(text string) !LoadedSidecar {
-	f := json2.decode[SideFile](text) or { return error('не JSON сайдкара vraw') }
+	f := json2.decode[SideFile](text) or { return error(i18n.tr('не JSON сайдкара vraw')) }
 	if f.app != 'vraw' {
-		return error('не сайдкар vraw')
+		return error(i18n.tr('не сайдкар vraw'))
 	}
 	if f.version > sidecar_version {
-		return error('версия ${f.version} новее программы')
+		return error(i18n.trf('версия {0} новее программы', '${f.version}'))
 	}
 	if f.history.len == 0 || f.current < 0 || f.current >= f.history.len {
-		return error('пустая или испорченная история')
+		return error(i18n.tr('пустая или испорченная история'))
 	}
 	mut hs := []HistEntry{}
 	for h in f.history {
@@ -810,13 +811,13 @@ fn read_side_head(raw_path string) SideHead {
 // не перезаписывается
 fn write_mark(raw_path string, mark Mark) ! {
 	side := sidecar_path(raw_path)
-	loaded := load_sidecar(side) or { return error('сайдкар не прочитан (${err.msg()})') }
+	loaded := load_sidecar(side) or { return error(i18n.trf('сайдкар не прочитан ({0})', '${err.msg()}')) }
 	if loaded.history.len == 0 {
 		if mark == Mark{} {
 			return // сайдкара нет и пометки нет - писать нечего
 		}
 		write_atomic(side, encode_history([HistEntry{
-			name:  'Открыт файл'
+			name:  i18n.tr('Открыт файл')
 			state: neutral_edit()
 		}], 0, mark))!
 		return
@@ -878,7 +879,7 @@ fn sidecar_error(mut st State, err IError) {
 	st.side_err = true
 	if !isnil(st.nm) {
 		mut nm := st.nm
-		nm.show_warning('Правки не сохранены рядом с RAW: ${err.msg()}')
+		nm.show_warning(i18n.trf('Правки не сохранены рядом с RAW: {0}', '${err.msg()}'))
 	}
 }
 

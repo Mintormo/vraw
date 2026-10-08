@@ -5,22 +5,23 @@ module main
 // HSL). Сдвиг ползунка микшера в цветном режиме сам включает Ч/Б (как в
 // Lightroom) - иначе движение ползунка ничего бы не меняло.
 import vgui
+import i18n
 
 fn bw_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 	tone_fx := st.tone_fx
-	mut cb := vgui.checkbox('Включить')
+	mut cb := vgui.checkbox(i18n.tr('Включить'))
 	cb.on_change = fn [mut st, tone_fx] (v bool) {
 		st.edit.params.bw = v
 		tone_fx()
-		record(mut st, 'bw', 'Чёрно-белое: ${on_off(v)}', false)
+		record(mut st, 'bw', i18n.trf('Чёрно-белое: {0}', '${on_off(v)}'), false)
 	}
 	st.bw_cb = cb
 	mut rows := []SectionRow{}
 	rows << SectionRow{cb}
 	for i in 0 .. 8 {
 		mut s := edit_slider(mut st, SliderCfg{
-			label:  hsl_names[i]
-			hname:  'Ч/Б: ${hsl_names[i]}'
+			label:  i18n.tr(hsl_names[i])
+			hname:  i18n.trf('Ч/Б: {0}', i18n.tr(hsl_names[i]))
 			min:    -100
 			max:    100
 			digits: 0
@@ -40,7 +41,7 @@ fn bw_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 		st.hsl_labels << lb // цвет диапазона, под тему - paint_ui
 		rows << SectionRow{edit_row(mut st, mut s, lbl_w, val_w)}
 	}
-	mut hint := vgui.label('Яркость цветов кадра в сером. Насыщенность, сочность и HSL в Ч/Б не действуют')
+	mut hint := vgui.label(i18n.tr('Яркость цветов кадра в сером. Насыщенность, сочность и HSL в Ч/Б не действуют'))
 	hint.font_size = 12
 	hint.wrap = true
 	st.hint_labels << hint

@@ -15,6 +15,7 @@ module main
 import math
 import vgui
 import pipeline
+import i18n
 
 const grade_wheel_h = 168 // высота буфера круга, px
 const grade_wheel_r = f32(78) // радиус круга, px
@@ -115,7 +116,7 @@ fn (mut w GradeWheel) stroke(phase int, x int, y int) {
 		w.drag = false
 		st.tone_fx()
 		z := st.edit.params.grade.zones[w.zone]
-		key := 'Цветокоррекция: ${grade_hist_names[w.zone]}'
+		key := i18n.trf('Цветокоррекция: {0}', i18n.tr(grade_hist_names[w.zone]))
 		record(mut st, key, '${key} ${int(z.hue)}°, ${int(z.sat)}', false)
 		return
 	}
@@ -200,10 +201,10 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 	mut tabs := vgui.tab_box()
 	for z in 0 .. pipeline.grade_zones {
 		mut w := make_grade_wheel(mut st, z)
-		hn := 'Цветокоррекция ${grade_hist_names[z]}'
+		hn := i18n.trf('Цветокоррекция {0}', i18n.tr(grade_hist_names[z]))
 		mut hue := edit_slider(mut st, SliderCfg{
-			label:  'Оттенок'
-			hname:  '${hn}: оттенок'
+			label:  i18n.tr('Оттенок')
+			hname:  i18n.trf('{0}: оттенок', '${hn}')
 			max:    360
 			digits: 0
 			signed: false
@@ -220,8 +221,8 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 			fx:     tone_fx
 		})
 		mut sat := edit_slider(mut st, SliderCfg{
-			label:  'Насыщенность'
-			hname:  '${hn}: насыщенность'
+			label:  i18n.tr('Насыщенность')
+			hname:  i18n.trf('{0}: насыщенность', '${hn}')
 			max:    100
 			digits: 0
 			signed: false
@@ -235,8 +236,8 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 			fx:     tone_fx
 		})
 		mut lum := edit_slider(mut st, SliderCfg{
-			label:  'Яркость'
-			hname:  '${hn}: яркость'
+			label:  i18n.tr('Яркость')
+			hname:  i18n.trf('{0}: яркость', '${hn}')
 			min:    -100
 			max:    100
 			digits: 0
@@ -250,7 +251,7 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 		})
 		w.hue = hue.sl
 		w.sat = sat.sl
-		tabs.add_tab(pipeline.grade_names[z], section([
+		tabs.add_tab(i18n.tr(pipeline.grade_names[z]), section([
 			SectionRow{w.cv},
 			SectionRow{edit_row(mut st, mut hue, lbl_w, val_w)},
 			SectionRow{edit_row(mut st, mut sat, lbl_w, val_w)},
@@ -258,8 +259,8 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 		]))
 	}
 	mut blend := edit_slider(mut st, SliderCfg{
-		label:  'Смешение'
-		hname:  'Цветокоррекция: смешение'
+		label:  i18n.tr('Смешение')
+		hname:  i18n.tr('Цветокоррекция: смешение')
 		max:    100
 		def:    50
 		digits: 0
@@ -273,8 +274,8 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 		fx:     tone_fx
 	})
 	mut bal := edit_slider(mut st, SliderCfg{
-		label:  'Баланс'
-		hname:  'Цветокоррекция: баланс'
+		label:  i18n.tr('Баланс')
+		hname:  i18n.tr('Цветокоррекция: баланс')
 		min:    -100
 		max:    100
 		digits: 0
@@ -286,7 +287,7 @@ fn grade_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 		}
 		fx:     tone_fx
 	})
-	mut hint := vgui.label('Круг: угол - оттенок, от центра - насыщенность')
+	mut hint := vgui.label(i18n.tr('Круг: угол - оттенок, от центра - насыщенность'))
 	st.hint_labels << hint
 	hint.font_size = 12
 	return section([

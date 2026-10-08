@@ -13,6 +13,7 @@ import time
 import vgui
 import pipeline
 import lens
+import i18n
 
 // EditState - снимок всех настроек правки кадра. Из него восстанавливается
 // и GUI (ползунки, чекбоксы, точки кривых), и проявка (превью, сохранение).
@@ -112,7 +113,7 @@ fn fmt_signed(v f32, digits int) string {
 }
 
 fn on_off(v bool) string {
-	return if v { 'вкл' } else { 'выкл' }
+	return if v { i18n.tr('вкл') } else { i18n.tr('выкл') }
 }
 
 // record добавляет в историю завершённую правку (текущий st.edit).
@@ -155,7 +156,7 @@ fn record(mut st State, key string, name string, merge bool) {
 // start_history - новая история файла: одна запись «Открыт файл»
 fn start_history(mut st State) {
 	st.history = [HistEntry{
-		name:  'Открыт файл'
+		name:  i18n.tr('Открыт файл')
 		state: st.edit.clone()
 	}]
 	st.hist_pos = 0
@@ -180,7 +181,7 @@ fn refresh_history(mut st State) {
 	bi := ba_index(st)
 	for i, e in st.history {
 		// Запись «до» сравнения (compare.v), если выбрана не первая
-		tag := if i == bi && bi > 0 { '  · до' } else { '' }
+		tag := if i == bi && bi > 0 { i18n.tr('  · до') } else { '' }
 		mut l := vgui.label('${i + 1}. ${e.name}${tag}')
 		l.color = if i == st.hist_pos {
 			st.pal.text
