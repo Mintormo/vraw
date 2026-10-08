@@ -41,6 +41,7 @@ struct SideState {
 	curves        [][]vgui.CurvePoint // точки кривых RGB, R, G, B
 	lens_corr     bool
 	use_curve     bool
+	profile       string // стиль проявки (в старых файлах нет - без стиля)
 	nr            []f32 // импульсный, яркостный, цветовой, ореолы
 	ai            f32   // AI-шумодав 0..100 (в старых файлах нет - 0)
 	ai_model      string // модель AI (id из ai.models)
@@ -427,6 +428,7 @@ fn side_state(e EditState) SideState {
 		curves:        e.curve_pts.map(it.clone())
 		lens_corr:     e.lens_corr
 		use_curve:     e.use_curve
+		profile:       e.profile
 		nr:            e.nr[..].clone()
 		ai:            e.ai
 		ai_model:      e.ai_model
@@ -562,6 +564,7 @@ fn edit_state(s SideState) !EditState {
 		}
 		lens_corr: s.lens_corr
 		use_curve: s.use_curve
+		profile:   if s.profile in pipeline.style_keys { s.profile } else { '' }
 		ai:        s.ai
 		ai_model:  s.ai_model
 		wb_mode:   s.wb_mode
@@ -832,6 +835,7 @@ fn with_derived(e EditState, look CamLook, cam pipeline.CamColor) EditState {
 	d.params.cam_sat = if e.use_curve && look.curve.len > 0 { look.sat } else { f32(1) }
 	d.params.cam_hue = if e.use_curve && look.curve.len > 0 { look.hue.clone() } else { []f32{} }
 	d.params.cam_hsat = if e.use_curve && look.curve.len > 0 { look.hsat.clone() } else { []f32{} }
+	d.params.style = pipeline.style_by_key(e.profile)
 	d.vign = look.vign
 	d.lens_zoom = look.zoom
 	d.params.tc_rgb = tone_lut(e.curve_pts[0])

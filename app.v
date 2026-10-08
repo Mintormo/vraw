@@ -76,7 +76,7 @@ mut:
 	// Виджеты, которые выставляет откат истории (set_edit)
 	binds   []SliderBind
 	lens_cb &vgui.CheckBox = unsafe { nil }
-	crv_cb  &vgui.CheckBox = unsafe { nil }
+	prof_cb &vgui.ComboBox = unsafe { nil } // «Профиль» (profile.v)
 	hist_lb &vgui.ListBox  = unsafe { nil }
 	nm      &vgui.NotificationManager = unsafe { nil }
 	// Сайдкар правок (sidecar.v): путь (пусто - не писать), ошибка записи
@@ -1638,15 +1638,8 @@ fn main() {
 	// сидит в flut, насыщенность - множитель, поэтому переключение -
 	// мгновенное (обычный apply, перепроявка не нужна). Ползунок
 	// «Насыщенность» - относительно камерной (1.00 - как у камеры).
-	mut crv_cb := vgui.checkbox('Как JPEG камеры (тон и цвет)')
-	crv_cb.checked = true
-	crv_cb.on_change = fn [mut st, mut cv, mut hist] (v bool) {
-		st.edit.use_curve = v
-		st.edit = with_derived(st.edit, st.look, st.cam)
-		apply_pipeline(mut st, mut cv, mut hist)
-		record(mut st, 'camcurve', 'Как JPEG камеры: ${on_off(v)}', false)
-	}
-	st.crv_cb = crv_cb
+	// Профиль проявки (profile.v): нейтральный, как JPEG камеры, стили
+	prof_row := profile_row(mut st, lbl_w)
 
 	// Шумодав и ореолы: в «Сброс» не входят (подготовка сырья, не тон)
 	mut imp := edit_slider(mut st, SliderCfg{
@@ -2395,7 +2388,7 @@ fn main() {
 
 	// Итог загрузки: хендлы и буферы - в State, затем досчитать то, что
 	// изменили за время загрузки (как restore_edit), и apply
-	st.on_load_done = fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut crv_cb, mut placeholder] (res LoadResult) {
+	st.on_load_done = fn [mut st, mut cv, mut hist, mut nm, mut app, mut lens_cb, mut lens_lb, mut placeholder] (res LoadResult) {
 		if res.gen != st.file_gen {
 			free_load(res) // отменённая загрузка прежнего кадра
 			return
@@ -2444,7 +2437,6 @@ fn main() {
 		st.look = res.look
 		drop(mut st.cam_view)
 		st.cam_view = res.cam_view
-		crv_cb.enabled = st.look.curve.len > 0
 		// Производные поля снимков - по камерной кривой этого кадра
 		st.edit = with_derived(st.edit, st.look, st.cam)
 		st.history = st.history.map(HistEntry{
@@ -3227,7 +3219,7 @@ fn main() {
 	panel_add(mut st, 'lens', section([
 		SectionRow{lens_cb},
 		SectionRow{lens_lb},
-		SectionRow{crv_cb},
+		SectionRow{prof_row},
 	]))
 	panel_add(mut st, 'crop', section(crop_rows))
 	panel_add(mut st, 'wb', section(wb_rows))

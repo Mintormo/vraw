@@ -42,7 +42,6 @@ fn new_state() (&State, &vgui.Slider, &vgui.Slider) {
 	})
 	st.hist_lb = vgui.list_box()
 	st.lens_cb = vgui.checkbox('')
-	st.crv_cb = vgui.checkbox('')
 	start_history(mut st)
 	return st, exp.sl, nrl.sl
 }
@@ -447,6 +446,7 @@ fn test_sidecar_wb_sharp_fields() {
 	st.edit.params.grade.blend = 0
 	st.edit.params.grade.balance = -25
 	st.edit.params.bw = true
+	st.edit.profile = 'landscape'
 	st.edit.params.bw_mix[5] = -60
 	st.edit.params.bw_mix[0] = 25
 	st.edit.params.sharp = pipeline.Sharpen{
@@ -475,6 +475,7 @@ fn test_sidecar_wb_sharp_fields() {
 	// Смешение 0 у включённой цветокоррекции - не умолчание
 	assert e.params.grade == st.edit.params.grade
 	assert e.params.bw && e.params.bw_mix == st.edit.params.bw_mix
+	assert e.profile == 'landscape'
 	assert e.params.sharp.rgb && e.params.sharp.dc_amount == 70
 	assert e.params.sharp.dc_radius == f32(1.1) && e.params.sharp.dc_contrast == 0
 	// Старый файл: полей нет (чужие ключи json2 пропускает)
@@ -482,7 +483,7 @@ fn test_sidecar_wb_sharp_fields() {
 	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
 		'sharp_masking', 'haze', 'haze_depth', 'vibrance', 'clarity', 'texture', 'vig_amount', 'vig_mid', 'vig_round', 'vig_feather', 'grain',
 		'grain_size', 'grain_rough', 'sharp_rgb', 'dc_amount', 'dc_radius',
-		'dc_contrast', 'grade', 'grade_blend', 'grade_balance', 'bw', 'bw_mix'] {
+		'dc_contrast', 'grade', 'grade_blend', 'grade_balance', 'bw', 'bw_mix', 'profile'] {
 		old = old.replace('"${key}"', '"old_${key}"')
 	}
 	assert !old.contains('"wb_mode"')
@@ -497,6 +498,7 @@ fn test_sidecar_wb_sharp_fields() {
 	assert o.params.fx == pipeline.Effects{}
 	assert o.params.grade == pipeline.Grade{}
 	assert !o.params.bw && o.params.bw_mix == [8]f32{}
+	assert o.profile == ''
 }
 
 // Режим «как снято» - без матрицы; другой режим - матрица по цвету камеры

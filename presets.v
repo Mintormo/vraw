@@ -37,7 +37,7 @@ const default_copy_groups = copy_groups.filter(it != 'crop' && it != 'masks')
 // пересчитываются: для открытого кадра это делает set_edit (with_derived),
 // в сайдкар они не пишутся.
 //   tone   - экспозиция, тени, контраст, текстура, Clarity, тон-эквалайзер,
-//            «Тени/Света», камерная кривая (вкл/выкл)
+//            «Тени/Света», профиль (камерная кривая и стиль)
 //   color  - баланс белого, сочность, насыщенность
 //   curves - точки тональных кривых RGB, R, G, B
 //   hsl    - HSL-эквалайзер
@@ -63,6 +63,7 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.params.sh_shadows = s.params.sh_shadows
 				e.params.sh_highlights = s.params.sh_highlights
 				e.use_curve = s.use_curve
+				e.profile = s.profile
 			}
 			'color' {
 				e.wb_mode = s.wb_mode

@@ -89,6 +89,9 @@ pub mut:
 	hsl_hue [8]f32
 	hsl_sat [8]f32
 	hsl_lum [8]f32
+	// Стиль проявки (style.v) - производное, по профилю кадра: базовый
+	// слой под контрастом, насыщенностью, сочностью и HSL
+	style Style
 	// Чёрно-белое (bw.v): серый по люме, микшер - яркость по 8 диапазонам
 	// оттенков (hsl_centers), -100..100. Вместо насыщенности, сочности и HSL
 	bw     bool
@@ -179,12 +182,13 @@ fn build_mlut(p &Params) []f32 {
 // гладкая S-кривая без клиппинга, a = 1 - тождественная. Только без
 // камерной кривой (она смешанная, см. CamTone и build_post).
 fn build_flut(p &Params) []f32 {
-	a := math.powf(2.0, p.contrast)
+	con := eff_contrast(p)
+	a := math.powf(2.0, con)
 	mut f := []f32{len: 65536}
 	for x in 0 .. 65536 {
 		v := math.powf(f32(x) * (1.0 / 65535.0), inv_gamma)
 		mut g := v
-		if p.contrast != 0 {
+		if con != 0 {
 			va := math.powf(v, a)
 			ia := math.powf(1.0 - v, a)
 			g = if va + ia > 0 { va / (va + ia) } else { f32(0) }
@@ -324,15 +328,16 @@ const post_n = 255 * 16 + 1
 // кривые на неё накладывает channel_luts. Без контраста и кривых - пусто
 // (тон как есть).
 fn build_post(p &Params) []f32 {
-	if p.contrast == 0 && p.tc_rgb.len != 256 && p.tc_r.len != 256 && p.tc_g.len != 256
+	con := eff_contrast(p)
+	if con == 0 && p.tc_rgb.len != 256 && p.tc_r.len != 256 && p.tc_g.len != 256
 		&& p.tc_b.len != 256 {
 		return []f32{}
 	}
-	a := math.powf(2.0, p.contrast)
+	a := math.powf(2.0, con)
 	mut f := []f32{len: post_n}
 	for x in 0 .. post_n {
 		mut g := f32(x) / f32(post_n - 1)
-		if p.contrast != 0 {
+		if con != 0 {
 			va := math.powf(g, a)
 			ia := math.powf(1.0 - g, a)
 			g = if va + ia > 0 { va / (va + ia) } else { f32(0) }
@@ -370,8 +375,9 @@ fn hsl_active(p &Params) bool {
 	if cam_hue_on(p) {
 		return true
 	}
+	hh, hs, hl := eff_hsl(p) // ползунки + стиль (style.v)
 	for i in 0 .. 8 {
-		if p.hsl_hue[i] != 0 || p.hsl_sat[i] != 0 || p.hsl_lum[i] != 0 {
+		if hh[i] != 0 || hs[i] != 0 || hl[i] != 0 {
 			return true
 		}
 	}
@@ -394,19 +400,20 @@ fn hsl_interp(vals [8]f32, deg f32) f32 {
 }
 
 fn build_hsl(p &Params) HslLut {
+	hh, hs, hl := eff_hsl(p) // ползунки + стиль (style.v)
 	mut dh := []f32{len: hsl_bins}
 	mut sm := []f32{len: hsl_bins}
 	mut lm := []f32{len: hsl_bins}
 	mut act := []u8{len: hsl_bins}
 	for b in 0 .. hsl_bins {
 		deg := (f32(b) + 0.5) * 360.0 / f32(hsl_bins)
-		dh[b] = hsl_interp(p.hsl_hue, deg) * f32(0.5 / 100.0) // 100 -> 30° = 0.5 секстанта
-		mut sv := 1.0 + hsl_interp(p.hsl_sat, deg) * f32(1.0 / 100.0)
+		dh[b] = hsl_interp(hh, deg) * f32(0.5 / 100.0) // 100 -> 30° = 0.5 секстанта
+		mut sv := 1.0 + hsl_interp(hs, deg) * f32(1.0 / 100.0)
 		if sv < 0 {
 			sv = 0
 		}
 		sm[b] = sv
-		lm[b] = math.powf(2.0, hsl_interp(p.hsl_lum, deg) * f32(1.0 / 100.0)) - 1.0
+		lm[b] = math.powf(2.0, hsl_interp(hl, deg) * f32(1.0 / 100.0)) - 1.0
 		if dh[b] != 0 || sm[b] != 1 || lm[b] != 0 {
 			act[b] = 1
 		}
@@ -972,8 +979,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
 	use_cl := !isnil(mask) && (p.clarity != 0 || lc.use_cl)
 	cmid := if use_cl { build_cmid(&p) } else { []f32{} }
-	sat := p.saturation * p.cam_sat
-	vib := p.vibrance / 100.0
+	sat := p.saturation * p.cam_sat * p.style.sat
+	vib := eff_vibrance(&p) / 100.0
 	wb_on := p.wb_on
 	wx := p.wb
 	wc := wx.cam

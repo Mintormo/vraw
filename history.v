@@ -23,7 +23,10 @@ mut:
 	params    pipeline.Params
 	curve_pts [][]vgui.CurvePoint // точки кривых: 0 - RGB, 1..3 - R, G, B
 	lens_corr bool = true // чекбокс «Коррекция объектива»
-	use_curve bool = true // чекбокс «Камерная кривая»
+	use_curve bool = true // «как JPEG камеры» - основа профиля (profile.v)
+	// стиль поверх (pipeline.style_keys; '' - нет); params.style -
+	// производное (with_derived)
+	profile string
 	nr        [4]f32 // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
 	ai        f32    // AI-шумодав: сила 1..100, 0 - выключен (ai_nr.v)
 	ai_model  string // id модели, которой посчитан AI (ai.models), при ai > 0
@@ -214,10 +217,7 @@ fn set_edit(mut st State, e EditState) {
 		mut cb := st.lens_cb
 		cb.set_checked(e.lens_corr)
 	}
-	if !isnil(st.crv_cb) {
-		mut cb := st.crv_cb
-		cb.set_checked(e.use_curve)
-	}
+	sync_profile(mut st, e)
 	if !isnil(st.sharp_rgb_cb) {
 		mut cb := st.sharp_rgb_cb
 		cb.set_checked(e.params.sharp.rgb)
