@@ -352,6 +352,37 @@ fn persp_line_done(mut st State, d CropDrag) {
 		false)
 }
 
+// upright_names - кнопки и записи истории автоперспективы
+// (pipeline.UprightMode по порядку)
+const upright_names = ['Уровень', 'Вертикали', 'Полностью']
+
+// upright_apply - автоперспектива (pipeline/upright.v): прямые линии
+// сырья после объектива (то, что на холсте до геометрии), подбор наклона
+// и перспективы по режиму; рамка подгоняется как при смене угла.
+// Мало линий - предупреждение, геометрия не меняется
+fn upright_apply(mut st State, mode pipeline.UprightMode) {
+	if st.raw_linear.len < st.pw * st.ph * 3 || st.pw <= 0 {
+		return
+	}
+	g := st.edit.geom
+	segs := pipeline.upright_segments(unsafe { &u16(st.raw_linear.data) }, st.pw, st.ph,
+		g)
+	w0, h0 := crop_frame(st)
+	name := upright_names[int(mode)]
+	fit := pipeline.upright_fit(segs, w0, h0, mode) or {
+		if !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_warning('Автоперспектива: на снимке мало прямых линий')
+		}
+		return
+	}
+	mut ng := geom_with_angle(st, fit.angle)
+	ng.pv = fit.pv
+	ng.ph = fit.ph
+	crop_apply(mut st, ng, 'upright', 'Автоперспектива (${name.to_lower()}): ${int(fit.pv)}, ${int(fit.ph)}, ${angle_text(fit.angle)}',
+		false)
+}
+
 // ── Мышь в режиме кадрирования ──
 
 // crop_hit - что под курсором (экранные координаты): ручка 0..7, 8 -
@@ -1180,12 +1211,34 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	g_row.add(gcb, flex: 1)
 	g_row.add(icon_slot(), min: icon_slot_w)
 
+	// Автоперспектива (как Upright): кнопки режимов
+	mut up_row := vgui.create_hbox_fill()
+	up_row.set_spacing(6)
+	// Подпись по своей ширине: с колонкой подписей кнопки не влезают
+	up_row.add(vgui.label('Авто'))
+	up_tips := ['Только наклон: горизонтали и вертикали станут ровными',
+		'Вертикали станут параллельными, плюс наклон',
+		'Вертикали и горизонтали: обе перспективы и наклон']
+	for i, uname in upright_names {
+		mut b := vgui.button(uname)
+		b.style = .flat
+		um := unsafe { pipeline.UprightMode(i) }
+		b.on_click = fn [mut st, um] () {
+			upright_apply(mut st, um)
+		}
+		mut tip := vgui.tooltip(up_tips[i])
+		tip.attach(b)
+		st.tips << tip
+		up_row.add(b, flex: 1)
+	}
+
 	mut hint := vgui.label('Enter - применить, Esc - отмена, двойной щелчок - вся рамка')
 	hint.font_size = 12
 	st.hint_labels << hint
 	return [SectionRow{mode_row}, SectionRow{a_row}, SectionRow{c_row},
 		SectionRow{total},
-		SectionRow{angle_row}, SectionRow{pv_row}, SectionRow{ph_row}, SectionRow{tools},
+		SectionRow{angle_row}, SectionRow{pv_row}, SectionRow{ph_row}, SectionRow{up_row},
+		SectionRow{tools},
 		SectionRow{g_row},
 		SectionRow{hint}]
 }
