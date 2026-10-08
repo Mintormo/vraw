@@ -307,8 +307,8 @@ fn test_zoom_at_point() {
 	assert cv.auto_fit
 }
 
-// Клавиши: удержание «\» - «до» и обратно; P в русской раскладке
-// (keycode «з») - по месту клавиши
+// Клавиши: удержание «\» - «до» и обратно; сочетания действий - по месту
+// клавиши в любой раскладке (keycode «з» на месте P)
 fn test_key_watch() {
 	dir := rt_dir('keys')
 	mut st := rt_folder(dir, 2)
@@ -325,13 +325,28 @@ fn test_key_watch() {
 	assert k.handle_event(&vgui.GuiEvent{ typ: .key_up, keycode: `\\`, scancode: sc_backslash },
 		app)
 	assert !st.ba_hold
-	// Латинская P - дело меню, KeyWatch не трогает
-	assert !k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: `p`, scancode: 19 }, app)
-	assert st.frames[0].mark.flag == 0
+	// Сочетания действий (hotkeys.v) - по месту клавиши: P «Отобран»
+	mut m_pick := vgui.menu_action('Отобран')
+	m_pick.shortcut = 'P'
+	m_pick.on_click = fn [mut st] () {
+		set_flag(mut st, 1)
+	}
+	hk_add(mut st, 'pick.flag_pick', 'Отбор', mut m_pick)
+	mut m_rej := vgui.menu_action('Отклонён')
+	m_rej.shortcut = 'X'
+	m_rej.on_click = fn [mut st] () {
+		set_flag(mut st, -1)
+	}
+	hk_add(mut st, 'pick.flag_reject', 'Отбор', mut m_rej)
 	// Русская раскладка: «з» на месте P
 	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: 0x437, scancode: 19 }, app)
 	assert st.frames[0].mark.flag == 1
-	// С Ctrl - не наше
+	// Латинская X - так же
+	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: `x`, scancode: 27 }, app)
+	assert st.frames[0].mark.flag == -1
+	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: `p`, scancode: 19 }, app)
+	assert st.frames[0].mark.flag == 1
+	// С Ctrl - другое сочетание, его нет
 	assert !k.handle_event(&vgui.GuiEvent{
 		typ:      .key_down
 		keycode:  0x447

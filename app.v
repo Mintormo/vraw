@@ -174,6 +174,10 @@ mut:
 	secondary_labels []&vgui.Label
 	hsl_labels       []&vgui.Label
 	bw_cb            &vgui.CheckBox = unsafe { nil } // «Чёрно-белое» (bw_ui.v)
+	// Горячие клавиши (hotkeys.v): действия-пункты меню и обновление
+	// подписей со вписанными сочетаниями (замыкания - один раз в main)
+	hk       []HotItem
+	hk_texts []fn ()
 	grade_wheels     []&GradeWheel // круги раздела «Цветокоррекция» (grade_ui.v)
 	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
 	// AI-шумодав (ai_nr.v): где лежат модели и ORT, кэши моделей по id
@@ -1128,6 +1132,8 @@ mut:
 	hint  &vgui.Label  = unsafe { nil }
 	fmts  &vgui.Label  = unsafe { nil }
 	edge  vgui.Color // цвет края градиента - им же поле вокруг заглушки
+	// подсказка открытия с текущими сочетаниями (hotkeys.v, hk_texts)
+	open_hint string = 'Меню «Файл»: Ctrl+O - файл, Ctrl+Shift+O - папка'
 }
 
 fn make_placeholder(th vgui.Theme) &Placeholder {
@@ -1229,7 +1235,7 @@ fn set_placeholder_text(mut ph Placeholder, folder bool) {
 		hint.text = 'Двойной щелчок по миниатюре в ленте'
 	} else {
 		title.text = 'Откройте RAW-файл или папку'
-		hint.text = 'Меню «Файл»: Ctrl+O - файл, Ctrl+Shift+O - папка'
+		hint.text = ph.open_hint
 	}
 }
 
@@ -2262,7 +2268,23 @@ fn main() {
 	mut ba_lb := vgui.label('До: первая запись')
 	st.secondary_labels << ba_lb
 	st.ba_lb = ba_lb
-	mut b_ba := icon_button(mut st, 'git-compare', 'Выделенная запись - «до» для сравнения (шторка Y, бок о бок Shift+Y)')
+	mut b_ba := icon_button(mut st, 'git-compare', 'Выделенная запись - «до» для сравнения')
+	mut ba_tip := st.tips.last()
+	st.hk_texts << fn [st, mut ba_tip] () {
+		keys := [hk_key(st, 'view.split'), hk_key(st, 'view.sbs')]
+		mut t := 'Выделенная запись - «до» для сравнения'
+		if keys[0].len > 0 || keys[1].len > 0 {
+			mut parts := []string{}
+			if keys[0].len > 0 {
+				parts << 'шторка ${keys[0]}'
+			}
+			if keys[1].len > 0 {
+				parts << 'бок о бок ${keys[1]}'
+			}
+			t += ' (${parts.join(', ')})'
+		}
+		ba_tip.text = t
+	}
 	b_ba.on_click = fn [mut st] () {
 		if isnil(st.hist_lb) {
 			return
@@ -2278,9 +2300,17 @@ fn main() {
 	ba_row.add(ba_lb, flex: 1)
 	ba_row.add(b_ba)
 	ba_row.add(b_ba0)
-	mut hist_hint := vgui.label('Двойной щелчок - перейти, Ctrl+Z / Ctrl+Shift+Z')
+	mut hist_hint := vgui.label('Двойной щелчок - перейти')
 	st.hint_labels << hist_hint
 	hist_hint.font_size = 12
+	st.hk_texts << fn [st, mut hist_hint] () {
+		keys := [hk_key(st, 'edit.undo'), hk_key(st, 'edit.redo')].filter(it.len > 0)
+		hist_hint.text = 'Двойной щелчок - перейти' + if keys.len > 0 {
+			', ${keys.join(' / ')}'
+		} else {
+			''
+		}
+	}
 	// Ctrl+Z / Ctrl+Shift+Z - пункты меню «Правка» (сочетания обрабатывает
 	// меню); Ctrl+Y - дополнительно, горячей клавишей окна
 	undo := fn [mut st, mut cv, mut hist, mut app] () {
@@ -2865,6 +2895,12 @@ fn main() {
 	}
 	bar.add_menu('Файл', [m_open, m_open_dir, vgui.menu_separator(), m_export,
 		vgui.menu_separator(), m_quit])
+	// Горячие клавиши - настраиваемые (hotkeys.v): ключи постоянные, по
+	// умолчанию - сочетания, заданные пунктам выше
+	hk_add(mut st, 'file.open', 'Файл', mut m_open)
+	hk_add(mut st, 'file.open_dir', 'Файл', mut m_open_dir)
+	hk_add(mut st, 'file.export', 'Файл', mut m_export)
+	hk_add(mut st, 'file.quit', 'Файл', mut m_quit)
 
 	mut m_undo := vgui.menu_action('Отменить')
 	m_undo.shortcut = 'Ctrl+Z'
@@ -2918,8 +2954,25 @@ fn main() {
 	m_all.on_click = fn [mut st] () {
 		select_all_frames(mut st)
 	}
+	// Пипетка баланса белого (wb_ui.v) - как кнопка в разделе «Баланс белого»
+	mut m_pick := vgui.menu_action('Пипетка баланса белого')
+	m_pick.shortcut = 'W'
+	m_pick.on_click = fn [mut st] () {
+		set_wb_pick(mut st, !st.wb_pick && st.linear.len > 0)
+	}
 	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
-		m_all, vgui.menu_separator(), m_crop, m_autotone, m_reset, vgui.menu_separator(), m_settings])
+		m_all, vgui.menu_separator(), m_crop, m_pick, m_autotone, m_reset, vgui.menu_separator(),
+		m_settings])
+	hk_add(mut st, 'edit.undo', 'Правка', mut m_undo)
+	hk_add(mut st, 'edit.redo', 'Правка', mut m_redo)
+	hk_add(mut st, 'edit.copy', 'Правка', mut m_copy)
+	hk_add(mut st, 'edit.paste', 'Правка', mut m_paste)
+	hk_add(mut st, 'edit.select_all', 'Правка', mut m_all)
+	hk_add(mut st, 'edit.crop', 'Правка', mut m_crop)
+	hk_add(mut st, 'edit.wb_pick', 'Правка', mut m_pick)
+	hk_add(mut st, 'edit.autotone', 'Правка', mut m_autotone)
+	hk_add(mut st, 'edit.reset_tone', 'Правка', mut m_reset)
+	hk_add(mut st, 'edit.settings', 'Правка', mut m_settings)
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {
@@ -3019,6 +3072,15 @@ fn main() {
 	}
 	pick_items << m_advance
 	bar.add_menu('Отбор', pick_items)
+	pick_ids := ['pick.rate0', 'pick.rate1', 'pick.rate2', 'pick.rate3', 'pick.rate4',
+		'pick.rate5', '', 'pick.flag_pick', 'pick.flag_reject', 'pick.flag_none', '',
+		'pick.advance']
+	for i, id in pick_ids {
+		if id.len > 0 {
+			mut it := pick_items[i]
+			hk_add(mut st, id, 'Отбор', mut it)
+		}
+	}
 
 	mut m_fit := vgui.menu_action('Вписать')
 	m_fit.shortcut = 'Ctrl+0'
@@ -3147,6 +3209,15 @@ fn main() {
 	}
 	bar.add_menu('Вид', [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
 		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, vgui.menu_separator(), m_full, m_strip, m_top, m_panel, m_left, m_bg, m_themes])
+	view_ids := ['view.fit', 'view.z50', 'view.z100', 'view.z200', 'view.zoom', 'view.split',
+		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.full',
+		'view.strip', 'view.top', 'view.panel', 'view.left']
+	view_items := [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_pair, m_swap, m_jpeg,
+		m_clipwarn, m_mask, m_full, m_strip, m_top, m_panel, m_left]
+	for i, id in view_ids {
+		mut it := view_items[i]
+		hk_add(mut st, id, 'Вид', mut it)
+	}
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
@@ -3154,9 +3225,32 @@ fn main() {
 	b_autotone.icon_name = 'wand-sparkles'
 	b_autotone.icon_size = 15
 	b_autotone.on_click = auto_tone_fn
-	mut at_tip := vgui.tooltip('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме (Ctrl+U)')
+	mut at_tip := vgui.tooltip('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме')
 	at_tip.attach(b_autotone)
 	st.tips << at_tip
+	st.hk_texts << fn [st, mut at_tip] () {
+		at_tip.text = 'Экспозиция, контраст, тени/света, чёрные и белые по гистограмме${hk_paren(st,
+			'edit.autotone')}'
+	}
+	st.hk_texts << fn [mut st, mut ph] () {
+		ko := hk_key(st, 'file.open')
+		kd := hk_key(st, 'file.open_dir')
+		mut parts := []string{}
+		if ko.len > 0 {
+			parts << '${ko} - файл'
+		}
+		if kd.len > 0 {
+			parts << '${kd} - папка'
+		}
+		ph.open_hint = if parts.len > 0 {
+			'Меню «Файл»: ${parts.join(', ')}'
+		} else {
+			'Меню «Файл» - открыть файл или папку'
+		}
+		set_placeholder_text(mut ph, st.frames.len > 0)
+	}
+	// Подписи по сочетаниям - все действия уже зарегистрированы
+	hk_refresh(mut st)
 	mut at_row := vgui.create_hbox_fill()
 	at_row.add(b_autotone)
 	at_row.add(vgui.label(''), flex: 1)

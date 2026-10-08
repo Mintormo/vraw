@@ -67,6 +67,14 @@ mut:
 	fs_strip &vgui.CheckBox = unsafe { nil }
 	sec_box  &vgui.VBox     = unsafe { nil } // ряды разделов по порядку
 	sec_rows []SecRow // по индексу panel_sections
+	// Горячие клавиши (hotkeys_ui.v): ряды по индексу st.hk, ждущий
+	// нажатия ряд (-1 - нет), сообщение
+	hk_rows []HkRow
+	hk_wait int = -1
+	hk_msg  &vgui.Label = unsafe { nil }
+	// подписи со вписанными сочетаниями (полноэкранный режим, F8 и F6)
+	fs_cap  &vgui.Label = unsafe { nil }
+	fs_note &vgui.Label = unsafe { nil }
 }
 
 // SecRow - ряд раздела панели в окне: показывать ли, вверх, вниз
@@ -108,6 +116,8 @@ fn show_settings(mut st State, mut app vgui.App, parent &vgui.Window) {
 	}
 	mut u := st.sui
 	st.del_armed = ''
+	u.hk_wait = -1
+	u.hk_msg.text = ''
 	sync_settings_ui(mut st)
 	mut d := u.dlg
 	if !d.is_open() {
@@ -393,6 +403,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	tabs.add_tab('Общие', general)
 	tabs.add_tab('Интерфейс', iface)
 	tabs.add_tab('Разделы панели', secs)
+	tabs.add_tab('Горячие клавиши', build_hotkeys_tab(mut st, mut u, mut dw))
 	tabs.add_tab('AI-шумодав', body)
 
 	// ── Где что лежит, закрыть ──
@@ -417,6 +428,11 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	outer.add(close_row)
 
 	dlg.add_widget(outer)
+	// Нажатие для кнопки сочетания - раньше кнопок и полей
+	dlg.add_widget(&HkCapture{
+		st: st
+		u:  u
+	})
 	// Подсказки - после корня: рисуются поверх
 	for p in paths {
 		dlg.add_widget(p.tip)
@@ -532,8 +548,10 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 	v.add(labeled('Расположение панели', side_cb, side_col, side_w))
 	v.add(strip_ck)
 	v.add(labeled('Расположение ленты', top_cb, side_col, side_w))
-	v.add(caption('Полноэкранный режим (F)'))
-	v.add(note(mut u, 'Что показывать вокруг снимка; F8 и F6 в режиме - то же'))
+	u.fs_cap = caption('Полноэкранный режим')
+	v.add(u.fs_cap)
+	u.fs_note = note(mut u, '')
+	v.add(u.fs_note)
 	v.add(fs_panel)
 	v.add(fs_strip)
 	mut secs := tab_page()
@@ -598,6 +616,8 @@ fn sync_settings_ui(mut st State) {
 	ccb.set_selected(if ci >= 0 { ci } else { frame_cache_mbs.index(frame_cache_mb_default) })
 	ccb.enabled = ck.checked
 	sync_iface(mut u, st.settings)
+	sync_hotkeys_ui(mut u, st)
+	sync_hk_texts(mut u, st)
 	busy := !isnil(st.dl)
 	p := st.ai_places
 	have_rt := ai.runtime_lib(p) != ''
@@ -792,4 +812,27 @@ fn dl_take(mut st State, res DlResult) {
 // fmt_cache_mb - предел кэша кадров в списке настроек
 fn fmt_cache_mb(mb int) string {
 	return if mb < 1024 { '${mb} МБ' } else if mb % 1024 == 0 { '${mb / 1024} ГБ' } else { '${f64(mb) / 1024:.1f} ГБ' }
+}
+
+// sync_hk_texts - подписи вкладки «Интерфейс» с текущими сочетаниями
+// (hotkeys.v): флажки панели и ленты, полноэкранный режим
+fn sync_hk_texts(mut u SettingsUi, st &State) {
+	if isnil(u.panel_ck) {
+		return
+	}
+	mut pck := u.panel_ck
+	pck.text = 'Показывать панель инструментов${hk_paren(st, 'view.panel')}'
+	mut sck := u.strip_ck
+	sck.text = 'Показывать ленту кадров${hk_paren(st, 'view.strip')}'
+	mut cap := u.fs_cap
+	cap.text = 'Полноэкранный режим${hk_paren(st, 'view.full')}'
+	kp := hk_key(st, 'view.panel')
+	ks := hk_key(st, 'view.strip')
+	keys := [kp, ks].filter(it.len > 0)
+	mut n := u.fs_note
+	n.text = if keys.len > 0 {
+		'Что показывать вокруг снимка; ${keys.join(' и ')} в режиме - то же'
+	} else {
+		'Что показывать вокруг снимка'
+	}
 }

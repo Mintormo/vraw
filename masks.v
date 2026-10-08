@@ -1469,7 +1469,10 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		select_mask(mut st, -1)
 	}
 	u.done_btn = done_b
-	mut show_cb := vgui.checkbox('Показать маску (O)')
+	mut show_cb := vgui.checkbox('Показать маску')
+	st.hk_texts << fn [st, mut show_cb] () {
+		show_cb.text = 'Показать маску${hk_paren(st, 'view.mask')}'
+	}
 	show_cb.on_change = fn [mut st] (v bool) {
 		if v != st.mask_show {
 			set_mask_show(mut st, v)

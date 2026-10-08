@@ -80,6 +80,9 @@ mut:
 	panel_hidden []string
 	// ширина панели инструментов, px (перетащенная; 0 - по умолчанию)
 	panel_w int
+	// свои горячие клавиши (hotkeys.v): «ключ=сочетание», пусто после «=» -
+	// снято; нет записи - по умолчанию
+	hotkeys []string
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -160,6 +163,7 @@ fn settings_from(s Settings) Settings {
 		fs_strip:     s.fs_strip
 		panel_order:  panel_order_from(s.panel_order)
 		panel_hidden: panel_hidden_from(s.panel_hidden)
+		hotkeys:      s.hotkeys.filter(it.contains('='))
 		panel_w:      if s.panel_w >= int(panel_min_w) && s.panel_w <= 10000 { s.panel_w } else { 0 }
 		no_frame_cache: s.no_frame_cache
 		frame_cache_mb: if s.frame_cache_mb in frame_cache_mbs { s.frame_cache_mb } else { 0 }

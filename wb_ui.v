@@ -217,6 +217,11 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_wb_pick(mut st, !st.wb_pick && st.linear.len > 0)
 	}
 	st.wb_pick_btn = pick
+	mut pick_tip := st.tips.last()
+	st.hk_texts << fn [st, mut pick_tip] () {
+		pick_tip.text = 'Пипетка: щёлкните по серому или белому на снимке${hk_paren(st,
+			'edit.wb_pick')}'
+	}
 	mut mode_lb := vgui.label('Режим')
 	mut mode_row := vgui.create_hbox_fill()
 	mode_row.set_spacing(6)

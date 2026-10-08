@@ -698,9 +698,9 @@ fn zoom_click(mut st State, mut cv vgui.Canvas, ev &vgui.CanvasInputEvent) bool 
 
 // KeyWatch - невидимый виджет окна для клавиш, которым мало горячей
 // клавиши: удержание «\» (нужно и отпускание - у горячих клавиш vgui
-// его нет) и однобуквенные сочетания в русской раскладке (SDL отдаёт
-// в keycode букву раскладки - «з» вместо P, и меню их не узнаёт; здесь -
-// по scancode, месту клавиши). Добавляется в окно после корня: события
+// его нет) и все настраиваемые сочетания (hk_dispatch, hotkeys.v) - по
+// scancode, месту клавиши: в русской раскладке SDL отдаёт в keycode букву
+// раскладки («з» вместо P), и меню vgui их не узнаёт. Добавляется в окно после корня: события
 // получает раньше меню, но после виджета в фокусе (поле ввода свои
 // буквы заберёт само).
 @[heap]
@@ -746,30 +746,10 @@ fn (mut k KeyWatch) handle_event(ev &vgui.GuiEvent, app &vgui.App) bool {
 		set_ba_hold(mut st, ev.typ == .key_down)
 		return true
 	}
-	// Буква раскладки не латинская - сочетание по месту клавиши
-	latin := ev.keycode >= `a` && ev.keycode <= `z`
-	if ev.typ == .key_down && mods == vgui.sdl_kmod_shift && !latin && ev.scancode == 28 {
-		set_ba_sbs(mut st, !st.ba_sbs) // Shift+Y
-		return true
-	}
-	if ev.typ == .key_down && mods == vgui.sdl_kmod_shift && !latin && ev.scancode == 6 {
-		pair_swap(mut st) // Shift+C
-		return true
-	}
-	if ev.typ != .key_down || mods != 0 || latin {
+	// Сочетания действий (hotkeys.v) - по месту клавиши, в любой
+	// раскладке; меню их уже не получает
+	if ev.typ != .key_down {
 		return false
 	}
-	match ev.scancode {
-		19 { set_flag(mut st, 1) } // P
-		27 { set_flag(mut st, -1) } // X
-		24 { set_flag(mut st, 0) } // U
-		29 { toggle_zoom_center(mut st) } // Z
-		28 { set_ba_split(mut st, !st.ba_split) } // Y
-		13 { set_clip_warn(mut st, !(st.clip_hi || st.clip_lo), !(st.clip_hi || st.clip_lo)) } // J
-		21 { set_crop_mode(mut st, !st.crop_mode) } // R
-		6 { set_pair(mut st, !st.pair_on) } // C
-		9 { set_fullscreen(mut st, !st.fullscreen) } // F
-		else { return false }
-	}
-	return true
+	return hk_dispatch(mut st, ev)
 }
