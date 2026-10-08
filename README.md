@@ -23,6 +23,22 @@ cd ~/projects/vraw
 ~/soft/v/v -cc gcc -enable-globals test .      # все тесты
 ```
 
+Портабельная версия для Linux — папка с программой, библиотеками и базой
+объективов, ставить ничего не нужно (нужен Linux с glibc 2.39+: Ubuntu
+24.04, Mint 22, свежие Fedora и Arch):
+
+```bash
+tools/portable.sh          # -> dist/vraw/ и dist/vraw-linux-x86_64.tar.gz
+tools/portable.sh --ai     # то же с моделями AI-шумодава и ONNX Runtime
+```
+
+Распаковать архив куда угодно и запустить `vraw/vraw`.
+
+## Лицензия
+
+MIT (файл `LICENSE`). Лицензии сторонних компонентов портабельная сборка
+собирает сама: папка `licenses/` и сводка `THIRD_PARTY.md`.
+
 ## Запуск
 
 ```bash

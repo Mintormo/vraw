@@ -1474,7 +1474,7 @@ fn main() {
 	}
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
-	st.lens_db = lens.load_db() or { unsafe { nil } }
+	st.lens_db = load_lens_db()
 	// AI-шумодав: модели и ONNX Runtime - в папке программы; загрузка
 	// (~1.5 с) - при первом прогоне
 	st.ai_places = ai.places(app_dir())

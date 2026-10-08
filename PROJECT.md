@@ -97,6 +97,10 @@
   такой `Corrector` владеет базой и освобождает её в `free()`. GUI:
   `st.lens_db` грузится в начале main, освобождается на выходе после
   всех воркеров. Тест `test_shared_database`.
+- **База в папке программы** (08.10.2026): `lens.load_db_dir(dir)` —
+  только XML из `dir` (`lf_db_load_directory`). GUI (`load_lens_db` в
+  settings.v): есть `<папка программы>/lensfun/` — база оттуда
+  (портабельная сборка), иначе `load_db()`.
 
 Обёртка над liblensfun 0.3.4 (apt, `liblensfun-dev`). Две коррекции:
 `vignetting()` (карта усиления) и `geometry()` (дисторсия + TCA одним
@@ -1643,6 +1647,29 @@ vraw — одно GUI-приложение: исходники `module main` л�
 разом `~/soft/v/v -cc gcc -enable-globals test .` (рекурсивно, вместе с
 тестами модулей). Консольной версии нет с 27.09.2026 (был `main.v` и
 модуль `develop/` — проявка без vgui ради CLI; растворён в приложении).
+
+**Портабельная сборка для Linux** (`tools/portable.sh`, 08.10.2026; с
+`--ai` — ещё модели и ONNX Runtime, ~290 МБ): `dist/vraw/` и архив
+`dist/vraw-linux-x86_64.tar.gz` (~15 МБ). Внутри: `vraw` (-prod, RPATH
+`$ORIGIN/lib` — `--disable-new-dtags`, чтобы путь действовал и на
+зависимости зависимостей), `lib/` — все .so из `ldd`, кроме glibc,
+libstdc++ и libgcc_s (своя копия ломала бы драйверы, которые SDL
+подгружает из системы), `lensfun/` — база профилей (обновлённая из
+`~/.local/share`), README, `LICENSE` (MIT), `licenses/` и сводка
+`THIRD_PARTY.md`. Лицензии: библиотеки из apt — пакет по `dpkg -S` (с
+архитектурой: у libjpeg есть и i386), текст `/usr/share/doc/<пакет>/
+copyright` и общие тексты из `/usr/share/common-licenses`, на которые он
+ссылается, ссылка на исходный пакет на Launchpad (для LGPL — исходники
+именно этой версии); краткое имя лицензии — таблица `spdx` в скрипте
+(новый пакет без записи — сборка останавливается). SDL3 (собран в
+`/usr/local`), V, Boehm GC, Mbed TLS, stb, Roboto (OFL 1.1, версия 3),
+Lucide, SCUNet, NAFNet — тексты в `tools/licenses/`; vgui — `LICENSE` из
+его репозитория. vgui и шрифты вшиты в бинарник. Ограничение —
+glibc не старее системы сборки (2.39, Ubuntu 24.04); для старых систем —
+собирать в контейнере со старой Ubuntu (не сделано: нет прав на docker).
+Проверка — запуск в `bwrap` с пустыми `/usr/local/lib`, базами lensfun и
+`/dev/null` на месте системных копий библиотек из `lib/`: кадр
+открывается, профиль объектива находится.
 
 Файлы: `app.v` — State, окно, панель, пересчёты, `main()`; `ai_nr.v` —
 AI-шумодав в окне; `wb_ui.v` — секция «Баланс белого»; `history.v`

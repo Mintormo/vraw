@@ -44,6 +44,7 @@ vraw — одно GUI-приложение на vgui (консольной ве�
 cd ~/projects/vraw
 ~/soft/v/v -prod -cc gcc -enable-globals .     # -> ./vraw
 ~/soft/v/v -cc gcc -enable-globals test .      # все тесты (рекурсивно, с модулями)
+tools/portable.sh                              # портабельная папка dist/vraw/ (Linux)
 ```
 
 - Сборка и тесты — ТОЛЬКО с `-cc gcc -enable-globals` (требование vgui).

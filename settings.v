@@ -9,6 +9,7 @@ import os
 import json2
 import vgui
 import ai
+import lens
 import imgio
 
 struct Settings {
@@ -109,6 +110,19 @@ fn bg_index(key string) int {
 // и ONNX Runtime
 fn app_dir() string {
 	return os.dir(os.executable())
+}
+
+// load_lens_db - база lensfun: портабельная сборка носит её в папке
+// программы (lensfun/), иначе - системная с обновлениями пользователя.
+// Базы нет - nil (коррекция объектива недоступна).
+fn load_lens_db() &lens.Database {
+	dir := os.join_path(app_dir(), 'lensfun')
+	if os.is_dir(dir) {
+		if db := lens.load_db_dir(dir) {
+			return db
+		}
+	}
+	return lens.load_db() or { unsafe { nil } }
 }
 
 fn settings_path() string {

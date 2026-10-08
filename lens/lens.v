@@ -64,6 +64,7 @@ pub struct C.lfModifier {}
 
 fn C.lf_db_new() &C.lfDatabase
 fn C.lf_db_load(db &C.lfDatabase) int
+fn C.lf_db_load_directory(db &C.lfDatabase, dirname &char) bool
 fn C.lf_db_destroy(db &C.lfDatabase)
 fn C.lf_db_find_cameras(db &C.lfDatabase, maker &char, model &char) &voidptr
 fn C.lf_db_find_lenses_hd(db &C.lfDatabase, cam &C.lfCamera, maker &char, lensname &char, sflags int) &voidptr
@@ -122,6 +123,23 @@ pub fn load_db() !&Database {
 		return error('не удалось создать базу lensfun')
 	}
 	C.lf_db_load(db)
+	return &Database{
+		db: db
+	}
+}
+
+// load_db_dir загружает базу lensfun только из папки dir (XML профилей,
+// как version_1) - портабельная сборка носит базу с собой, системной на
+// чужом компьютере может не быть.
+pub fn load_db_dir(dir string) !&Database {
+	db := C.lf_db_new()
+	if isnil(db) {
+		return error('не удалось создать базу lensfun')
+	}
+	if !C.lf_db_load_directory(db, &char(dir.str)) {
+		C.lf_db_destroy(db)
+		return error('нет профилей lensfun в ${dir}')
+	}
 	return &Database{
 		db: db
 	}

@@ -22,3 +22,6 @@
 /onnxruntime/
 /onnxruntime.tmp/
 *.part
+
+# Портабельная сборка (tools/portable.sh)
+/dist/
