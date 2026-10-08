@@ -214,6 +214,9 @@ fn mask_name(m pipeline.Mask, i int) string {
 // select_mask - выделить фильтр idx (-1 - снять выделение)
 fn select_mask(mut st State, idx int) {
 	st.mask_sel = if idx >= 0 && idx < st.edit.params.masks.len { idx } else { -1 }
+	if st.mask_sel >= 0 && st.spot_mode {
+		set_spot_mode(mut st, false)
+	}
 	st.mask_part = -1
 	st.mask_drag = MaskDrag{}
 	if st.mask_pick {
@@ -288,6 +291,9 @@ fn add_mask(mut st State, kind pipeline.MaskKind) {
 	}
 	if kind != .brush {
 		m.set_shape(-1, default_shape(st, kind, false))
+	}
+	if st.spot_mode {
+		set_spot_mode(mut st, false)
 	}
 	st.edit.params.masks << m
 	st.mask_sel = st.edit.params.masks.len - 1

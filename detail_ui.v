@@ -115,6 +115,7 @@ struct DetailPrep {
 	dc        pipeline.Sharpen
 	ai_s      f32 // 0 - без AI
 	model     string
+	spots     []pipeline.Spot // удаление пятен (после подготовки, до геометрии)
 }
 
 // detail_prep_of - подготовка стороны: «после» - нынешние настройки (AI -
@@ -128,6 +129,7 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 			dc:        b.params.sharp
 			ai_s:      ba_ai(st, b)
 			model:     st.ai_lin_model
+			spots:     b.spots
 		}
 	}
 	return DetailPrep{
@@ -136,6 +138,7 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 		dc:        st.edit.params.sharp
 		ai_s:      ai_effective(st)
 		model:     ai_run_model(st)
+		spots:     st.edit.spots
 	}
 }
 
@@ -210,7 +213,7 @@ fn detail_prep_key(st &State, side int) string {
 		p.model
 	} else {
 		''
-	}}'
+	}}|${pipeline.spot_key(p.spots)}'
 }
 
 // detail_tiles_key - от чего зависят плитки модели: сырьё после объектива
@@ -226,7 +229,7 @@ fn detail_wanted(st &State) bool {
 	}
 	// Режим кадрирования - весь повёрнутый кадр; дымка и резкость
 	// показываются картой
-	if st.crop_mode || st.haze_show || jpeg_active(st) {
+	if st.crop_mode || st.haze_show || st.dust_show || jpeg_active(st) {
 		return false
 	}
 	// AI в превью, а модель для фрагмента не загрузилась - увеличенное превью
@@ -505,8 +508,9 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 		res.lin = detail_prep(res.src, ln, DetailJob{
 			r:    r
 			geom: req.geom
-			nr:   req.prep.nr
-			dc:   req.prep.dc
+			nr:    req.prep.nr
+			dc:    req.prep.dc
+			spots: req.prep.spots
 		}, dai, mut prog) or {
 			if err is ai.Cancelled {
 				res.cancelled = true

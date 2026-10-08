@@ -292,6 +292,23 @@ mut:
 	brush_hx      f32
 	brush_hy      f32
 	mask_ui    &MaskUi = unsafe { nil }
+	// Удаление пятен (spots_ui.v): режим инструмента, выделенное пятно (-1 -
+	// нет; не правка), перетаскивание, курсор над холстом (буфер холста);
+	// настройки новых пятен (размер 1..100, растушёвка, непрозрачность,
+	// режим); показ пыли (вид) и его усиление
+	spot_mode    bool
+	spot_sel     int = -1
+	spot_drag    SpotDrag
+	spot_hover   bool
+	spot_hx      f32
+	spot_hy      f32
+	spot_size    f32 = 35
+	spot_feather f32 = 20
+	spot_opacity f32 = 100
+	spot_kind    pipeline.SpotMode
+	spot_ui      &SpotUi = unsafe { nil }
+	dust_show    bool
+	dust_amt     f32 = 50
 	// Копирование настроек и пресеты (presets.v): буфер настроек и его
 	// группы (пусто - ничего не скопировано), пункт «Вставить настройки»,
 	// меню (номер пункта «Пресеты» в нём), вставка в кадры (paste_settings
@@ -394,6 +411,7 @@ struct GeomKey {
 	geom    pipeline.Geom
 	crop    bool
 	valid   bool
+	spots   string // пятна (pipeline.spot_key): правят сырьё до геометрии
 }
 
 // ensure_geom - геометрия превью (glin, gmask) по текущему сырью и
@@ -404,42 +422,47 @@ fn ensure_geom(mut st State, mut cv vgui.Canvas) {
 		geom:    st.edit.geom
 		crop:    !st.crop_mode
 		valid:   true
+		spots:   pipeline.spot_key(st.edit.spots)
 	}
 	if key != st.geom_key || st.glin.len == 0 {
-		if key.geom.is_noop(key.crop) {
-			// Геометрия ничего не меняет - те же массивы, без копии (-48 МБ
-			// на превью 24 Мп): glin/gmask, как и linear/mask, только читаются
-			drop(mut st.glin)
-			drop(mut st.gmask)
-			st.glin = share(st.linear)
-			st.gmask = share(st.mask)
-			st.gw = st.pw
-			st.gh = st.ph
-			st.haze = pipeline.HazeMap{}
-			st.geom_key = key
-			if cv.width != st.gw || cv.height != st.gh {
-				set_canvas_size(mut cv, st.gw, st.gh)
-			}
-			return
-		}
-		// Свои буферы вне сборщика (bufown.v), прежние отпускаются
-		drop(mut st.glin)
-		drop(mut st.gmask)
-		ow, oh := key.geom.out_size(st.pw, st.ph, key.crop)
-		st.glin = own_new[u16](ow * oh * 3)
-		st.gw, st.gh = pipeline.geom_apply_into(unsafe { &u16(st.linear.data) }, st.pw,
-			st.ph, 3, key.geom, key.crop, mut st.glin)
-		if st.mask.len == st.pw * st.ph * pipeline.mask_ch {
-			st.gmask = own_new[u16](ow * oh * pipeline.mask_ch)
-			pipeline.geom_apply_into(unsafe { &u16(st.mask.data) }, st.pw, st.ph, pipeline.mask_ch,
-				key.geom, key.crop, mut st.gmask)
-		}
-		st.haze = pipeline.HazeMap{}
 		st.geom_key = key
+		st.gw, st.gh = geom_stage(st.linear, st.mask, st.pw, st.ph, st.edit.spots, key, mut
+			st.glin, mut st.gmask)
+		st.haze = pipeline.HazeMap{}
 	}
 	if cv.width != st.gw || cv.height != st.gh {
 		set_canvas_size(mut cv, st.gw, st.gh)
 	}
+}
+
+// geom_stage - сырьё и маска превью после пятен и геометрии: прежние
+// glin/gmask отпускаются, новые - свои буферы (bufown.v); если пятен нет и
+// геометрия ничего не меняет - те же массивы, без копии (-48 МБ на превью
+// 24 Мп): glin/gmask, как и linear/mask, только читаются. Маска пятнами не
+// правится (она гладкая - пыль в ней почти не видна). Возвращает размер.
+fn geom_stage(linear []u16, mask []u16, pw int, ph int, spots []pipeline.Spot, key GeomKey, mut glin []u16, mut gmask []u16) (int, int) {
+	drop(mut glin)
+	drop(mut gmask)
+	mut lin := healed(linear, pw, ph, spots)
+	if key.geom.is_noop(key.crop) {
+		// Перенос ссылки (bufown.v): lin дальше не нужен
+		unsafe {
+			glin = lin
+		}
+		gmask = share(mask)
+		return pw, ph
+	}
+	ow, oh := key.geom.out_size(pw, ph, key.crop)
+	glin = own_new[u16](ow * oh * 3)
+	gw, gh := pipeline.geom_apply_into(unsafe { &u16(lin.data) }, pw, ph, 3, key.geom,
+		key.crop, mut glin)
+	drop(mut lin)
+	if mask.len == pw * ph * pipeline.mask_ch {
+		gmask = own_new[u16](ow * oh * pipeline.mask_ch)
+		pipeline.geom_apply_into(unsafe { &u16(mask.data) }, pw, ph, pipeline.mask_ch, key.geom,
+			key.crop, mut gmask)
+	}
+	return gw, gh
 }
 
 // apply_pipeline прогоняет превью через пайплайн в холст и обновляет
@@ -488,6 +511,15 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	npix := st.gw * st.gh
 	if (st.edit.params.haze != 0 || st.haze_show) && st.haze.d.len != npix {
 		st.haze = pipeline.haze_map(unsafe { &u16(st.glin.data) }, st.gw, st.gh)
+	}
+	if st.dust_show {
+		// Показ пыли (spots_ui.v) - карта вместо снимка, гистограмма -
+		// прежняя, без подсветки и до/после
+		pipeline.dust_view(unsafe { &u16(st.glin.data) }, st.gw, st.gh, st.dust_amt, mut
+			cv.pixels, 4)
+		cv.mark_dirty()
+		detail_refresh(mut st)
+		return
 	}
 	if st.haze_show {
 		pipeline.haze_view(&st.haze, st.edit.params.haze_depth, mut cv.pixels, 4)
@@ -1561,6 +1593,7 @@ fn main() {
 	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
 		crop_overlay(mut st, mut ctx)
 		mask_overlay(mut st, mut ctx) // ручки градиентного фильтра
+		spot_overlay(mut st, mut ctx) // круги пятен (spots_ui.v)
 		ba_overlay(mut st, mut ctx) // шторка до/после
 		pair_overlay(st, mut ctx) // подпись открытого при сравнении кадров
 		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
@@ -1571,6 +1604,10 @@ fn main() {
 	cv.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
 		// Режим кадрирования (crop.v): рамка, ручки, линия горизонта
 		if crop_input(mut st, ev) {
+			return
+		}
+		// Режим удаления пятен (spots_ui.v): щелчок - пятно, круги тянутся
+		if spot_input(mut st, ev) {
 			return
 		}
 		// Ручки выделенного градиентного фильтра (masks.v)
@@ -2246,6 +2283,8 @@ fn main() {
 	crop_rows := build_crop_section(mut st, lbl_w, val_w)
 	// Градиентные фильтры (masks.v)
 	mask_rows := build_mask_section(mut st, lbl_w, val_w)
+	// Удаление пятен (spots_ui.v)
+	spot_rows := build_spot_section(mut st, lbl_w, val_w)
 
 	// ── История правок: список, текущая запись выделена ──
 	// Щелчок (или стрелки в списке) - откат к записи, более поздняя -
@@ -2370,6 +2409,7 @@ fn main() {
 		drop(mut st.glin)
 		drop(mut st.gmask)
 		crop_leave(mut st)
+		spot_leave(mut st)
 		st.mask_sel = -1
 		st.mask_part = -1
 		st.mask_drag = MaskDrag{}
@@ -2565,8 +2605,19 @@ fn main() {
 	win.bind_hotkey('Enter', fn [mut st] () {
 		if st.crop_mode {
 			set_crop_mode(mut st, false)
+		} else if st.spot_mode {
+			set_spot_mode(mut st, false)
 		}
 	})
+	// Удаление пятен: Delete / Backspace - выделенное пятно (в полях ввода
+	// клавиши забирает поле - сюда не доходят)
+	for k in ['Delete', 'Backspace'] {
+		win.bind_hotkey(k, fn [mut st] () {
+			if st.spot_mode && spot_valid(st) {
+				delete_spot(mut st)
+			}
+		})
+	}
 	win.bind_hotkey('Escape', fn [mut st] () {
 		if st.horizon {
 			st.horizon = false
@@ -2574,6 +2625,13 @@ fn main() {
 			sync_crop_ui(mut st)
 		} else if st.crop_mode {
 			crop_cancel(mut st)
+		} else if st.spot_mode {
+			// Пятна: снять выделение, второй Esc - выйти из режима
+			if spot_valid(st) {
+				select_spot(mut st, -1)
+			} else {
+				set_spot_mode(mut st, false)
+			}
 		} else if st.mask_pick {
 			set_mask_pick(mut st, false) // пипетка цвета фильтра - отмена
 		} else if st.mask_sel >= 0 {
@@ -2638,6 +2696,7 @@ fn main() {
 		drop(mut st.glin)
 		drop(mut st.gmask)
 		crop_leave(mut st)
+		spot_leave(mut st)
 		st.mask_sel = -1
 		st.mask_part = -1
 		st.mask_drag = MaskDrag{}
@@ -2960,8 +3019,18 @@ fn main() {
 	m_pick.on_click = fn [mut st] () {
 		set_wb_pick(mut st, !st.wb_pick && st.linear.len > 0)
 	}
+	// Удаление пятен (spots_ui.v): Q, как в Lightroom
+	mut m_spots := vgui.menu_checkbox('Удаление пятен', false)
+	m_spots.shortcut = 'Q'
+	m_spots.on_toggle = fn [mut st] (v bool) {
+		set_spot_mode(mut st, v)
+	}
+	if !isnil(st.spot_ui) {
+		mut su := st.spot_ui
+		su.m_spots = m_spots
+	}
 	bar.add_menu('Правка', [m_undo, m_redo, vgui.menu_separator(), m_copy, m_paste,
-		m_all, vgui.menu_separator(), m_crop, m_pick, m_autotone, m_reset, vgui.menu_separator(),
+		m_all, vgui.menu_separator(), m_crop, m_spots, m_pick, m_autotone, m_reset, vgui.menu_separator(),
 		m_settings])
 	hk_add(mut st, 'edit.undo', 'Правка', mut m_undo)
 	hk_add(mut st, 'edit.redo', 'Правка', mut m_redo)
@@ -2969,6 +3038,7 @@ fn main() {
 	hk_add(mut st, 'edit.paste', 'Правка', mut m_paste)
 	hk_add(mut st, 'edit.select_all', 'Правка', mut m_all)
 	hk_add(mut st, 'edit.crop', 'Правка', mut m_crop)
+	hk_add(mut st, 'edit.spots', 'Правка', mut m_spots)
 	hk_add(mut st, 'edit.wb_pick', 'Правка', mut m_pick)
 	hk_add(mut st, 'edit.autotone', 'Правка', mut m_autotone)
 	hk_add(mut st, 'edit.reset_tone', 'Правка', mut m_reset)
@@ -3354,6 +3424,7 @@ fn main() {
 	panel_add(mut st, 'bw', bw_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'grade', grade_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'masks', section(mask_rows))
+	panel_add(mut st, 'spots', section(spot_rows))
 	// Раскрытая секция показывает метки всех фильтров на снимке (индекс
 	// секции - layout_panel)
 	acc.on_change = fn [mut st] (idx int, open bool) {

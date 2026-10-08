@@ -61,6 +61,10 @@ fn detail_full(src &DetailSrc, c &lens.Corrector, vign f32, job DetailJob) ([]u1
 	} else {
 		buf
 	}
+	if job.spots.len > 0 {
+		pipeline.spots_apply(unsafe { &u16(lin.data) }, Region{0, 0, src.w, src.h}, src.w,
+			src.h, job.spots)
+	}
 	return pipeline.geom_apply(unsafe { &u16(lin.data) }, src.w, src.h, 3, job.geom, true)
 }
 
@@ -131,6 +135,52 @@ fn test_detail_no_lens() ! {
 	mut np := ai.NoProgress{}
 	got := detail_prep(src, unsafe { nil }, job, DetailAi{}, mut np)!
 	assert detail_diff(got, full, ow, job.r) <= 1
+}
+
+// Пятна: источник далеко за фрагментом (кусок расширяется до него),
+// второе пятно - частично в фрагменте; с поворотом на 90° и шумодавом
+fn test_detail_spots() ! {
+	src, _ := detail_case() or { return }
+	w := f32(src.w)
+	h := f32(src.h)
+	job := DetailJob{
+		geom:  pipeline.Geom{
+			rot90: 1
+		}
+		nr:    [f32(0), 30, 30, 0]!
+		r:     Region{100, 200, 300, 250}
+		spots: [
+			pipeline.Spot{
+				x:  0.5
+				y:  0.5
+				sx: 0.15
+				sy: 0.2
+				r:  0.03
+			},
+			pipeline.Spot{
+				x:    0.4
+				y:    0.45
+				sx:   0.6
+				sy:   0.8
+				r:    0.04
+				mode: .clone
+			},
+		]
+	}
+	full, ow, oh := detail_full(src, unsafe { nil }, 0, job)
+	// Фрагмент - вокруг первого пятна (после поворота на 90° по часовой
+	// точка (x, y) кадра - (h - y, x) выхода)
+	cx := int(h - 0.5 * h)
+	cy := int(0.5 * w)
+	r := Region{cx - 150, cy - 120, 300, 240}
+	assert r.x >= 0 && r.y >= 0 && r.x + r.w <= ow && r.y + r.h <= oh
+	mut np := ai.NoProgress{}
+	got := detail_prep(src, unsafe { nil }, DetailJob{ ...job, r: r }, DetailAi{}, mut np)!
+	assert detail_diff(got, full, ow, r) <= 1
+	// Без пятен фрагмент другой - пятна действуют
+	plain := detail_prep(src, unsafe { nil }, DetailJob{ ...job, r: r, spots: [] }, DetailAi{}, mut
+		np)!
+	assert detail_diff(plain, full, ow, r) > 100
 }
 
 // Финальный проход фрагмента с маской и дымкой из «превью» (вдвое меньший

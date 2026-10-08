@@ -103,6 +103,7 @@ struct DetailJob {
 	geom   pipeline.Geom // out_geom кадра
 	nr     [4]f32
 	dc     pipeline.Sharpen
+	spots  []pipeline.Spot // удаление пятен (после Capture, до геометрии)
 	margin int = detail_margin
 }
 
@@ -146,10 +147,13 @@ fn lens_piece(src &DetailSrc, ln &DetailLens, p Region) []u16 {
 }
 
 // detail_region - кусок кадра после объектива, из которого геометрия
-// читает r, с запасом для фильтров
+// читает r, с запасом для фильтров; с пятнами - и их источники (пятна
+// считаются по сырью куска - источник должен быть в нём), запас - уже
+// вокруг всего
 fn detail_region(src &DetailSrc, job DetailJob) Region {
-	return pipeline.geom_source_box(job.geom, src.w, src.h, true, job.r).expand(job.margin,
-		src.w, src.h)
+	sb := pipeline.geom_source_box(job.geom, src.w, src.h, true, job.r)
+	return pipeline.spots_region(job.spots, src.w, src.h, sb).expand(job.margin, src.w,
+		src.h)
 }
 
 // detail_prep - линейное сырьё фрагмента r.w x r.h RGB: то же, что та же
@@ -192,6 +196,9 @@ fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob, dai DetailAi, mut 
 		pipeline.deconvolve(pb, p.w, p.h, job.dc, 1.0)
 	} else {
 		buf
+	}
+	if job.spots.len > 0 {
+		pipeline.spots_apply(unsafe { &u16(lin.data) }, p, w, h, job.spots)
 	}
 	return pipeline.geom_apply_region(unsafe { &u16(lin.data) }, p, w, h, 3, job.geom, true,
 		job.r)

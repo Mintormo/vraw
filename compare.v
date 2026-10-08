@@ -49,7 +49,7 @@ struct BaKey {
 // показ карты дымки или резкости
 fn ba_active(st &State) bool {
 	return (st.ba_hold || st.ba_split || st.ba_sbs) && st.history.len > 0 && st.glin.len > 0
-		&& !st.crop_mode && !st.haze_show && !st.sharp_show && st.sharp_drag == .off
+		&& !st.crop_mode && !st.haze_show && !st.dust_show && !st.sharp_show && st.sharp_drag == .off
 }
 
 // ba_index - номер записи «до» (выбранная, если она ещё есть, иначе первая)
@@ -89,13 +89,37 @@ fn cur_prep_key(st &State) string {
 		st.dc_applied, st.ai_applied)
 }
 
-// ba_own - у «до» своё сырьё и оно готово (иначе - нынешнее)
+// ba_own - у «до» своё сырьё и оно готово (иначе - нынешнее): другая
+// подготовка - своё из dev_linear; та же подготовка, но другие пятна -
+// нынешнее сырьё со своими пятнами
 fn ba_own(st &State) bool {
 	if st.history.len == 0 {
 		return false
 	}
-	need := ba_prep_key(st, ba_state(st))
-	return need != cur_prep_key(st) && st.ba_raw_key == need && st.ba_glin.len > 0
+	b := ba_state(st)
+	need := ba_prep_key(st, b)
+	if need != cur_prep_key(st) {
+		return st.ba_raw_key == need && st.ba_glin.len > 0
+	}
+	return ba_spots_differ(st, b) && st.ba_glin.len > 0 && st.ba_gkey == ba_gkey_of(st, b, false)
+}
+
+// ba_spots_differ - пятна «до» не те, что у нынешней правки
+fn ba_spots_differ(st &State, b EditState) bool {
+	return pipeline.spot_key(b.spots) != pipeline.spot_key(st.edit.spots)
+}
+
+// ba_gkey_of - ключ сырья «до» после пятен и геометрии: своё сырьё
+// (own_raw - номер ba_gen) или нынешнее (номер lin_gen, со знаком минус -
+// не путать с ba_gen); пятна - записи «до», геометрия - нынешняя
+fn ba_gkey_of(st &State, b EditState, own_raw bool) GeomKey {
+	return GeomKey{
+		lin_gen: if own_raw { st.ba_gen } else { -1 - st.lin_gen }
+		geom:    st.edit.geom
+		crop:    !st.crop_mode
+		valid:   true
+		spots:   pipeline.spot_key(b.spots)
+	}
 }
 
 // ba_maps - маска «Тени/Света» и карта дымки, по которым считается «до»
@@ -110,39 +134,23 @@ fn ba_maps(st &State) ([]u16, &pipeline.HazeMap) {
 fn ba_ensure_raw(mut st State) {
 	b := ba_state(st)
 	need := ba_prep_key(st, b)
-	if need == cur_prep_key(st) {
-		return
-	}
-	if st.ba_raw_key != need || st.ba_lin.len == 0 {
+	own_raw := need != cur_prep_key(st)
+	if own_raw && (st.ba_raw_key != need || st.ba_lin.len == 0) {
 		ba_prep_start(mut st, b, need)
 		return
 	}
-	// Геометрия - нынешняя (шторка совпадает), пересчёт по ключу
-	gk := GeomKey{
-		lin_gen: st.ba_gen
-		geom:    st.edit.geom
-		crop:    !st.crop_mode
-		valid:   true
+	if !own_raw && !ba_spots_differ(st, b) {
+		return
 	}
+	// Пятна записи «до», геометрия - нынешняя (шторка совпадает), пересчёт
+	// по ключу
+	gk := ba_gkey_of(st, b, own_raw)
 	if gk == st.ba_gkey && st.ba_glin.len > 0 {
 		return
 	}
-	drop(mut st.ba_glin)
-	drop(mut st.ba_gmask)
-	if gk.geom.is_noop(gk.crop) {
-		st.ba_glin = share(st.ba_lin)
-		st.ba_gmask = share(st.ba_mask)
-	} else {
-		ow, oh := gk.geom.out_size(st.pw, st.ph, gk.crop)
-		st.ba_glin = own_new[u16](ow * oh * 3)
-		pipeline.geom_apply_into(unsafe { &u16(st.ba_lin.data) }, st.pw, st.ph, 3, gk.geom,
-			gk.crop, mut st.ba_glin)
-		if st.ba_mask.len == st.pw * st.ph * pipeline.mask_ch {
-			st.ba_gmask = own_new[u16](ow * oh * pipeline.mask_ch)
-			pipeline.geom_apply_into(unsafe { &u16(st.ba_mask.data) }, st.pw, st.ph, pipeline.mask_ch,
-				gk.geom, gk.crop, mut st.ba_gmask)
-		}
-	}
+	lin := if own_raw { st.ba_lin } else { st.linear }
+	mask := if own_raw { st.ba_mask } else { st.mask }
+	geom_stage(lin, mask, st.pw, st.ph, b.spots, gk, mut st.ba_glin, mut st.ba_gmask)
 	st.ba_haze = pipeline.HazeMap{}
 	st.ba_gkey = gk
 }

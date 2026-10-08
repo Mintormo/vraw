@@ -108,6 +108,21 @@ struct SideState {
 	// Чёрно-белое (в старых файлах нет - цвет; микшер пуст - нули)
 	bw     bool
 	bw_mix []f32 // 8 диапазонов, как HSL
+	// Удаление пятен (в старых файлах нет - пусто)
+	spots []SideSpot
+}
+
+// SideSpot - пятно в файле (pipeline.Spot): режим строкой ('heal' /
+// 'clone'), точки - доли кадра до поворота и кадрирования
+struct SideSpot {
+	x       f32
+	y       f32
+	sx      f32
+	sy      f32
+	r       f32
+	feather f32
+	opacity f32
+	mode    string
 }
 
 // SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
@@ -309,6 +324,34 @@ fn side_mask(m pipeline.Mask) SideMask {
 	}
 }
 
+fn side_spot(p pipeline.Spot) SideSpot {
+	return SideSpot{
+		x:       p.x
+		y:       p.y
+		sx:      p.sx
+		sy:      p.sy
+		r:       p.r
+		feather: p.feather
+		opacity: p.opacity
+		mode:    if p.mode == .clone { 'clone' } else { 'heal' }
+	}
+}
+
+// spot_of - пятно из файла: радиус и проценты - в пределах ползунков,
+// центры - в кадре
+fn spot_of(s SideSpot) pipeline.Spot {
+	return pipeline.Spot{
+		x:       clampf(s.x, 0, 1)
+		y:       clampf(s.y, 0, 1)
+		sx:      clampf(s.sx, 0, 1)
+		sy:      clampf(s.sy, 0, 1)
+		r:       clampf(s.r, pipeline.spot_r_min, pipeline.spot_r_max)
+		feather: clamp_pct(s.feather)
+		opacity: clamp_pct(s.opacity)
+		mode:    if s.mode == 'clone' { .clone } else { .heal }
+	}
+}
+
 // clamp_persp - перспектива в пределах ползунка (-100..100)
 fn clamp_persp(v f32) f32 {
 	return if v < -100 { -100 } else if v > 100 { 100 } else { v }
@@ -472,6 +515,7 @@ fn side_state(e EditState) SideState {
 		grade_balance: p.grade.balance
 		bw:            p.bw
 		bw_mix:        p.bw_mix[..].clone()
+		spots:         e.spots.map(side_spot(it))
 	}
 }
 
@@ -586,6 +630,7 @@ fn edit_state(s SideState) !EditState {
 		crop_aw:       if s.crop_aw > 0 { s.crop_aw } else { 3 }
 		crop_ah:       if s.crop_ah > 0 { s.crop_ah } else { 2 }
 		crop_portrait: s.crop_portrait
+		spots:         s.spots.map(spot_of(it))
 	}
 	for i in 0 .. 5 {
 		e.params.eq[i] = s.eq[i]

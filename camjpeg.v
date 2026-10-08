@@ -14,7 +14,7 @@ import pipeline
 // показ дымки и резкости
 fn jpeg_active(st &State) bool {
 	return st.jpeg_show && st.cam_view.len == st.pw * st.ph * 4 && st.pw > 0 && !st.crop_mode
-		&& !st.haze_show && !st.sharp_show && st.sharp_drag == .off
+		&& !st.haze_show && !st.dust_show && !st.sharp_show && st.sharp_drag == .off
 }
 
 // jpeg_pixels - JPEG камеры в холст gw x gh с геометрией кадра

@@ -257,6 +257,9 @@ fn set_crop_mode(mut st State, on bool) {
 	st.crop_drag = CropDrag{}
 	if on {
 		set_wb_pick(mut st, false)
+		if st.spot_mode {
+			set_spot_mode(mut st, false)
+		}
 		st.crop_before = st.edit.clone()
 		// Кадр без рамки и без выбранной пропорции - последняя выбранная
 		// (по ориентации кадра), рамка - наибольшая

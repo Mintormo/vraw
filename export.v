@@ -333,6 +333,10 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	if !progress.stage(.tone, 0, 0) {
 		return ExportCancelled{}
 	}
+	// Удаление пятен - как в превью: после подготовки, до геометрии
+	if e.spots.len > 0 {
+		pipeline.spots_apply(src, pipeline.Region{0, 0, w, h}, w, h, e.spots)
+	}
 	// Кадрирование и поворот - как в превью: после подготовки сырья, сырьё
 	// и маска «Тени/Света» одной геометрией
 	mut gw := w

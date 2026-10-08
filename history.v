@@ -45,6 +45,9 @@ mut:
 	crop_aw       int = 3
 	crop_ah       int = 2
 	crop_portrait bool
+	// Удаление пятен (spots_ui.v): по порядку, точки - доли кадра до
+	// поворота и кадрирования (pipeline/spots.v)
+	spots []pipeline.Spot
 	// Сила коррекции виньетирования кадра «как JPEG камеры» (CamLook.vign) -
 	// производное, как params.curve (with_derived), в сайдкар не пишется
 	vign f32 = lens.vign_default
@@ -72,6 +75,7 @@ fn (e EditState) clone() EditState {
 	c.params.tc_g = e.params.tc_g.clone()
 	c.params.tc_b = e.params.tc_b.clone()
 	c.params.masks = e.params.masks.map(it.copy())
+	c.spots = e.spots.clone()
 	c.curve_pts = [][]vgui.CurvePoint{}
 	for pts in e.curve_pts {
 		c.curve_pts << pts.clone()
@@ -226,6 +230,7 @@ fn set_edit(mut st State, e EditState) {
 	sync_wb_mode(mut st)
 	sync_crop_ui(mut st)
 	sync_mask_ui(mut st)
+	sync_spot_ui(mut st)
 	sync_grade_ui(mut st)
 	sync_bw_ui(mut st)
 }

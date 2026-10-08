@@ -23,6 +23,7 @@ struct PanelSection {
 const panel_sections = [
 	PanelSection{'lens', 'Коррекция', true},
 	PanelSection{'crop', 'Кадрирование и поворот', false},
+	PanelSection{'spots', 'Удаление пятен', false},
 	PanelSection{'wb', 'Баланс белого', true},
 	PanelSection{'tone', 'Экспозиция и тон', true},
 	PanelSection{'haze', 'Удаление дымки', false},
