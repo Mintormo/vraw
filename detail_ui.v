@@ -111,6 +111,7 @@ struct DetailFrac {
 // DetailPrep - подготовка сырья фрагмента одной стороны
 struct DetailPrep {
 	use_lens  bool
+	man       lens.Manual // ручная коррекция объектива
 	nr        [4]f32
 	dc        pipeline.Sharpen
 	ai_s      f32 // 0 - без AI
@@ -125,6 +126,7 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 		b := ba_state(st)
 		return DetailPrep{
 			use_lens:  b.lens_corr && !isnil(st.corr)
+			man:       b.lman
 			nr:        b.nr
 			dc:        b.params.sharp
 			ai_s:      ba_ai(st, b)
@@ -134,6 +136,7 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 	}
 	return DetailPrep{
 		use_lens:  st.edit.lens_corr && !isnil(st.corr)
+		man:       st.edit.lman
 		nr:        st.edit.nr
 		dc:        st.edit.params.sharp
 		ai_s:      ai_effective(st)
@@ -209,7 +212,7 @@ mut:
 fn detail_prep_key(st &State, side int) string {
 	g := out_geom(&st.edit)
 	p := detail_prep_of(st, side)
-	return '${st.file_gen}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
+	return '${st.file_gen}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
 		p.model
 	} else {
 		''
@@ -219,7 +222,7 @@ fn detail_prep_key(st &State, side int) string {
 // detail_tiles_key - от чего зависят плитки модели: сырьё после объектива
 // и модель
 fn detail_tiles_key(st &State, p DetailPrep) string {
-	return '${st.raw_path}|${p.use_lens}|${st.look.vign}|${st.look.zoom}|${p.model}'
+	return '${st.raw_path}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.model}'
 }
 
 // detail_wanted - нужен ли слой детализации сейчас
@@ -511,6 +514,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 			nr:    req.prep.nr
 			dc:    req.prep.dc
 			spots: req.prep.spots
+			man:   req.prep.man
 		}, dai, mut prog) or {
 			if err is ai.Cancelled {
 				res.cancelled = true

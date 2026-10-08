@@ -58,9 +58,11 @@ fn prefetch_worker(job PfJob, mut app vgui.App, on_done fn (PfResult)) {
 		return
 	}
 	mut lens_corr := neutral_edit().lens_corr
+	mut man := lens.Manual{}
 	if side := load_sidecar(sidecar_path(job.path)) {
 		if side.history.len > 0 {
 			lens_corr = side.history[side.current].state.lens_corr
+			man = side.history[side.current].state.lman
 		}
 	}
 	mut res := load_compute(LoadJob{
@@ -68,6 +70,7 @@ fn prefetch_worker(job PfJob, mut app vgui.App, on_done fn (PfResult)) {
 		dev:       d
 		db:        job.db
 		lens_corr: lens_corr
+		man:       man
 		stop:      job.stop
 	})
 	d.close()
@@ -203,6 +206,7 @@ fn load_start(mut st State, nd &raw.Developer) {
 		dev:       nd
 		db:        st.lens_db
 		lens_corr: st.edit.lens_corr
+		man:       st.edit.lman
 		stop:      stop
 	}
 	mut app := st.app

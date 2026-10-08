@@ -198,7 +198,7 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 			m := d.meta()
 			corr := db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
 			lm = lens_match(cj, d.flip(), corr, lin, w, h, m)
-			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, lm.vign, lm.zoom)
+			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, true, lm.vign, lm.zoom, lens.Manual{})
 		}
 		if e.use_curve {
 			look = CamLook{

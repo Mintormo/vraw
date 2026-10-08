@@ -7,6 +7,7 @@ import os
 import vgui
 import math
 import pipeline
+import lens
 
 // new_state - State с двумя ползунками (экспозиция, яркостный шумодав)
 // и списком истории, как в main; открыт «файл» (запись «Открыт файл»).
@@ -417,6 +418,28 @@ fn test_sidecar_ai_field() {
 	assert loaded.history[1].state.ai == 70
 	assert loaded.history[1].state.ai_model == 'scunet_real_gan'
 	assert loaded.history[1].state.params.exposure == f32(0.3)
+}
+
+// Ручная коррекция объектива в сайдкаре; в старом файле её нет - нули,
+// средняя точка 50
+fn test_sidecar_manual_lens() {
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('lman')
+	st.edit.lman = lens.Manual{
+		dist:     -12
+		vign:     35
+		vign_mid: 70
+		ca_r:     8
+		ca_b:     -5
+	}
+	drag(mut exp, 0.2)
+	text := os.read_file(st.side_path)!
+	assert text.contains('"man_dist": -12')
+	loaded := decode_sidecar(text)!
+	assert loaded.history[1].state.lman == st.edit.lman
+	old := decode_sidecar(text.replace('"man_vign_mid"', '"x_mid"').replace('"man_vign": 35', '"x_v": 35'))!
+	assert old.history[1].state.lman.vign == 0
+	assert old.history[1].state.lman.vign_mid == 50
 }
 
 // Баланс белого и резкость в сайдкаре: пишутся и читаются; старый файл

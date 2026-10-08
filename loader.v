@@ -35,6 +35,7 @@ struct LoadJob {
 	dev       &raw.Developer = unsafe { nil }
 	db        &lens.Database = unsafe { nil } // общая база lensfun (nil - без коррекции)
 	lens_corr bool
+	man       lens.Manual // ручная коррекция объектива
 	stop &StopFlag = unsafe { nil }
 }
 
@@ -49,6 +50,7 @@ mut:
 	corr       &lens.Corrector = unsafe { nil }
 	meta       raw.Meta
 	lens_corr  bool
+	man        lens.Manual // с какой ручной коррекцией raw_linear
 	w          int
 	h          int
 	dev_linear []u16
@@ -83,6 +85,7 @@ fn load_compute(job LoadJob) LoadResult {
 		dev:       d
 		meta:      meta
 		lens_corr: job.lens_corr
+		man:       job.man
 	}
 	// Профиль объектива, проявка, подготовка, камерная кривая
 	res = LoadResult{
@@ -130,6 +133,7 @@ fn load_compute(job LoadJob) LoadResult {
 		aperture:  meta.aperture
 		vign:      vign
 		zoom:      lm.zoom
+		man:       job.man
 	})
 	if job.stop.stop {
 		drop(mut dev_linear)

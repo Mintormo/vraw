@@ -59,7 +59,8 @@ fn frame_trim(mut st State) {
 struct FrameCache {
 mut:
 	path       string
-	lens_corr  bool // raw_linear - с коррекцией объектива
+	lens_corr  bool        // raw_linear - с коррекцией объектива
+	man        lens.Manual // и с этой ручной коррекцией
 	corr       &lens.Corrector = unsafe { nil } // из общей базы lensfun
 	w          int
 	h          int
@@ -90,6 +91,7 @@ fn frame_store(mut st State) {
 	mut fc := &FrameCache{
 		path:       st.raw_path
 		lens_corr:  st.edit.lens_corr
+		man:        st.edit.lman
 		corr:       st.corr
 		w:          st.pw
 		h:          st.ph
@@ -117,6 +119,7 @@ fn frame_put(mut st State, path string, res LoadResult) {
 	mut fc := &FrameCache{
 		path:       path
 		lens_corr:  res.lens_corr
+		man:        res.man
 		corr:       res.corr
 		w:          res.w
 		h:          res.h
@@ -185,6 +188,7 @@ fn frame_take(mut st State, path string, dev &raw.Developer) ?LoadResult {
 			corr:       c.corr
 			meta:       d.meta()
 			lens_corr:  c.lens_corr
+			man:        c.man
 			w:          c.w
 			h:          c.h
 			dev_linear: c.dev_linear

@@ -109,6 +109,7 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 			}
 			'lens' {
 				e.lens_corr = s.lens_corr
+				e.lman = s.lman
 			}
 			'crop' {
 				e.geom = s.geom

@@ -43,10 +43,7 @@ fn detail_case() ?(&DetailSrc, &lens.Database) {
 fn detail_full(src &DetailSrc, c &lens.Corrector, vign f32, job DetailJob) ([]u16, int, int) {
 	mut buf := src.dev.clone()
 	pb := unsafe { &u16(buf.data) }
-	if !isnil(c) {
-		c.vignetting(pb, src.w, src.h, src.meta.focal, src.meta.aperture, vign)
-		c.geometry(pb, src.w, src.h, src.meta.focal)
-	}
+	lens_full(pb, src.w, src.h, c, src.meta.focal, src.meta.aperture, vign, 1, job.man)
 	if job.nr[0] > 0 {
 		pipeline.impulse(pb, src.w, src.h, job.nr[0])
 	}
@@ -120,6 +117,50 @@ fn test_detail_matches_full() ! {
 		assert d <= 1, 'r=${r} расхождение ${d}'
 	}
 	ln.free()
+}
+
+// Ручная коррекция объектива: поверх профиля и без него (lens_piece -
+// ручной ремап из куска, исправленного профилем)
+fn test_detail_manual_lens() ! {
+	src, db := detail_case() or { return }
+	man := lens.Manual{
+		dist:     -30
+		vign:     40
+		vign_mid: 35
+		ca_r:     25
+		ca_b:     -40
+	}
+	job0 := DetailJob{
+		geom: pipeline.Geom{
+			angle: -1.5
+			x0:    0.03
+			y0:    0.02
+			x1:    0.95
+			y1:    0.97
+		}
+		nr:   [f32(0), 20, 20, 0]!
+		man:  man
+	}
+	c := db.find(src.meta.cam_make, src.meta.cam_model, src.meta.lens) or { unsafe { nil } }
+	for use_prof in [false, true] {
+		if use_prof && isnil(c) {
+			eprintln('ПРОПУСК части с профилем: профиль объектива не найден')
+			continue
+		}
+		cc := if use_prof { c } else { unsafe { &lens.Corrector(nil) } }
+		mut ln := if use_prof { make_detail_lens(c, src, 0.5, 1) } else { unsafe { &DetailLens(nil) } }
+		full, ow, oh := detail_full(src, cc, 0.5, job0)
+		for r in [Region{ow / 3, oh / 3, 400, 300}, Region{0, 0, 250, 200},
+			Region{ow - 300, oh - 260, 300, 260}] {
+			mut np := ai.NoProgress{}
+			got := detail_prep(src, ln, DetailJob{ ...job0, r: r }, DetailAi{}, mut np)!
+			d := detail_diff(got, full, ow, r)
+			assert d <= 1, 'профиль ${use_prof}, r=${r}: расхождение ${d}'
+		}
+		if use_prof {
+			ln.free()
+		}
+	}
 }
 
 fn test_detail_no_lens() ! {

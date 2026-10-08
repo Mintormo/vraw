@@ -14,6 +14,7 @@ import math
 import json2
 import vgui
 import pipeline
+import lens
 
 const sidecar_ext = '.vraw.json'
 const sidecar_version = 1
@@ -110,6 +111,13 @@ struct SideState {
 	bw_mix []f32 // 8 диапазонов, как HSL
 	// Удаление пятен (в старых файлах нет - пусто)
 	spots []SideSpot
+	// Ручная коррекция объектива (lens.Manual; в старых файлах нет -
+	// нули, средняя точка 0 без виньетирования читается как 50)
+	man_dist     f32
+	man_vign     f32
+	man_vign_mid f32
+	man_ca_r     f32
+	man_ca_b     f32
 }
 
 // SideSpot - пятно в файле (pipeline.Spot): режим строкой ('heal' /
@@ -516,6 +524,11 @@ fn side_state(e EditState) SideState {
 		bw:            p.bw
 		bw_mix:        p.bw_mix[..].clone()
 		spots:         e.spots.map(side_spot(it))
+		man_dist:      e.lman.dist
+		man_vign:      e.lman.vign
+		man_vign_mid:  e.lman.vign_mid
+		man_ca_r:      e.lman.ca_r
+		man_ca_b:      e.lman.ca_b
 	}
 }
 
@@ -631,6 +644,13 @@ fn edit_state(s SideState) !EditState {
 		crop_ah:       if s.crop_ah > 0 { s.crop_ah } else { 2 }
 		crop_portrait: s.crop_portrait
 		spots:         s.spots.map(spot_of(it))
+		lman:          lens.Manual{
+			dist:     clamp_persp(s.man_dist)
+			vign:     clamp_persp(s.man_vign)
+			vign_mid: if s.man_vign_mid > 0 || s.man_vign != 0 { clamp_pct(s.man_vign_mid) } else { f32(50) }
+			ca_r:     clamp_persp(s.man_ca_r)
+			ca_b:     clamp_persp(s.man_ca_b)
+		}
 	}
 	for i in 0 .. 5 {
 		e.params.eq[i] = s.eq[i]

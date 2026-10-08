@@ -595,6 +595,7 @@ struct PrepJob {
 	aperture  f32
 	vign      f32    // сила коррекции виньетирования (CamLook.vign)
 	zoom      f32 = 1 // кадр «как у камеры» (CamLook.zoom)
+	man       lens.Manual // ручная коррекция (после профиля, и без него)
 	nr        [4]f32 // импульсный, яркостный, цветовой, ореолы
 	ai_src    []u16  // результат модели по тому же сырью (только чтение) или пусто
 	ai_s      f32    // сила AI 0..100 (0 - без AI)
@@ -633,6 +634,7 @@ fn make_prep_job(mut st State) PrepJob {
 		aperture:  st.meta.aperture
 		vign:      st.look.vign
 		zoom:      st.look.zoom
+		man:       st.edit.lman
 		nr:        st.edit.nr
 		ai_src:    if ai_s > 0 { share(st.ai_linear) } else { []u16{} }
 		ai_s:      ai_s
@@ -673,13 +675,12 @@ fn prep_compute(job PrepJob) PrepResult {
 	// Сырьё после объектива (точка возврата для следующего пересчёта
 	// шумодава): коррекция - на своей копии
 	mut lensed := share(job.src)
-	if job.redo_lens && !isnil(job.corr) {
+	if job.redo_lens && (!isnil(job.corr) || job.man.active()) {
 		drop(mut lensed)
 		lensed = own_clone(job.src)
 		rb := unsafe { &u16(lensed.data) }
-		job.corr.vignetting(rb, job.w, job.h, job.focal, job.aperture, job.vign)
-		// Дисторсия + TCA - строго после виньетирования (ремап двигает пиксели)
-		job.corr.geometry_zoom(rb, job.w, job.h, job.focal, job.zoom)
+		lens_full(rb, job.w, job.h, job.corr, job.focal, job.aperture, job.vign, job.zoom,
+			job.man)
 	}
 	// AI и шумодав - на своей копии сырья
 	use_ai := job.ai_s > 0 && job.ai_src.len == lensed.len
@@ -1450,7 +1451,7 @@ fn main() {
 		'Контраст', 'Сочность', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
 		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
 		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв',
-		'Смешение', 'Баланс'], 8)
+		'Смешение', 'Баланс', 'Дисторсия', 'ХА: красный', 'ХА: синий', 'Виньетка'], 8)
 	val_w := column_width(mut win, ['-4.00', '100', '12000 K', '-150', '3.00 px', '360°'], 8)
 
 	mut st := &State{}
@@ -2517,7 +2518,7 @@ fn main() {
 		show_viewer(mut cv, mut placeholder)
 		sync_view_bg(mut st)
 		// Что поменяли за время загрузки (и шумодав из сайдкара)
-		if st.edit.lens_corr != res.lens_corr {
+		if st.edit.lens_corr != res.lens_corr || st.edit.lman != res.man {
 			request_prep(mut st, mut app, true)
 		} else if prep_stale(st) {
 			request_prep(mut st, mut app, false)
@@ -3380,11 +3381,11 @@ fn main() {
 	acc.fit_content = true
 	acc.spacing = 4
 	acc.header_height = 30
-	panel_add(mut st, 'lens', section([
-		SectionRow{lens_cb},
-		SectionRow{lens_lb},
-		SectionRow{prof_row},
-	]))
+	mut lens_rows := [SectionRow{lens_cb}, SectionRow{lens_lb}]
+	lens_rows << lens_manual_rows(mut st, lbl_w, val_w)
+	lens_rows << SectionRow{vgui.separator()}
+	lens_rows << SectionRow{prof_row}
+	panel_add(mut st, 'lens', section(lens_rows))
 	panel_add(mut st, 'crop', section(crop_rows))
 	panel_add(mut st, 'wb', section(wb_rows))
 	panel_add(mut st, 'tone', section([

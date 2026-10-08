@@ -17,17 +17,31 @@ import ai
 import bigbuf
 import imgio
 
-// correct_lens - коррекция объектива на месте (виньетирование с силой vign
-// строго до дисторсии: ремап двигает пиксели; кадр увеличен в zoom раз -
-// «как у камеры»); false - профиля нет
-fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, vign f32, zoom f32) bool {
-	if isnil(db) {
-		return false
+// lens_full - коррекция объектива всего кадра на месте: профиль c (nil -
+// без него; виньетирование с силой vign, кадр увеличен в zoom раз - «как
+// у камеры») и ручная man (lens/manual.v). Виньетирование (профиля, затем
+// ручное) - строго до ремапов, по геометрии сенсора; ремап профиля, затем
+// ручной - доводка уже исправленного кадра. Тот же порядок - у фрагмента
+// 1:1 (lens_piece, detail.v)
+fn lens_full(buf &u16, w int, h int, c &lens.Corrector, focal f32, aperture f32, vign f32, zoom f32, man lens.Manual) {
+	if !isnil(c) {
+		c.vignetting(buf, w, h, focal, aperture, vign)
 	}
-	c := db.find(m.cam_make, m.cam_model, m.lens) or { return false }
-	c.vignetting(buf, w, h, m.focal, m.aperture, vign)
-	c.geometry_zoom(buf, w, h, m.focal, zoom)
-	return true
+	lens.manual_vignetting(buf, w, h, man)
+	if !isnil(c) {
+		c.geometry_zoom(buf, w, h, focal, zoom)
+	}
+	lens.manual_geometry(buf, w, h, man)
+}
+
+// correct_lens - коррекция объектива на месте по профилю из базы db
+// (если есть, use_prof) и ручная man (lens_full)
+fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, use_prof bool, vign f32, zoom f32, man lens.Manual) {
+	mut c := unsafe { &lens.Corrector(nil) }
+	if use_prof && !isnil(db) {
+		c = db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
+	}
+	lens_full(buf, w, h, c, m.focal, m.aperture, vign, zoom, man)
 }
 
 // Image - проявленный 8-битный RGB-кадр и метаданные RAW (для EXIF)
@@ -144,7 +158,7 @@ fn write_secs(f imgio.Format) f64 {
 fn export_plan(e EditState, ai_secs f64, f imgio.Format) StagePlan {
 	mut st := [ExportStage.decode]
 	mut w := [0.6]
-	if e.lens_corr {
+	if e.lens_corr || e.lman.active() {
 		st << .lens
 		w << 2.8
 	}
@@ -269,11 +283,11 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	w := img.width
 	h := img.height
 	buf := img.data_u16()
-	if e.lens_corr {
+	if e.lens_corr || e.lman.active() {
 		if !progress.stage(.lens, 0, 0) {
 			return ExportCancelled{}
 		}
-		correct_lens(buf, w, h, meta, db, e.vign, e.lens_zoom)
+		correct_lens(buf, w, h, meta, db, e.lens_corr, e.vign, e.lens_zoom, e.lman)
 	}
 	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
 	if e.ai > 0 {

@@ -23,6 +23,9 @@ mut:
 	params    pipeline.Params
 	curve_pts [][]vgui.CurvePoint // точки кривых: 0 - RGB, 1..3 - R, G, B
 	lens_corr bool = true // чекбокс «Коррекция объектива»
+	// Ручная коррекция объектива (lens/manual.v): дисторсия, ХА,
+	// виньетирование - и без профиля, и поверх него
+	lman lens.Manual
 	use_curve bool = true // «как JPEG камеры» - основа профиля (profile.v)
 	// стиль поверх (pipeline.style_keys; '' - нет); params.style -
 	// производное (with_derived)
@@ -239,7 +242,7 @@ fn set_edit(mut st State, e EditState) {
 // пересчёты. Тональные настройки - один apply (~60 мс); подготовка сырья
 // (коррекция объектива, шумодав) - фоновый request_prep.
 fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Canvas, mut app vgui.App) {
-	lens_changed := st.edit.lens_corr != e.lens_corr
+	lens_changed := st.edit.lens_corr != e.lens_corr || st.edit.lman != e.lman
 	set_edit(mut st, e)
 	if lens_changed {
 		request_prep(mut st, mut app, true)

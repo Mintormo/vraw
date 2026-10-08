@@ -26,6 +26,7 @@ module main
 // (Z и пробел - то же по центру вида).
 import vgui
 import pipeline
+import lens
 
 // Шторка: линия, ручка, подписи
 const ba_line = vgui.Color{255, 255, 255, 230}
@@ -65,7 +66,7 @@ fn ba_state(st &State) EditState {
 // ba_ai - сила AI у «до»: результат модели посчитан по нынешнему сырью
 // после объектива - годится, только если у «до» тот же объектив и модель
 fn ba_ai(st &State, b EditState) f32 {
-	return if b.ai > 0 && ai_ready(st) && b.lens_corr == st.edit.lens_corr && b.ai_model == st.ai_lin_model {
+	return if b.ai > 0 && ai_ready(st) && b.lens_corr == st.edit.lens_corr && b.lman == st.edit.lman && b.ai_model == st.ai_lin_model {
 		b.ai
 	} else {
 		0
@@ -73,19 +74,19 @@ fn ba_ai(st &State, b EditState) f32 {
 }
 
 // prep_key_of - подготовка сырья снимка (то, что не входит в тон)
-fn prep_key_of(lens_on bool, nr [4]f32, dc [3]f32, ai_s f32) string {
-	return '${lens_on}|${nr}|${dc}|${ai_s}'
+fn prep_key_of(lens_on bool, man lens.Manual, nr [4]f32, dc [3]f32, ai_s f32) string {
+	return '${lens_on}|${man.key()}|${nr}|${dc}|${ai_s}'
 }
 
 // ba_prep_key - подготовка сырья «до»
 fn ba_prep_key(st &State, b EditState) string {
-	return prep_key_of(b.lens_corr && !isnil(st.corr), b.nr, dc_key(b.params.sharp),
+	return prep_key_of(b.lens_corr && !isnil(st.corr), b.lman, b.nr, dc_key(b.params.sharp),
 		ba_ai(st, b))
 }
 
 // cur_prep_key - подготовка нынешнего сырья (linear)
 fn cur_prep_key(st &State) string {
-	return prep_key_of(st.edit.lens_corr && !isnil(st.corr), st.nr_applied,
+	return prep_key_of(st.edit.lens_corr && !isnil(st.corr), st.edit.lman, st.nr_applied,
 		st.dc_applied, st.ai_applied)
 }
 
@@ -177,6 +178,7 @@ fn ba_prep_start(mut st State, b EditState, key string) {
 		aperture:  st.meta.aperture
 		vign:      st.look.vign
 		zoom:      st.look.zoom
+		man:       b.lman
 		nr:        b.nr
 		ai_src:    if ai_s > 0 { share(st.ai_linear) } else { []u16{} }
 		ai_s:      ai_s

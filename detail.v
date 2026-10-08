@@ -104,6 +104,7 @@ struct DetailJob {
 	nr     [4]f32
 	dc     pipeline.Sharpen
 	spots  []pipeline.Spot // удаление пятен (после Capture, до геометрии)
+	man    lens.Manual     // ручная коррекция объектива (после профиля)
 	margin int = detail_margin
 }
 
@@ -122,9 +123,25 @@ fn (n NoRunner) run(_ []f32, mut _ []f32, _ int, _ int) ! {
 	return error('модели нет')
 }
 
-// lens_piece - прямоугольник p кадра после коррекции объектива (ln nil -
-// без неё): побитово равен той же области полной коррекции
-fn lens_piece(src &DetailSrc, ln &DetailLens, p Region) []u16 {
+// lens_piece - прямоугольник p кадра после коррекции объектива: профиль
+// (ln nil - без него) и ручная man; побитово равен той же области полной
+// коррекции (lens_full: виньетирование профиля и ручное, ремап профиля,
+// ручной ремап)
+fn lens_piece(src &DetailSrc, ln &DetailLens, man lens.Manual, p Region) []u16 {
+	mp := lens.manual_plan(man, src.w, src.h) or {
+		return prof_piece(src, ln, lens.manual_vign_lut(man), p)
+	}
+	// Ручной ремап: кусок исправленного профилем кадра под p, из него - p
+	p1 := mp.source_box(p)
+	piece := prof_piece(src, ln, lens.manual_vign_lut(man), p1)
+	mut buf := []u16{len: p.w * p.h * 3}
+	mp.remap(unsafe { &u16(piece.data) }, p1, p, unsafe { &u16(buf.data) })
+	return buf
+}
+
+// prof_piece - прямоугольник p кадра после профиля объектива (ln nil - без
+// него) и ручного виньетирования (mlut пусто - без него)
+fn prof_piece(src &DetailSrc, ln &DetailLens, mlut []f32, p Region) []u16 {
 	w := src.w
 	h := src.h
 	has_lut := !isnil(ln) && ln.lut.len > 0
@@ -135,6 +152,7 @@ fn lens_piece(src &DetailSrc, ln &DetailLens, p Region) []u16 {
 		if has_lut {
 			lens.vign_apply_region(unsafe { &u16(piece.data) }, sb, w, h, ln.lut)
 		}
+		lens.manual_vign_region(unsafe { &u16(piece.data) }, sb, w, h, mlut)
 		mut buf := []u16{len: p.w * p.h * 3}
 		ln.plan.remap(unsafe { &u16(piece.data) }, sb, p, unsafe { &u16(buf.data) })
 		return buf
@@ -143,6 +161,7 @@ fn lens_piece(src &DetailSrc, ln &DetailLens, p Region) []u16 {
 	if has_lut {
 		lens.vign_apply_region(unsafe { &u16(buf.data) }, p, w, h, ln.lut)
 	}
+	lens.manual_vign_region(unsafe { &u16(buf.data) }, p, w, h, mlut)
 	return buf
 }
 
@@ -174,13 +193,13 @@ fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob, dai DetailAi, mut 
 		t := tc.grid.cover(ai.Rect{p.x, p.y, p.w, p.h})
 		wr := tc.grid.window(t)
 		win := Region{wr.x, wr.y, wr.w, wr.h}
-		lw := lens_piece(src, ln, win)
+		lw := lens_piece(src, ln, job.man, win)
 		tc.fill(dai.model, t, unsafe { &u16(lw.data) }, wr, mut progress)!
 		den := tc.compose(ai.Rect{p.x, p.y, p.w, p.h})!
 		buf = pipeline.crop_region(unsafe { &u16(lw.data) }, win.w, 3, Region{p.x - win.x, p.y - win.y, p.w, p.h})
 		ai.blend(unsafe { &u16(buf.data) }, den, dai.strength / 100)
 	} else {
-		buf = lens_piece(src, ln, p)
+		buf = lens_piece(src, ln, job.man, p)
 	}
 	pb := unsafe { &u16(buf.data) }
 	if job.nr[0] > 0 {
