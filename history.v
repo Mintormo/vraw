@@ -226,6 +226,7 @@ fn set_edit(mut st State, e EditState) {
 	sync_wb_mode(mut st)
 	sync_crop_ui(mut st)
 	sync_mask_ui(mut st)
+	sync_grade_ui(mut st)
 }
 
 // restore_edit - откат/возврат к снимку: виджеты (set_edit) и ровно нужные

@@ -152,6 +152,7 @@ mut:
 	// Полноэкранный режим (panel.v): окно на весь экран без меню, панели
 	// и ленты; в настройки не пишется
 	fullscreen bool
+	work_w     f32 = 1440 // ширина окна (рабочей области), px (PanelFit)
 	win        &vgui.Window = unsafe { nil }
 	// Раскладка окна (panel.v): корень (меню + рабочая область), меню,
 	// аккордеон панели, виджеты разделов и их раскрытость (по индексу
@@ -172,6 +173,7 @@ mut:
 	hint_labels      []&vgui.Label
 	secondary_labels []&vgui.Label
 	hsl_labels       []&vgui.Label
+	grade_wheels     []&GradeWheel // круги раздела «Цветокоррекция» (grade_ui.v)
 	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
 	// AI-шумодав (ai_nr.v): где лежат модели и ORT, кэши моделей по id
 	// (модель грузится при первом прогоне), результат модели по raw_linear,
@@ -1395,7 +1397,7 @@ fn main() {
 	mut app := vgui.create_app(theme: theme)!
 	// Тема приложения: окно без своей темы получит её в add_window
 	// Размер по умолчанию - золотое сечение: 1440 / 890 ~ 1.618
-	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1440, height: 890)!
+	mut win := vgui.create_window(title: 'vraw - проявка RAW', width: 1440, height: 890)! // = State.work_w
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
@@ -1405,8 +1407,9 @@ fn main() {
 	lbl_w := column_width(mut win, ['Экспозиция', 'Тени',
 		'Контраст', 'Сочность', 'Насыщенность', 'Света', 'Чёрные', 'Средние', 'Белые',
 		'Импульсный', 'Яркостный', 'Цветовой', 'Ореолы', 'Оранжевый', 'Фиолетовый', 'Пурпурный', 'Сила',
-		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв'], 8)
-	val_w := column_width(mut win, ['-4.00', '100', '12000 K', '-150', '3.00 px'], 8)
+		'Режим', 'Температура', 'Оттенок', 'Глубина', 'Величина', 'Радиус', 'Порог', 'Маска краёв',
+		'Смешение', 'Баланс'], 8)
+	val_w := column_width(mut win, ['-4.00', '100', '12000 K', '-150', '3.00 px', '360°'], 8)
 
 	mut st := &State{}
 	st.settings = settings
@@ -3257,6 +3260,7 @@ fn main() {
 	panel_add(mut st, 'hsl', section([
 		SectionRow{hsl_tabs},
 	]))
+	panel_add(mut st, 'grade', grade_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'masks', section(mask_rows))
 	// Раскрытая секция показывает метки всех фильтров на снимке (индекс
 	// секции - layout_panel)
@@ -3374,9 +3378,10 @@ fn main() {
 	// справа или слева, или скрыта - layout_work (panel.v)
 	mut top := vgui.splitter_horizontal()
 	top.bar_size = 3
-	top.ratio = panel_start_ratio(st.settings.panel_left)
-	// Ширина просмотра изменилась - текущий кадр ленты снова по центру
+	// Ширину панели перетащили - запомнить в пикселях (при изменении окна
+	// она держится, fit_panel_ratio); текущий кадр ленты снова по центру
 	top.on_resize = fn [mut st] (r f32) {
+		panel_dragged(mut st)
 		center_strip(mut st)
 	}
 	st.hsplit = top
@@ -3389,6 +3394,10 @@ fn main() {
 	// Сочетания меню - и в полноэкранном режиме, где полоса скрыта
 	bar.keys_when_hidden = true
 	layout_work(mut st)
+	// Ширина панели в пикселях при изменении окна - до раскладки корня
+	win.add_widget(&PanelFit{
+		st: st
+	})
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).

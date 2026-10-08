@@ -30,6 +30,7 @@ const panel_sections = [
 	PanelSection{'eq', 'Тон-эквалайзер (EV)', false},
 	PanelSection{'curves', 'Кривые', false},
 	PanelSection{'hsl', 'HSL', false},
+	PanelSection{'grade', 'Цветокоррекция', false},
 	PanelSection{'masks', 'Градиентные фильтры', false},
 	PanelSection{'nr', 'Шумодав и ореолы', false},
 	PanelSection{'sharp', 'Резкость', false},
@@ -46,8 +47,8 @@ const view_pad = f32(16)
 // Мин. высота снимка в сплиттере «снимок | лента»
 const view_min_h = f32(200)
 
-// Ширина панели при старте - 440 при ширине окна 1280; мин. ширины
-// панели и просмотра
+// Ширина панели по умолчанию (перетащенная - в настройке panel_w); мин.
+// ширины панели и просмотра
 const panel_start_w = f32(440)
 const panel_min_w = f32(360)
 const viewer_min_w = f32(400)
@@ -187,6 +188,7 @@ fn layout_work(mut st State) {
 	if !panel_on(st) {
 		root.add(st.viewer, flex: 1)
 	} else {
+		fit_panel_ratio(mut st)
 		if st.settings.panel_left {
 			sp.min_first = panel_min_w
 			sp.min_second = viewer_min_w
@@ -220,11 +222,69 @@ fn viewer_share(st &State) f32 {
 	return if st.settings.panel_left { 1 - r } else { r }
 }
 
-// panel_start_ratio - доля первой половины сплиттера при старте: панель
-// panel_start_w при ширине окна 1280
-fn panel_start_ratio(left bool) f32 {
-	pf := panel_start_w / f32(1280 - 3)
-	return if left { pf } else { 1 - pf }
+// panel_width - ширина панели инструментов, px: перетащенная (настройка
+// panel_w) или по умолчанию
+fn panel_width(st &State) f32 {
+	return if st.settings.panel_w > 0 { f32(st.settings.panel_w) } else { panel_start_w }
+}
+
+// fit_panel_ratio - доля сплиттера «просмотр | панель» под ширину панели в
+// пикселях при ширине окна st.work_w: Splitter держит долю, а панель - свою
+// ширину, поэтому при изменении окна растёт или сжимается только просмотр.
+// Узкое окно - панель уже (до panel_min_w), настройка при этом не меняется.
+fn fit_panel_ratio(mut st State) {
+	if isnil(st.hsplit) {
+		return
+	}
+	mut sp := st.hsplit
+	usable := st.work_w - sp.bar_size
+	if usable <= 0 {
+		return
+	}
+	mut pw := panel_width(st)
+	if pw > usable - viewer_min_w {
+		pw = usable - viewer_min_w
+	}
+	if pw < panel_min_w {
+		pw = panel_min_w
+	}
+	pf := pw / usable
+	sp.ratio = if st.settings.panel_left { pf } else { 1 - pf }
+}
+
+// PanelFit - невидимый виджет окна ПЕРЕД корнем: в раскладке кадра
+// (arrange, до сплиттера) замечает новую ширину окна и ставит долю
+// сплиттера под ширину панели (fit_panel_ratio). Через window_resize было бы
+// на кадр позже: vgui рисует окно новой ширины до рассылки события.
+struct PanelFit {
+mut:
+	st &State = unsafe { nil }
+}
+
+fn (mut f PanelFit) arrange(mut ctx vgui.RenderContext) {
+	mut st := f.st
+	if ctx.screen_width > 0 && ctx.screen_width != st.work_w {
+		st.work_w = ctx.screen_width
+		fit_panel_ratio(mut st)
+	}
+}
+
+fn (mut f PanelFit) draw(mut _ vgui.RenderContext) {}
+
+fn (mut f PanelFit) handle_event(_ &vgui.GuiEvent, _ &vgui.App) bool {
+	return false
+}
+
+// panel_dragged - ширину панели перетащили: запомнить её в пикселях
+fn panel_dragged(mut st State) {
+	sp := st.hsplit
+	usable := sp.bounds.w - sp.bar_size
+	if usable <= 0 {
+		return
+	}
+	pf := if st.settings.panel_left { sp.ratio } else { 1 - sp.ratio }
+	st.settings.panel_w = int(pf * usable + 0.5)
+	save_settings(st.settings)
 }
 
 // panel_on / strip_on - видны ли панель и лента сейчас: в окне - по
@@ -257,12 +317,8 @@ fn set_panel_left(mut st State, left bool) {
 		return
 	}
 	st.settings.panel_left = left
-	if !isnil(st.hsplit) {
-		mut sp := st.hsplit
-		sp.ratio = 1 - sp.ratio
-	}
 	save_settings(st.settings)
-	layout_work(mut st)
+	layout_work(mut st) // доля под сторону - fit_panel_ratio
 	sync_settings_ui(mut st)
 }
 

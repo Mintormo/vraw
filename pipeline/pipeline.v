@@ -89,6 +89,9 @@ pub mut:
 	hsl_hue [8]f32
 	hsl_sat [8]f32
 	hsl_lum [8]f32
+	// Цветокоррекция (grade.v): тонирование теней, средних, светов и
+	// общий оттенок - после HSL
+	grade Grade
 	// Дизеринг финального квантования в 8 бит (TPDF ±1 LSB) - убирает
 	// полосы (banding) на гладких градиентах (небо). Включён по умолчанию.
 	dither bool = true
@@ -958,6 +961,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 	}
 	use_hsl := hsl_active(&p)
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
+	use_grade := p.grade.active()
+	grade := if use_grade { build_grade(&p.grade) } else { GradeLut{} }
 	use_sh := !isnil(mask) && (p.sh_shadows != 0 || p.sh_highlights != 0)
 	slut := if use_sh { build_slut(&p) } else { []f32{} }
 	use_cl := !isnil(mask) && (p.clarity != 0 || lc.use_cl)
@@ -1003,6 +1008,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 		hsm:        unsafe { &f32(hsl.sm.data) }
 		hlm:        unsafe { &f32(hsl.lm.data) }
 		hact:       unsafe { &u8(hsl.act.data) }
+		use_grade:  use_grade
+		gd:         unsafe { &f32(grade.d.data) }
 		cdh:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hue.data) } } else { unsafe { nil } }
 		csk:        if cam_hue_on(&p) { unsafe { &f32(p.cam_hsat.data) } } else { unsafe { nil } }
 		use_sh:     use_sh
@@ -1068,6 +1075,8 @@ struct RenderCtx {
 	hsm        &f32 = unsafe { nil }
 	hlm        &f32 = unsafe { nil }
 	hact       &u8  = unsafe { nil }
+	use_grade  bool
+	gd         &f32 = unsafe { nil } // цветокоррекция по тону люмы (build_grade)
 	cdh        &f32 = unsafe { nil } // таблица цвета «как JPEG» или nil
 	csk        &f32 = unsafe { nil }
 	use_sh     bool
@@ -1105,6 +1114,8 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	use_cl := rc.use_cl
 	pcl := rc.pcl
 	use_hsl := rc.use_hsl
+	use_grade := rc.use_grade
+	gd := rc.gd
 	sat := rc.sat
 	vib := rc.vib
 	to_tone := rc.to_tone
@@ -1342,6 +1353,9 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 			}
 			if use_hsl {
 				vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact, cdh, csk)
+			}
+			if use_grade {
+				vr, vg, vb = grade_pixel(vr, vg, vb, gd)
 			}
 			if vr < 0 {
 				vr = 0

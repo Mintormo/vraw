@@ -78,6 +78,8 @@ mut:
 	fs_strip bool
 	panel_order  []string = panel_default_order()
 	panel_hidden []string
+	// ширина панели инструментов, px (перетащенная; 0 - по умолчанию)
+	panel_w int
 }
 
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
@@ -158,6 +160,7 @@ fn settings_from(s Settings) Settings {
 		fs_strip:     s.fs_strip
 		panel_order:  panel_order_from(s.panel_order)
 		panel_hidden: panel_hidden_from(s.panel_hidden)
+		panel_w:      if s.panel_w >= int(panel_min_w) && s.panel_w <= 10000 { s.panel_w } else { 0 }
 		no_frame_cache: s.no_frame_cache
 		frame_cache_mb: if s.frame_cache_mb in frame_cache_mbs { s.frame_cache_mb } else { 0 }
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию

@@ -98,6 +98,12 @@ struct SideState {
 	grain       f32
 	grain_size  f32
 	grain_rough f32
+	// Цветокоррекция (pipeline.Grade; в старых файлах нет - пусто, без
+	// неё): оттенок, насыщенность, яркость зон теней, средних, светов и
+	// общей подряд (12 чисел); смешение 0 без цветокоррекции читается как 50
+	grade         []f32
+	grade_blend   f32
+	grade_balance f32
 }
 
 // SideMask - градиентный фильтр в файле (pipeline.Mask): вид строкой
@@ -353,7 +359,8 @@ fn mask_of(s SideMask) pipeline.Mask {
 // выход за границы при применении)
 fn (s SideState) validate() ! {
 	if s.eq.len != 5 || s.hsl_hue.len != 8 || s.hsl_sat.len != 8 || s.hsl_lum.len != 8
-		|| s.nr.len != 4 || s.curves.len != 4 || (s.crop.len != 0 && s.crop.len != 4) {
+		|| s.nr.len != 4 || s.curves.len != 4 || (s.crop.len != 0 && s.crop.len != 4)
+		|| (s.grade.len != 0 && s.grade.len != 3 * pipeline.grade_zones) {
 		return error('неверный размер массивов настроек')
 	}
 	// С допуском: доли у края кадра - 1 ± погрешность f32
@@ -454,7 +461,44 @@ fn side_state(e EditState) SideState {
 		grain:         p.fx.grain
 		grain_size:    p.fx.grain_size
 		grain_rough:   p.fx.grain_rough
+		grade:         side_grade(p.grade)
+		grade_blend:   p.grade.blend
+		grade_balance: p.grade.balance
 	}
+}
+
+// side_grade - зоны цветокоррекции списком (пусто - её нет)
+fn side_grade(g pipeline.Grade) []f32 {
+	if !g.active() {
+		return []f32{}
+	}
+	mut a := []f32{cap: 3 * pipeline.grade_zones}
+	for z in g.zones {
+		a << z.hue
+		a << z.sat
+		a << z.lum
+	}
+	return a
+}
+
+// grade_of - цветокоррекция из файла (значения - в пределах ползунков)
+fn grade_of(s SideState) pipeline.Grade {
+	mut g := pipeline.Grade{
+		balance: clampf(s.grade_balance, -100, 100)
+	}
+	if s.grade.len == 3 * pipeline.grade_zones {
+		for i in 0 .. pipeline.grade_zones {
+			g.zones[i] = pipeline.GradeZone{
+				hue: clampf(s.grade[3 * i], 0, 360)
+				sat: clampf(s.grade[3 * i + 1], 0, 100)
+				lum: clampf(s.grade[3 * i + 2], -100, 100)
+			}
+		}
+	}
+	if g.active() || s.grade_blend > 0 {
+		g.blend = clampf(s.grade_blend, 0, 100)
+	}
+	return g
 }
 
 // side_fx - эффекты из файла: в старом файле полей нет (нули) - форма по
@@ -490,6 +534,7 @@ fn edit_state(s SideState) !EditState {
 			clarity:       s.clarity
 			texture:       s.texture
 			fx:            side_fx(s)
+			grade:         grade_of(s)
 			haze:          s.haze
 			haze_depth:    if s.haze_depth > 0 || s.haze != 0 { s.haze_depth } else { f32(25) }
 			masks:         s.masks.map(mask_of(it))
@@ -761,6 +806,10 @@ fn sidecar_error(mut st State, err IError) {
 
 fn clamp01f(v f32) f32 {
 	return if v < 0 { 0 } else if v > 1 { 1 } else { v }
+}
+
+fn clampf(v f32, lo f32, hi f32) f32 {
+	return if v < lo { lo } else if v > hi { hi } else { v }
 }
 
 // with_derived заполняет производные поля снимка: камерную кривую
