@@ -33,12 +33,15 @@ command -v "$cc" >/dev/null || { echo "Нет $cc - apt install gcc-mingw-w64-x8
 rm -rf "$out" "$zipf"
 mkdir -p "$out"
 
-# -fno-lto: с LTO (его включает -prod) у vraw.exe пустое окно. Причина -
-# ошибка V: трамплин замыканий портит xmm15, на Windows x64 он сохраняемый
-# (vlang/v#29822). Без LTO - тот же -O2; вернуть LTO после исправления в V.
+# Нужен V с исправленным трамплином замыканий: исходный портит xmm15, на
+# Windows x64 он сохраняемый (vlang/v#29822) - пустое окно, пустое превью
+# после кадрирования. Пока не исправлено в upstream - локальная правка
+# vlib/builtin/closure/closure.c.v (xmm5 под Windows), проверка ниже.
+grep -q 'amd64 && windows' "$HOME/soft/v/vlib/builtin/closure/closure.c.v" ||
+	{ echo "V без правки трамплина замыканий (vlang/v#29822) - см. комментарий"; exit 1; }
 echo "Сборка..."
 "$v" -prod -os windows -cc "$cc" -enable-globals -subsystem windows \
-	-cflags "-I$pfx/include -fno-lto" -ldflags "-L$pfx/lib -fno-lto" \
+	-cflags "-I$pfx/include" -ldflags "-L$pfx/lib" \
 	-o "$out/vraw.exe" "$root"
 
 # DLL: обход зависимостей от vraw.exe; берутся те, что есть в $pfx/bin,
