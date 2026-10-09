@@ -1455,6 +1455,10 @@ fn main() {
 	// Тема приложения: окно без своей темы получит её в add_window
 	// Размер по умолчанию - золотое сечение: 1440 / 890 ~ 1.618
 	mut win := vgui.create_window(title: 'vraw', width: 1440, height: 890)! // = State.work_w
+	// Масштаб интерфейса прошлого запуска (uiscale.v): окно на экране
+	// того же размера, внутри - крупнее или мельче
+	ui_k := f32(ui_scale_pct(settings.ui_scale)) / 100
+	set_window_scale(mut win, ui_k)
 
 	// Колонки панели ползунков: не константы «с запасом», а фактическая
 	// ширина самых длинных строк. Первый список - все подписи рядов,
@@ -3542,7 +3546,9 @@ fn main() {
 	mut vsplit := vgui.splitter_vertical()
 	vsplit.bar_size = 3
 	// Мин. высоты и порядок половин - layout_strip (лента снизу или сверху)
-	vsplit.ratio = strip_start_ratio(st.settings.strip_top)
+	// (при масштабе интерфейса - той же логической высоты, uiscale.v)
+	vsplit.ratio = scaled_strip_ratio(strip_start_ratio(st.settings.strip_top), st.settings.strip_top,
+		ui_k)
 	vsplit.on_resize = fn [mut st] (r f32) {
 		fit_strip_items(mut st)
 	}

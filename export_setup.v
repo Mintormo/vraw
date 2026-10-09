@@ -192,6 +192,7 @@ fn export_path_taken(s &Settings, raw_path string, f imgio.Format, taken map[str
 struct ExportSetupUi {
 mut:
 	dlg     &vgui.Dialog   = unsafe { nil }
+	scroll   &vgui.ScrollBox = unsafe { nil } // корень: содержимое в прокрутке (dlgfit.v)
 	what_cb &vgui.ComboBox = unsafe { nil }
 	// Варианты «Кадры» на момент открытия окна (ключи: 'open', 'sel',
 	// 'all') и выбранный; выбор не запоминается - зависит от ленты
@@ -246,7 +247,7 @@ fn show_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) {
 	sync_export_setup(mut st)
 	mut d := st.xs.dlg
 	if !d.is_open() {
-		d.show_scaled(parent)
+		show_dialog(mut d, st.xs.scroll, parent, 0, 0)
 	}
 }
 
@@ -826,7 +827,8 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(result)
 	body.add(btn_row)
 
-	dlg.add_widget(body)
+	u.scroll = dialog_scroll(body)
+	dlg.add_widget(u.scroll)
 	dlg.add_widget(dir_note.tip) // после корня: рисуется поверх
 	app.add_dialog(dlg)
 	st.xs = u

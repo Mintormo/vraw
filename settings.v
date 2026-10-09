@@ -18,6 +18,8 @@ mut:
 	viewer_bg  string = 'dark' // ключ из bg_keys
 	strip_open bool   = true
 	theme      string = 'dark' // ключ из theme_keys (themes.v)
+	// масштаб интерфейса, % (uiscale.v; 0 - старый файл без поля, 100%)
+	ui_scale int = 100
 	// язык интерфейса (код из i18n.langs; '' - как в системе); меняется
 	// после перезапуска
 	lang     string
@@ -149,6 +151,7 @@ fn settings_from(s Settings) Settings {
 		viewer_bg:  bg_keys[bg_index(s.viewer_bg)]
 		strip_open: s.strip_open
 		theme:      theme_keys[theme_index(s.theme)]
+		ui_scale:   ui_scale_pct(s.ui_scale)
 		lang:       if i18n.known(s.lang) { s.lang } else { '' }
 		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()

@@ -1,7 +1,8 @@
 module main
 
 // Окно «Настройки» (меню «Правка - Настройки...»), вкладки: «Общие» -
-// оформление (тема, фон вокруг снимка - те же, что в меню «Вид»), память
+// оформление (тема и фон вокруг снимка - те же, что в меню «Вид»;
+// масштаб интерфейса), память
 // (кэш кадров, framecache.v); «Интерфейс» - панель инструментов и лента
 // кадров (panel.v); «Разделы панели» - какие и в каком порядке;
 // «AI-шумодав»: скачивание ONNX
@@ -47,8 +48,10 @@ struct ModelRow {
 struct SettingsUi {
 mut:
 	dlg      &vgui.Dialog      = unsafe { nil }
+	scroll   &vgui.ScrollBox = unsafe { nil } // корень: содержимое в прокрутке (dlgfit.v)
 	theme_cb &vgui.ComboBox    = unsafe { nil }
 	bg_cb    &vgui.ComboBox    = unsafe { nil }
+	scale_sp &vgui.Spinbox     = unsafe { nil } // свой, %
 	cache_ck &vgui.CheckBox    = unsafe { nil }
 	cache_cb &vgui.ComboBox    = unsafe { nil }
 	rt_state &vgui.Label       = unsafe { nil }
@@ -122,7 +125,7 @@ fn show_settings(mut st State, mut app vgui.App, parent &vgui.Window) {
 	sync_settings_ui(mut st)
 	mut d := u.dlg
 	if !d.is_open() {
-		d.show_scaled(parent)
+		show_dialog(mut d, u.scroll, parent, 0, 0)
 	}
 }
 
@@ -258,6 +261,23 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		set_viewer_bg(mut st, i)
 	}
 	u.bg_cb = bg_cb
+	// Масштаб интерфейса - числом;
+	// применяется кнопкой или Enter, не на каждую
+	// цифру: при наборе «125» сначала пришло бы «1», а окно настроек
+	// меняет размер под курсором
+	mut scale_sp := vgui.spinbox()
+	scale_sp.set_range(ui_scale_min, ui_scale_max)
+	scale_sp.step = 5
+	mut scale_ti := scale_sp.text_input
+	scale_ti.max_len = 3 // больше ui_scale_max не набрать
+	scale_ti.on_submit = fn [mut st] (_ string) {
+		apply_scale_field(mut st)
+	}
+	u.scale_sp = scale_sp
+	mut scale_ok := vgui.button(i18n.tr('Применить'))
+	scale_ok.on_click = fn [mut st] () {
+		apply_scale_field(mut st)
+	}
 
 	// ── Память: кэш кадров ──
 	mut cache_ck := vgui.checkbox(i18n.tr('Держать недавние кадры в памяти'))
@@ -287,7 +307,8 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		i18n.tr('нет в папке моделей')], 8)
 	btn_col := column_width(mut dw, [i18n.tr('Скачать'), i18n.tr('Удалить'), i18n.tr('Точно?'), i18n.tr('Готов')], 0) +
 		2 * vgui.measure_pad_x
-	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Не больше')], 8)
+	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Масштаб интерфейса'),
+		i18n.tr('Не больше')], 8)
 	// Списки оформления - одной ширины, по самому длинному пункту обоих
 	// (24 - стрелка ComboBox, как в его measure)
 	mut look_items := i18n.tr_all(theme_names)
@@ -312,6 +333,17 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	general.add(caption(i18n.tr('Оформление')))
 	general.add(labeled(i18n.tr('Тема'), theme_cb, look_col, look_w))
 	general.add(labeled(i18n.tr('Фон вокруг снимка'), bg_cb, look_col, look_w))
+	mut scale_row := vgui.create_hbox_fill()
+	scale_row.set_spacing(8)
+	scale_row.add(vgui.label(i18n.tr('Масштаб интерфейса')), min: look_col)
+	// Ширина поля - явно: measure Spinbox кладёт на две кнопки 44 px, а
+	// они квадратные по высоте поля - число обрезалось
+	scale_row.add(scale_sp, min: column_width(mut dw, ['300'], 0) + 2 * vgui.measure_pad_x +
+		2 * dw.ctx.control_h())
+	scale_row.add(vgui.label('%'))
+	scale_row.add(scale_ok)
+	scale_row.add(vgui.create_spacer(), flex: 1)
+	general.add(scale_row)
 
 	general.add(caption(i18n.tr('Память')))
 	general.add(cache_ck)
@@ -428,7 +460,8 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	close_row.add(close, min: btn_col)
 	outer.add(close_row)
 
-	dlg.add_widget(outer)
+	u.scroll = dialog_scroll(outer)
+	dlg.add_widget(u.scroll)
 	// Нажатие для кнопки сочетания - раньше кнопок и полей
 	dlg.add_widget(&HkCapture{
 		st: st
@@ -632,6 +665,14 @@ fn sync_iface(mut u SettingsUi, s &Settings) {
 	}
 }
 
+// apply_scale_field - свой масштаб из поля; в поле - что применилось
+// (число вне пределов - ближайший предел)
+fn apply_scale_field(mut st State) {
+	mut sp := st.sui.scale_sp
+	apply_ui_scale(mut st, sp.value)
+	sp.set_value(ui_scale_pct(st.settings.ui_scale))
+}
+
 // sync_settings_ui - окно по состоянию: выбранные тема и фон, модель,
 // что скачано, идёт ли скачивание
 fn sync_settings_ui(mut st State) {
@@ -643,6 +684,13 @@ fn sync_settings_ui(mut st State) {
 	tcb.set_selected(theme_index(st.settings.theme))
 	mut bcb := u.bg_cb
 	bcb.set_selected(bg_index(st.settings.viewer_bg))
+	pct := ui_scale_pct(st.settings.ui_scale)
+	// Пока в поле печатают - число не трогать (окно обновляется и от
+	// скачивания)
+	mut ssp := u.scale_sp
+	if !ssp.text_input.focused {
+		ssp.set_value(pct)
+	}
 	mut ck := u.cache_ck
 	ck.checked = !st.settings.no_frame_cache
 	mut ccb := u.cache_cb

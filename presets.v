@@ -526,6 +526,7 @@ fn rebuild_presets_menu(mut st State) {
 struct GroupsUi {
 mut:
 	dlg      &vgui.Dialog    = unsafe { nil }
+	scroll   &vgui.ScrollBox = unsafe { nil } // корень: содержимое в прокрутке (dlgfit.v)
 	title    &vgui.Label     = unsafe { nil }
 	name     &vgui.TextInput = unsafe { nil }
 	ok       &vgui.Button    = unsafe { nil }
@@ -580,7 +581,7 @@ fn show_groups(mut st State, mut app vgui.App, parent &vgui.Window, preset bool)
 		cb.set_checked(g in st.settings.copy_groups)
 	}
 	if !d.is_open() {
-		d.show_scaled(parent)
+		show_dialog(mut d, u.scroll, parent, 0, 0)
 	}
 	if preset {
 		d.win.set_default_focus_text_input(name)
@@ -716,7 +717,8 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	u.body = body
 	layout_groups(mut u)
 
-	dlg.add_widget(body)
+	u.scroll = dialog_scroll(body)
+	dlg.add_widget(u.scroll)
 	app.add_dialog(dlg)
 	st.groups_ui = u
 }
@@ -727,6 +729,7 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 struct PresetsUi {
 mut:
 	dlg      &vgui.Dialog    = unsafe { nil }
+	scroll   &vgui.ScrollBox = unsafe { nil } // корень: содержимое в прокрутке (dlgfit.v)
 	app      &vgui.App       = unsafe { nil }
 	list     &vgui.ListBox   = unsafe { nil }
 	name     &vgui.TextInput = unsafe { nil }
@@ -753,7 +756,8 @@ fn show_presets(mut st State, mut app vgui.App, parent &vgui.Window) {
 	mut u := st.presets_ui
 	mut d := u.dlg
 	if !d.is_open() {
-		d.show_scaled(parent)
+		// размер - заданный при создании (presets_w × presets_h)
+		show_dialog(mut d, u.scroll, parent, presets_w, presets_h)
 	}
 }
 
@@ -858,6 +862,10 @@ fn presets_delete(mut st State) {
 	nm.show_success(i18n.trf('Пресет «{0}» удалён', '${p.name}'))
 }
 
+// Окно «Управление пресетами» - своего размера (список растягивается)
+const presets_w = 560
+const presets_h = 400
+
 fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut u := &PresetsUi{
 		app: unsafe { &app }
@@ -873,8 +881,8 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		font_size: parent.config.font_size
 		mono_size: parent.config.mono_size
 		ui_scale:  parent.ctx.ui_scale
-		width:     560
-		height:    400
+		width:     presets_w
+		height:    presets_h
 	)!
 	u.dlg = dlg
 
@@ -971,7 +979,8 @@ fn build_presets_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(name_row)
 	body.add(btn_row)
 
-	dlg.add_widget(body)
+	u.scroll = dialog_scroll(body)
+	dlg.add_widget(u.scroll)
 	app.add_dialog(dlg)
 	st.presets_ui = u
 }

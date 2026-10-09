@@ -91,6 +91,7 @@ fn (c &ExportCtl) stage_no() int {
 struct ExportUi {
 mut:
 	dlg     &vgui.Dialog      = unsafe { nil }
+	scroll   &vgui.ScrollBox = unsafe { nil } // корень: содержимое в прокрутке (dlgfit.v)
 	files   &vgui.Label       = unsafe { nil }
 	stage   &vgui.Label       = unsafe { nil }
 	bar     &vgui.ProgressBar = unsafe { nil }
@@ -117,7 +118,7 @@ fn show_export(mut st State, mut app vgui.App, parent &vgui.Window) {
 	paint_export(mut st)
 	mut d := st.eui.dlg
 	if !d.is_open() {
-		d.show_scaled(parent)
+		show_dialog(mut d, st.eui.scroll, parent, 0, 0)
 	}
 }
 
@@ -196,7 +197,8 @@ fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(vgui.create_spacer(), flex: 1)
 	body.add(btn_row)
 
-	dlg.add_widget(body)
+	u.scroll = dialog_scroll(body)
+	dlg.add_widget(u.scroll)
 	dlg.add_widget(folder.tip) // после корня: рисуется поверх
 	app.add_dialog(dlg)
 	st.eui = u
