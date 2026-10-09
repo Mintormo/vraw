@@ -1,36 +1,9 @@
 module i18n
 
-// Правила форм числа: по примеру на каждую форму
+// Правила форм числа - тест vgui.i18n; здесь - что обёртка их отдаёт
 fn test_plural_index() {
-	for n, want in {1: 0, 3: 1, 5: 2, 11: 2, 21: 0, 22: 1, 112: 2} {
-		assert plural_index('ru', n) == want
-	}
-	for n, want in {1: 0, 3: 1, 5: 2, 21: 2, 22: 1, 12: 2} {
-		assert plural_index('pl', n) == want
-	}
-	for n, want in {1: 0, 4: 1, 5: 2, 21: 2} {
-		assert plural_index('cs', n) == want
-	}
-	for n, want in {1: 0, 21: 0, 11: 2, 2: 1, 10: 2, 19: 2} {
-		assert plural_index('lt', n) == want
-	}
-	for n, want in {0: 0, 10: 0, 15: 0, 1: 1, 21: 1, 11: 0, 2: 2} {
-		assert plural_index('lv', n) == want
-	}
-	for n, want in {1: 0, 0: 1, 2: 1, 19: 1, 20: 2, 101: 1} {
-		assert plural_index('ro', n) == want
-	}
-	for n, want in {1: 0, 101: 0, 2: 1, 3: 2, 4: 2, 5: 3} {
-		assert plural_index('sl', n) == want
-	}
-	for n, want in {0: 0, 1: 0, 2: 1} {
-		assert plural_index('fr', n) == want
-	}
-	for n, want in {1: 0, 0: 1, 2: 1} {
-		assert plural_index('en', n) == want
-	}
-	assert plural_index('vi', 1) == 0
-	assert plural_index('vi', 5) == 0
+	assert plural_index('ru', 21) == 0
+	assert plural_index('sl', 5) == 3
 }
 
 // Русский - ключи как есть; подстановки; формы числа без перевода -
@@ -66,9 +39,24 @@ fn test_tables() {
 	}
 }
 
-// Незнакомый язык - английский; система C/POSIX - английский
+// Незнакомый язык - английский
 fn test_set_unknown() {
 	set('xx')
 	assert current() == 'en'
+	assert supported('xx') == 'en' && supported('de') == 'de'
 	set('ru')
+}
+
+// Перевод из вшитого файла, запасной - английский, омоним; tr_in - не
+// меняя текущего языка
+fn test_tr_german() {
+	set('de')
+	assert tr('Экспозиция') == table('de')['Экспозиция']
+	assert tr('Экспозиция') != 'Экспозиция'
+	assert trc('ББ', 'Оттенок') != trc('HSL', 'Оттенок')
+	assert pl(1, 'кадр|кадра|кадров') != pl(5, 'кадр|кадра|кадров')
+	set('ru')
+	assert tr_in('de', 'Экспозиция') == table('de')['Экспозиция']
+	assert current() == 'ru'
+	assert tr('Экспозиция') == 'Экспозиция'
 }

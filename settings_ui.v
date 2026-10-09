@@ -488,7 +488,7 @@ fn tab_page() &vgui.VBox {
 // самоназваниями. Окно строится один раз, поэтому новый язык - после
 // перезапуска; подпись об этом - сразу на выбранном языке.
 fn build_lang_row(mut st State) &vgui.VBox {
-	sys := i18n.system()
+	sys := system_lang()
 	sys_name := i18n.langs.filter(it.code == sys)[0].name
 	mut items := ['${i18n.tr('Как в системе')} (${sys_name})']
 	items << i18n.langs.map(it.name)
@@ -505,7 +505,7 @@ fn build_lang_row(mut st State) &vgui.VBox {
 		}
 		st.settings.lang = code
 		save_settings(st.settings)
-		shown := if code == '' { i18n.system() } else { code }
+		shown := if code == '' { system_lang() } else { code }
 		restart.text = i18n.tr_in(shown, 'Язык сменится после перезапуска программы')
 		restart.visible = shown != i18n.current()
 	}

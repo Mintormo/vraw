@@ -137,6 +137,12 @@ fn settings_path() string {
 
 // load_settings - настройки из файла; нет файла или он испорчен -
 // значения по умолчанию
+// system_lang - язык системы (переменные окружения, иначе предпочтения
+// ОС через SDL - vgui), которого нет у vraw - английский
+fn system_lang() string {
+	return i18n.supported(vgui.detect_system_locale())
+}
+
 fn load_settings() Settings {
 	text := os.read_file(settings_path()) or { return Settings{} }
 	s := json2.decode[Settings](text) or { return Settings{} }

@@ -1446,7 +1446,9 @@ fn main() {
 	// Настройки прошлого запуска: тема, фон вокруг снимка, лента
 	settings := load_settings()
 	// Язык - до всего, что пишет текст (окно, State с подписями, потоки)
-	i18n.set(if settings.lang != '' { settings.lang } else { i18n.system() })
+	i18n.set(if settings.lang != '' { settings.lang } else { system_lang() })
+	// Каталог перевода у vraw и vgui общий (vgui.i18n): здесь vgui
+	// добавляет в него свои строки (диалоги, кнопки)
 	vgui.set_locale(i18n.current())
 	// Тема приложения (меняется в меню «Вид - Тема»); из неё же -
 	// палитра vraw и цвета заглушки

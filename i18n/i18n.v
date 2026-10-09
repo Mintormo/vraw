@@ -1,69 +1,26 @@
-// Перевод интерфейса vraw. Ключ - сама русская строка из кода (как в
-// gettext): tr('Экспозиция'), поэтому код остаётся читаемым, а русский
-// не нужен отдельным файлом. Переводы - lang/<код>.json рядом с модулем
-// ({"русская строка": "перевод"}), вшиты в бинарник.
+// Перевод интерфейса vraw - обёртка над vgui.i18n (ядро перевода vgui на
+// чистом V, без SDL: его можно звать и из raw/, ai/, imgio/, lens/,
+// которым нельзя зависеть от окон). Здесь - только своё: переводы vraw
+// (lang/<код>.json рядом с модулем, {"русская строка": "перевод"}, вшиты
+// в бинарник), ключи - русский текст (исходный язык), запасной -
+// английский; имена функций - прежние (tr, trf, trc, pl, tr_in ...),
+// весь код и tools/i18n_check.py их и ищут.
 //
-// Язык выбирается один раз при запуске (set) - дальше таблица только
+// Язык выбирается один раз при запуске (set) - дальше каталог только
 // читается, поэтому tr можно звать из любых потоков. Поиск: выбранный
-// язык, затем английский, затем сам ключ (русский).
-//
-// Строки с подстановками - trf('Кадр {0} из {1}', a, b); формы числа -
-// pl(n, 'кадр|кадра|кадров'): ключ - русские формы через «|», в переводе -
-// формы своего языка в порядке его правила (plural_index).
+// язык, затем английский, затем сам ключ (русский). Формы числа -
+// pl(n, 'кадр|кадра|кадров'), правила - vgui.i18n.plural_index.
 module i18n
 
-import os
 import json2
+import vgui.i18n as core
 
 // Lang - язык интерфейса: код и самоназвание (для списка в настройках)
-pub struct Lang {
-pub:
-	code string
-	name string
-}
+pub type Lang = core.Lang
 
-// Порядок - как в списке настроек: русский (исходный), английский,
-// дальше по алфавиту самоназваний.
-pub const langs = [
-	Lang{'ru', 'Русский'},
-	Lang{'en', 'English'},
-	Lang{'id', 'Bahasa Indonesia'},
-	Lang{'cs', 'Čeština'},
-	Lang{'da', 'Dansk'},
-	Lang{'de', 'Deutsch'},
-	Lang{'et', 'Eesti'},
-	Lang{'es', 'Español'},
-	Lang{'fr', 'Français'},
-	Lang{'hr', 'Hrvatski'},
-	Lang{'it', 'Italiano'},
-	Lang{'lv', 'Latviešu'},
-	Lang{'lt', 'Lietuvių'},
-	Lang{'hu', 'Magyar'},
-	Lang{'nl', 'Nederlands'},
-	Lang{'nb', 'Norsk bokmål'},
-	Lang{'pl', 'Polski'},
-	Lang{'pt', 'Português (Brasil)'},
-	Lang{'ro', 'Română'},
-	Lang{'sk', 'Slovenčina'},
-	Lang{'sl', 'Slovenščina'},
-	Lang{'fi', 'Suomi'},
-	Lang{'sv', 'Svenska'},
-	Lang{'vi', 'Tiếng Việt'},
-	Lang{'tr', 'Türkçe'},
-	Lang{'el', 'Ελληνικά'},
-	Lang{'be', 'Беларуская'},
-	Lang{'bg', 'Български'},
-	Lang{'kk', 'Қазақ тілі'},
-	Lang{'sr', 'Српски'},
-	Lang{'uk', 'Українська'},
-]
-
-__global (
-	i18n_code  = 'ru'
-	i18n_main  = map[string]string{}
-	i18n_en    = map[string]string{}
-	i18n_ready = false
-)
+// langs - языки vraw (у каждого, кроме русского, - файл lang/<код>.json);
+// порядок - как в списке настроек
+pub const langs = core.languages
 
 // embedded - вшитый файл перевода; '' - нет такого языка
 fn embedded(code string) string {
@@ -116,199 +73,61 @@ pub fn known(code string) bool {
 	return langs.any(it.code == code)
 }
 
-// system - язык системы из LC_ALL / LC_MESSAGES / LANG / LANGUAGE
-// (uk_UA.UTF-8 -> uk; Norwegian no/nn -> nb); не из списка - английский.
-pub fn system() string {
-	for key in ['LC_ALL', 'LC_MESSAGES', 'LANG', 'LANGUAGE'] {
-		v := os.getenv(key).to_lower()
-		if v.len < 2 || v == 'c' || v.starts_with('c.') || v == 'posix' {
-			continue
-		}
-		mut code := v.all_before(':').all_before('.').all_before('_').all_before('-')
-		if code in ['no', 'nn'] {
-			code = 'nb'
-		}
-		return if known(code) { code } else { 'en' }
-	}
-	return 'en'
+// supported - язык code, если он есть у vraw, иначе английский
+// (язык системы - vgui.detect_system_locale, в module main: здесь SDL нет)
+pub fn supported(code string) string {
+	return if known(code) { code } else { 'en' }
 }
 
-// set выбирает язык интерфейса. Звать один раз при запуске, до
-// построения окна и до запуска потоков.
+// set выбирает язык интерфейса (незнакомый - английский). Звать один раз
+// при запуске, до построения окна и до запуска потоков.
 pub fn set(code string) {
-	i18n_code = if known(code) { code } else { 'en' }
-	i18n_main = if i18n_code == 'ru' { map[string]string{} } else { table(i18n_code) }
-	i18n_en = if i18n_code in ['ru', 'en'] { map[string]string{} } else { table('en') }
-	i18n_ready = true
+	core.set_loader(embedded)
+	core.set_source_locale('ru')
+	core.set_fallback('en')
+	core.set_locale(supported(code))
 }
 
 // current - код выбранного языка
 pub fn current() string {
-	return i18n_code
+	return core.locale()
 }
 
 // tr - перевод строки s (ключ - русский текст)
 pub fn tr(s string) string {
-	if i18n_code == 'ru' {
-		return s
-	}
-	if v := i18n_main[s] {
-		if v != '' {
-			return v
-		}
-	}
-	if v := i18n_en[s] {
-		if v != '' {
-			return v
-		}
-	}
-	return s
+	return core.tr(s)
 }
 
-// trc - перевод омонима: одно русское слово, разные переводы
-// («Оттенок» - Hue в HSL и Tint в балансе белого). Ключ перевода -
-// «контекст::строка», по-русски и без перевода - сама строка.
+// trc - перевод омонима («Оттенок» - Hue в HSL и Tint в балансе белого):
+// ключ перевода - «контекст::строка», по-русски - сама строка
 pub fn trc(ctx string, s string) string {
-	key := ctx + '::' + s
-	t := tr(key)
-	return if t == key { s } else { t }
+	return core.trc(ctx, s)
 }
 
 // trf - перевод с подстановками {0}, {1}...
 pub fn trf(s string, args ...string) string {
-	mut r := tr(s)
-	for i, a in args {
-		r = r.replace('{${i}}', a)
-	}
-	return r
+	return core.trf(s, ...args)
 }
 
 // tr_in - перевод s на язык code, не меняя текущего (подпись о смене
 // языка - сразу на выбранном). Без перевода - английский, для ru - s.
 pub fn tr_in(code string, s string) string {
-	if code == 'ru' {
-		return s
-	}
-	if v := table(code)[s] {
-		if v != '' {
-			return v
-		}
-	}
-	if v := table('en')[s] {
-		if v != '' {
-			return v
-		}
-	}
-	return s
+	return core.tr_in(code, s)
 }
 
 // tr_all - перевод списка (названия пунктов из констант)
 pub fn tr_all(a []string) []string {
-	return a.map(tr(it))
+	return core.tr_all(a)
 }
 
 // pl - форма слова для числа n. forms - русские формы «один|два|пять»
 // (ключ перевода); перевод - формы своего языка через «|» в порядке
 // plural_index. Без перевода - русское правило.
 pub fn pl(n i64, forms string) string {
-	t := tr(forms)
-	// перевод не нашёлся - формы русские, правило тоже русское
-	code := if t == forms && i18n_code != 'ru' { 'ru' } else { i18n_code }
-	f := t.split('|')
-	i := plural_index(code, n)
-	return f[if i < f.len { i } else { f.len - 1 }]
+	return core.pl(n, forms)
 }
 
-// plural_index - номер формы для числа n по правилу языка (CLDR, только
-// целые). Порядок форм в переводе:
-//   ru uk be sr hr          один | два-четыре | пять (21 - один, 11 - пять)
-//   pl                      один | два-четыре | пять (21 - пять)
-//   cs sk                   один | два-четыре | остальные
-//   lt                      один (1, 21) | два-девять | остальные (11-19, 10, 20)
-//   lv                      ноль (0, 10-20, 30) | один (1, 21) | остальные
-//   ro                      один | мало (0, 2-19, 101-119) | остальные
-//   sl                      один (1, 101) | два (2, 102) | три-четыре | остальные
-//   fr pt                   один (0, 1) | остальные
-//   vi id                   одна форма
-//   остальные               один | остальные
+// plural_index - номер формы для числа n по правилу языка
 pub fn plural_index(code string, n i64) int {
-	a := if n < 0 { -n } else { n }
-	m10 := a % 10
-	m100 := a % 100
-	return match code {
-		'ru', 'uk', 'be', 'sr', 'hr' {
-			if m10 == 1 && m100 != 11 {
-				0
-			} else if m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) {
-				1
-			} else {
-				2
-			}
-		}
-		'pl' {
-			if a == 1 {
-				0
-			} else if m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) {
-				1
-			} else {
-				2
-			}
-		}
-		'cs', 'sk' {
-			if a == 1 {
-				0
-			} else if a >= 2 && a <= 4 {
-				1
-			} else {
-				2
-			}
-		}
-		'lt' {
-			if m10 == 1 && (m100 < 11 || m100 > 19) {
-				0
-			} else if m10 >= 2 && (m100 < 11 || m100 > 19) {
-				1
-			} else {
-				2
-			}
-		}
-		'lv' {
-			if m10 == 0 || (m100 >= 11 && m100 <= 19) {
-				0
-			} else if m10 == 1 && m100 != 11 {
-				1
-			} else {
-				2
-			}
-		}
-		'ro' {
-			if a == 1 {
-				0
-			} else if a == 0 || (m100 >= 1 && m100 <= 19) {
-				1
-			} else {
-				2
-			}
-		}
-		'sl' {
-			if m100 == 1 {
-				0
-			} else if m100 == 2 {
-				1
-			} else if m100 == 3 || m100 == 4 {
-				2
-			} else {
-				3
-			}
-		}
-		'fr', 'pt' {
-			if a <= 1 { 0 } else { 1 }
-		}
-		'vi', 'id' {
-			0
-		}
-		else {
-			if a == 1 { 0 } else { 1 }
-		}
-	}
+	return core.plural_index(code, n)
 }
