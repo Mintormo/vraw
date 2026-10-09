@@ -1396,7 +1396,13 @@ sqrt-каналам, u = r−y, v = b−y (декорреляция, не кол
   - `scunet_real_psnr` (по умолчанию) и `scunet_real_gan` — SCUNet
     (cszn/SCUNet, Apache-2.0), «blind real-world» веса, готовые ONNX с
     huggingface.co/Heliosoph/scunet-onnx: граф `.onnx` (3.8 МБ) + веса
-    `.onnx.data` (73 МБ) рядом (ORT находит сам). ~2 с на плитку.
+    `.onnx.data` (73 МБ) рядом. ~2 с на плитку. Граф и веса
+    `vr_model_open` читает в память сам и отдаёт ORT из памяти
+    (`CreateSessionFromArray` + `AddExternalInitializersFromFilesInMemory`,
+    веса - `<модель>.data`): по пути ORT 1.30 проверяет путь весов через
+    `std::filesystem::weakly_canonical`, а на общей папке QEMU в Windows
+    (и части сетевых дисков) это ошибка «The volume does not contain a
+    recognized file system» (09.10.2026).
     GAN-вариант дорисовывает текстуру — меньше «мыла».
   - `nafnet_sidd_w32` — NAFNet-SIDD-width32 (MIT), 117 МБ, 0.33 с на
     плитку, но мылит мелкие детали и даёт вертикальные полосы в тёмном.
@@ -1751,8 +1757,8 @@ SDL3_image, LibRaw (0.22, на Linux 0.21 — сборка по заголовк
 кодировке ANSI, кириллица ломалась бы). Тоже ради путей: JPEG/PNG/BMP
 stbi кодирует в память (`imgio/stbmem.v`, `stbi_write_*_to_func`), в
 файл пишет `os` (он на Windows открывает файлы по UTF-16). ONNX Runtime
-(`ai/ort_shim.h`): `LoadLibraryExW` вместо `dlopen`, путь модели в
-`CreateSession` — `wchar_t`; для Windows качается zip
+(`ai/ort_shim.h`): `LoadLibraryExW` вместо `dlopen`, файлы модели
+открываются `_wfopen` (UTF-16) и отдаются ORT из памяти; для Windows качается zip
 `onnxruntime-win-x64` (82 МБ из-за .pdb — при распаковке системным `tar`
 Windows 10+ пропускаются), библиотеке нужен Microsoft Visual C++
 Redistributable — нет его — ошибка загрузки с ссылкой на установщик.

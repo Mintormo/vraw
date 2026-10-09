@@ -96,6 +96,36 @@ static void *vr_dlopen(const char *path, char *err, int err_len) {
 #define vr_dlclose(h) dlclose(h)
 #endif
 
+// vr_read_file - файл целиком в память (malloc; NULL - нет файла или
+// ошибка чтения), длина - в *len. Путь UTF-8, на Windows - _wfopen.
+static char *vr_read_file(const char *path, size_t *len) {
+#ifdef _WIN32
+	wchar_t *w = vr_wide(path);
+	FILE *f = w ? _wfopen(w, L"rb") : NULL;
+	free(w);
+#else
+	FILE *f = fopen(path, "rb");
+#endif
+	if (f == NULL) {
+		return NULL;
+	}
+	char *buf = NULL;
+	long n = -1;
+	if (fseek(f, 0, SEEK_END) == 0) {
+		n = ftell(f);
+	}
+	if (n >= 0 && fseek(f, 0, SEEK_SET) == 0) {
+		buf = (char *)malloc(n > 0 ? (size_t)n : 1);
+		if (buf != NULL && fread(buf, 1, (size_t)n, f) != (size_t)n) {
+			free(buf);
+			buf = NULL;
+		}
+	}
+	fclose(f);
+	*len = buf ? (size_t)n : 0;
+	return buf;
+}
+
 // vr_ort_load - загрузить библиотеку ORT по пути; 0 - успех (или уже
 // загружена), иначе текст ошибки в err
 static int vr_ort_load(const char *path, char *err, int err_len) {
@@ -144,7 +174,14 @@ static void vr_model_close(VrModel *m) {
 	free(m);
 }
 
-// vr_model_open - NULL при ошибке (текст - в err)
+// vr_model_open - NULL при ошибке (текст - в err).
+// Граф и веса читаются в память сами и отдаются ORT из памяти
+// (CreateSessionFromArray): веса SCUNet - отдельный файл <модель>.data
+// рядом, и при загрузке по пути ORT проверяет его путь через
+// std::filesystem::weakly_canonical, а тот на части томов Windows
+// (общая папка QEMU/virtiofs, некоторые сетевые диски) падает - «The
+// volume does not contain a recognized file system». Из памяти путь не
+// проверяется. Буферы ORT копирует - освобождаются сразу после создания.
 static VrModel *vr_model_open(const char *path, char *err, int err_len) {
 	const OrtApi *api = vr_ort_api();
 	if (api == NULL) {
@@ -155,16 +192,49 @@ static VrModel *vr_model_open(const char *path, char *err, int err_len) {
 	OrtSessionOptions *opts = NULL;
 	OrtAllocator *alloc = NULL;
 	char *name = NULL;
+	size_t model_len = 0, data_len = 0;
+	char *model = vr_read_file(path, &model_len);
+	char *data = NULL;
+	if (model == NULL) {
+		snprintf(err, err_len, "не удалось прочитать %s", path);
+		goto fail;
+	}
 	if (vr_take_error(api->CreateSessionOptions(&opts), err, err_len)) goto fail;
 	if (vr_take_error(api->SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL), err, err_len)) goto fail;
+	{
+		// веса - <путь>.data; в графе они записаны под именем файла без папки
+		size_t plen = strlen(path);
+		char *data_path = (char *)malloc(plen + 6);
+		memcpy(data_path, path, plen);
+		memcpy(data_path + plen, ".data", 6);
+		data = vr_read_file(data_path, &data_len);
+		const char *base = data_path;
+		for (const char *c = data_path; *c; c++) {
+			if (*c == '/' || *c == '\\') base = c + 1;
+		}
+		OrtStatus *st = NULL;
+		if (data != NULL) {
 #ifdef _WIN32
-	wchar_t *wpath = vr_wide(path);
-	OrtStatus *st = api->CreateSession(vr_env, wpath, opts, &m->sess);
-	free(wpath);
+			wchar_t *wbase = vr_wide(base);
+			const ORTCHAR_T *names[1] = {wbase};
 #else
-	OrtStatus *st = api->CreateSession(vr_env, path, opts, &m->sess);
+			const ORTCHAR_T *names[1] = {base};
 #endif
-	if (vr_take_error(st, err, err_len)) goto fail;
+			char *bufs[1] = {data};
+			size_t lens[1] = {data_len};
+			st = api->AddExternalInitializersFromFilesInMemory(opts, names, bufs, lens, 1);
+#ifdef _WIN32
+			free(wbase);
+#endif
+		}
+		free(data_path);
+		if (vr_take_error(st, err, err_len)) goto fail;
+	}
+	if (vr_take_error(api->CreateSessionFromArray(vr_env, model, model_len, opts, &m->sess), err, err_len)) goto fail;
+	free(model);
+	model = NULL;
+	free(data);
+	data = NULL;
 	api->ReleaseSessionOptions(opts);
 	opts = NULL;
 	if (vr_take_error(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &m->mem), err, err_len)) goto fail;
@@ -177,6 +247,8 @@ static VrModel *vr_model_open(const char *path, char *err, int err_len) {
 	api->AllocatorFree(alloc, name);
 	return m;
 fail:
+	free(model);
+	free(data);
 	if (opts) api->ReleaseSessionOptions(opts);
 	vr_model_close(m);
 	return NULL;
