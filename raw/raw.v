@@ -94,7 +94,6 @@ pub struct C.libraw_lensinfo_t {
 }
 
 fn C.libraw_init(flags u32) &C.libraw_data_t
-fn C.libraw_open_file(lr &C.libraw_data_t, path &char) int
 fn C.libraw_unpack(lr &C.libraw_data_t) int
 fn C.libraw_dcraw_process(lr &C.libraw_data_t) int
 fn C.libraw_dcraw_make_mem_image(lr &C.libraw_data_t, errc &int) &C.libraw_processed_image_t
@@ -161,7 +160,7 @@ pub fn open(path string) !&Developer {
 	if isnil(lr) {
 		return error(i18n.tr('не удалось инициализировать LibRaw'))
 	}
-	code := C.libraw_open_file(lr, path.str)
+	code := open_path(lr, path)
 	if code != 0 {
 		C.libraw_close(lr)
 		return error(i18n.trf('открытие «{0}»: {1}', '${path}', '${err_text(code)}'))

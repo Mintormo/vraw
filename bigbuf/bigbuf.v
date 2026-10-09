@@ -15,10 +15,9 @@ module bigbuf
 // Удобно для временных плоскостей внутри функции:
 //   mut tmp := bigbuf.new_f32(n)
 //   defer { bigbuf.free(mut tmp) }
-#include <sys/mman.h>
-
-fn C.mmap(addr voidptr, length usize, prot int, flags int, fd int, offset i64) voidptr
-fn C.munmap(addr voidptr, length usize) int
+//
+// Выделение у системы - os_alloc/os_free: mmap (os_nix.c.v), на Windows
+// VirtualAlloc (os_windows.c.v); память в обоих случаях обнулена.
 
 // alloc - массив из n нулевых элементов T в своём mmap
 fn alloc[T](n int) []T {
@@ -27,9 +26,8 @@ fn alloc[T](n int) []T {
 		return a
 	}
 	bytes := usize(n) * sizeof(T)
-	p := C.mmap(unsafe { nil }, bytes, C.PROT_READ | C.PROT_WRITE, C.MAP_PRIVATE | C.MAP_ANONYMOUS,
-		-1, 0)
-	if p == C.MAP_FAILED {
+	p := os_alloc(bytes)
+	if p == unsafe { nil } {
 		panic('bigbuf: нет памяти на ${bytes >> 20} МБ')
 	}
 	unsafe {
@@ -68,7 +66,7 @@ pub fn is_big[T](a []T) bool {
 // освобождать результат, который бывает и тем, и другим.
 pub fn free[T](mut a []T) {
 	if is_big(a) {
-		C.munmap(a.data, usize(a.cap) * sizeof(T))
+		os_free(a.data, usize(a.cap) * sizeof(T))
 	}
 	a = []T{}
 }

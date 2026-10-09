@@ -17,7 +17,7 @@ import bigbuf
 import i18n
 
 #flag -I @VMODROOT/ai/include
-#flag -ldl
+#flag linux -ldl
 #include "@VMODROOT/ai/ort_shim.h"
 
 @[typedef]
@@ -51,7 +51,7 @@ pub fn (e Cancelled) msg() string {
 // экспорт могут попросить её из разных потоков)
 const runtime_mu = sync.new_mutex()
 
-// load_runtime - загрузить ONNX Runtime по пути к libonnxruntime.so
+// load_runtime - загрузить ONNX Runtime по пути к библиотеке (runtime_lib)
 // (повторный вызов после успеха - ничего не делает). Библиотека остаётся
 // в памяти до конца процесса.
 pub fn load_runtime(lib string) ! {
@@ -106,7 +106,7 @@ mut:
 	err   string
 pub:
 	path    string // файл модели .onnx
-	runtime string // libonnxruntime.so
+	runtime string // папка ONNX Runtime (библиотека - runtime_lib)
 }
 
 pub fn new_cache(path string, runtime string) &Cache {

@@ -79,13 +79,9 @@ struct BatchDone {
 
 // ── Нагрузка ──
 
-#include <sys/resource.h>
-#include <unistd.h>
 #include <omp.h>
 #flag -lgomp
 
-fn C.setpriority(which int, who u32, prio int) int
-fn C.gettid() int
 fn C.omp_set_num_threads(n int)
 
 // Нагрузка экспорта: ключи (Settings.export_load) и названия
@@ -137,17 +133,6 @@ fn mem_par(par int, npix i64, avail i64) int {
 	return if fit < 1 { 1 } else if fit < par { fit } else { par }
 }
 
-// mem_available - MemAvailable из /proc/meminfo, байт (0 - неизвестно)
-fn mem_available() i64 {
-	s := os.read_file('/proc/meminfo') or { return 0 }
-	for l in s.split_into_lines() {
-		if l.starts_with('MemAvailable:') {
-			return l.all_after(':').trim_space().all_before(' ').i64() * 1024
-		}
-	}
-	return 0
-}
-
 // frame_pixels - пикселей полного кадра RAW (0 - не открылся)
 fn frame_pixels(path string) i64 {
 	mut d := raw.open(path) or { return 0 }
@@ -159,12 +144,13 @@ fn frame_pixels(path string) i64 {
 }
 
 // apply_load - приоритет и OpenMP вызывающего потока; потоки, которые он
-// создаст (деконволюция, резкость, OpenMP LibRaw), наследуют приоритет.
-// Повысить приоритет без прав нельзя - только понизить, поэтому вызывать
-// лишь в потоках экспорта, не в главном.
+// создаст (деконволюция, резкость, OpenMP LibRaw), наследуют приоритет
+// (на Linux; на Windows - только сам поток). Повысить приоритет без прав
+// нельзя - только понизить, поэтому вызывать лишь в потоках экспорта, не
+// в главном. Системная часть - sys_nix.c.v / sys_windows.c.v.
 fn apply_load(l LoadLevel) {
 	if l.nice > 0 {
-		C.setpriority(0, u32(C.gettid()), l.nice) // 0 - PRIO_PROCESS: для потока по tid
+		lower_thread_priority(l.nice)
 	}
 	if l.omp > 0 {
 		C.omp_set_num_threads(l.omp)

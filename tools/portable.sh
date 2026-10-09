@@ -57,7 +57,6 @@ if ((with_ai)); then
 	cp -r "$root/onnxruntime" "$out/onnxruntime"
 fi
 
-cp "$root/README.md" "$out/"
 
 # --- Лицензии -------------------------------------------------------------
 # licenses/ - тексты всех лицензий, THIRD_PARTY.md - сводка: компонент,
@@ -75,12 +74,12 @@ cp "$vgui_lic" "$lic/vgui.txt"
 
 # Краткое имя лицензии по исходному пакету Ubuntu
 declare -A spdx=(
-	[brotli]='MIT' [bzip2]='bzip2 (BSD-подобная)' [freetype]='FTL (FreeType License)'
-	[glib2.0]='LGPL-2.1+' [gcc-14]='GPL-3 с GCC Runtime Library Exception'
+	[brotli]='MIT' [bzip2]='bzip2 (BSD-like)' [freetype]='FTL (FreeType License)'
+	[glib2.0]='LGPL-2.1+' [gcc-14]='GPL-3 with GCC Runtime Library Exception'
 	[graphite2]='LGPL-2.1+ / MPL-1.1 / GPL-2+' [harfbuzz]='MIT'
 	[libjpeg-turbo]='IJG + BSD-3-Clause + Zlib' [lcms2]='MIT'
-	[lensfun]='LGPL-3 (библиотека), CC BY-SA 3.0 (база профилей)'
-	[pcre2]='BSD-3-Clause' [libpng1.6]='libpng' [libraw]='LGPL-2.1 или CDDL-1.0'
+	[lensfun]='LGPL-3 (library), CC BY-SA 3.0 (profile database)'
+	[pcre2]='BSD-3-Clause' [libpng1.6]='libpng' [libraw]='LGPL-2.1 or CDDL-1.0'
 	[zlib]='Zlib'
 )
 # Собранные вручную (/usr/local): имя .so -> компонент, заголовок,
@@ -99,18 +98,18 @@ hver() { # заголовок, префикс макросов -> 3.5.0
 
 tp="$out/THIRD_PARTY.md"
 cat >"$tp" <<'END'
-# Сторонние компоненты vraw
+# vraw third-party components
 
-vraw и vgui - лицензия MIT (файлы LICENSE и licenses/vgui.txt). Ниже -
-всё остальное, что входит в эту сборку. Полные тексты лицензий - в папке
-licenses/, общие (GPL, LGPL, Apache...) - в licenses/common/.
+vraw and vgui are MIT-licensed (LICENSE and licenses/vgui.txt). Below is
+everything else included in this build. Full license texts are in the
+licenses/ folder, common ones (GPL, LGPL, Apache...) in licenses/common/.
 
-## Библиотеки (папка lib/)
+## Libraries (lib/ folder)
 
-Подключаются динамически: любую можно заменить своей сборкой (это
-требование LGPL). Исходники именно этих версий - по ссылкам в таблице.
+Linked dynamically: any of them can be replaced with your own build (as
+the LGPL requires). Sources of exactly these versions are linked below.
 
-| Файл | Компонент | Версия | Лицензия | Исходники |
+| File | Component | Version | License | Sources |
 |---|---|---|---|---|
 END
 declare -A seen=()
@@ -149,34 +148,34 @@ done
 cp /usr/share/common-licenses/Apache-2.0 "$lic/common/"
 cat >>"$tp" <<'END'
 
-## Вшито в бинарник vraw
+## Built into the vraw binary
 
-| Компонент | Лицензия | Текст |
+| Component | License | Text |
 |---|---|---|
-| vgui (GUI-библиотека) | MIT | licenses/vgui.txt |
-| Стандартная библиотека V | MIT | licenses/V.txt |
-| Boehm GC (сборщик мусора V) | лицензия Boehm GC (MIT-подобная) | licenses/libgc.txt |
-| Mbed TLS (HTTPS для скачивания моделей) | Apache-2.0 | licenses/mbedtls.txt, licenses/common/Apache-2.0 |
+| vgui (GUI library) | MIT | licenses/vgui.txt |
+| V standard library | MIT | licenses/V.txt |
+| Boehm GC (V garbage collector) | Boehm GC license (MIT-like) | licenses/libgc.txt |
+| Mbed TLS (HTTPS for model downloads) | Apache-2.0 | licenses/mbedtls.txt, licenses/common/Apache-2.0 |
 | stb_image, stb_image_write, stb_image_resize2 | MIT / public domain | licenses/stb.txt |
-| Шрифт Roboto | SIL Open Font License 1.1 | licenses/Roboto-OFL.txt |
-| Значки Lucide | ISC | licenses/Lucide-ISC.txt |
+| Roboto font | SIL Open Font License 1.1 | licenses/Roboto-OFL.txt |
+| Lucide icons | ISC | licenses/Lucide-ISC.txt |
 
-## Данные
+## Data
 
-| Компонент | Лицензия | Текст |
+| Component | License | Text |
 |---|---|---|
-| База профилей объективов lensfun (папка lensfun/) | CC BY-SA 3.0 | licenses/lensfun.txt |
+| lensfun lens profile database (lensfun/ folder) | CC BY-SA 3.0 | licenses/lensfun.txt |
 
-База - работа проекта lensfun (https://lensfun.github.io), распространяется
-без изменений.
+The database is the work of the lensfun project (https://lensfun.github.io),
+distributed unmodified.
 
-## AI-шумодав (ONNX Runtime и SCUNet скачивает программа - «Правка - Настройки»; сборка с --ai кладёт всё готовым)
+## AI denoise (ONNX Runtime and models are downloaded by the program - Edit - Settings; a build with --ai includes them)
 
-| Компонент | Лицензия | Текст |
+| Component | License | Text |
 |---|---|---|
-| ONNX Runtime (папка onnxruntime/) | MIT | onnxruntime/LICENSE, onnxruntime/ThirdPartyNotices.txt |
-| Модели SCUNet (Kai Zhang et al., https://github.com/cszn/SCUNet) | Apache-2.0 | licenses/SCUNet.txt |
-| Модель NAFNet (https://github.com/megvii-research/NAFNet) | MIT | licenses/NAFNet.txt |
+| ONNX Runtime (onnxruntime/ folder) | MIT | onnxruntime/LICENSE, onnxruntime/ThirdPartyNotices.txt |
+| SCUNet models (Kai Zhang et al., https://github.com/cszn/SCUNet) | Apache-2.0 | licenses/SCUNet.txt |
+| NAFNet model (https://github.com/megvii-research/NAFNet) | MIT | licenses/NAFNet.txt |
 END
 
 # Проверка: все библиотеки находятся (в lib/ или в системе)

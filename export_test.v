@@ -276,9 +276,10 @@ fn test_export_path() {
 	s.export_exists = 'overwrite'
 	assert export_path(&s, raw_path, .jpeg) == os.join_path(dir, 'IMG_1.jpg')
 	s.export_dir_mode = 'dir'
-	s.export_dir = '/tmp/out'
+	out := os.join_path(os.temp_dir(), 'out')
+	s.export_dir = out
 	s.export_name = '{name}_web'
-	assert export_path(&s, raw_path, .tiff) == '/tmp/out/IMG_1_web.tif'
+	assert export_path(&s, raw_path, .tiff) == os.join_path(out, 'IMG_1_web.tif')
 	os.rmdir_all(dir) or {}
 }
 

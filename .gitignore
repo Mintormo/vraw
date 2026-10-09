@@ -23,5 +23,5 @@
 /onnxruntime.tmp/
 *.part
 
-# Портабельная сборка (tools/portable.sh)
+# Портабельные сборки (tools/portable.sh, tools/windows.sh)
 /dist/

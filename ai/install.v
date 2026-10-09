@@ -204,32 +204,35 @@ pub fn install_model(p Places, m ModelInfo, progress fn (done i64, total i64) bo
 }
 
 // install_runtime - скачать официальную сборку ONNX Runtime и распаковать
-// в папку runtime (содержимое архива без верхней папки: lib/, include/,
-// лицензии). Распаковка - системным tar во временную папку, затем
-// переименование: недораспакованный runtime не появится.
+// в папку runtime (содержимое архива без верхней папки: lib/, лицензии).
+// Распаковка - системным tar (в Windows 10+ он есть и понимает zip) во
+// временную папку, затем переименование: недораспакованный runtime не
+// появится.
 pub fn install_runtime(p Places, progress fn (done i64, total i64) bool) ! {
 	parent := os.dir(p.runtime)
 	os.mkdir_all(parent)!
-	tgz := p.runtime + '.tgz'
-	tmp := p.runtime + '.tmp'
 	f := runtime_file
-	fetch(f, tgz, 0, f.size, progress)!
+	arc := p.runtime + os.file_ext(f.name)
+	tmp := p.runtime + '.tmp'
+	fetch(f, arc, 0, f.size, progress)!
 	defer {
-		os.rm(tgz) or {}
+		os.rm(arc) or {}
 	}
 	if os.exists(tmp) {
 		os.rmdir_all(tmp)!
 	}
 	os.mkdir_all(tmp)!
-	// Аргументы массивом, без оболочки (os.execute со строкой устарел)
-	res := os.exec(['tar', '-xzf', tgz, '-C', tmp, '--strip-components=1'])
+	// Аргументы массивом, без оболочки (os.execute со строкой устарел);
+	// заголовки и отладочные символы (.pdb - 400 МБ) не нужны
+	res := os.exec(['tar', '-xf', arc, '-C', tmp, '--strip-components=1', '--exclude=*.pdb',
+		'--exclude=*.lib', '--exclude=*/include/*'])
 	if res.exit_code != 0 {
 		os.rmdir_all(tmp) or {}
 		return error(i18n.trf('не удалось распаковать {0}: {1}', '${f.name}', '${res.output.trim_space()}'))
 	}
-	if !os.exists(os.join_path(tmp, 'lib', 'libonnxruntime.so.1')) {
+	if !os.exists(os.join_path(tmp, runtime_lib_name)) {
 		os.rmdir_all(tmp) or {}
-		return error(i18n.trf('в архиве {0} нет lib/libonnxruntime.so.1', '${f.name}'))
+		return error(i18n.trf('в архиве {0} нет {1}', '${f.name}', runtime_lib_name))
 	}
 	// Папка без библиотеки (обрывок прошлой установки) - заменяется
 	if os.exists(p.runtime) {

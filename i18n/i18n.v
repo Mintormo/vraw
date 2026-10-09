@@ -79,12 +79,25 @@ pub fn supported(code string) string {
 	return if known(code) { code } else { 'en' }
 }
 
-// set выбирает язык интерфейса (незнакомый - английский). Звать один раз
-// при запуске, до построения окна и до запуска потоков.
-pub fn set(code string) {
+// init - до выбора языка (set) - исходный язык, русский: строки как есть
+// и формы числа по русскому правилу (тесты и всё, что выполнится до
+// set в main; без этого ядро брало правило своего языка по умолчанию -
+// английского, «8 группы»)
+fn init() {
+	configure()
+	core.set_locale('ru')
+}
+
+fn configure() {
 	core.set_loader(embedded)
 	core.set_source_locale('ru')
 	core.set_fallback('en')
+}
+
+// set выбирает язык интерфейса (незнакомый - английский). Звать один раз
+// при запуске, до построения окна и до запуска потоков.
+pub fn set(code string) {
+	configure()
 	core.set_locale(supported(code))
 }
 

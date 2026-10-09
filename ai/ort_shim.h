@@ -11,7 +11,6 @@
 #ifndef VRAW_ORT_SHIM_H
 #define VRAW_ORT_SHIM_H
 
-#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,27 +45,77 @@ static int vr_take_error(OrtStatus *st, char *buf, int buf_len) {
 
 typedef const OrtApiBase *(*VrGetApiBase)(void);
 
+// Загрузка библиотеки: dlopen, на Windows - LoadLibraryExW. Пути из V -
+// UTF-8; Windows ждёт UTF-16 (и путь модели для CreateSession там тоже
+// wchar_t - ORTCHAR_T).
+#ifdef _WIN32
+#include <windows.h>
+
+// vr_wide - UTF-8 -> UTF-16 (malloc; NULL - ошибка)
+static wchar_t *vr_wide(const char *s) {
+	int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+	if (n <= 0) {
+		return NULL;
+	}
+	wchar_t *w = (wchar_t *)malloc(n * sizeof(wchar_t));
+	MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n);
+	return w;
+}
+
+// Зависимости (onnxruntime_providers_shared.dll) ищутся в папке самой
+// библиотеки - LOAD_WITH_ALTERED_SEARCH_PATH
+static void *vr_dlopen(const char *path, char *err, int err_len) {
+	wchar_t *w = vr_wide(path);
+	HMODULE h = w ? LoadLibraryExW(w, NULL, LOAD_WITH_ALTERED_SEARCH_PATH) : NULL;
+	free(w);
+	if (h == NULL) {
+		DWORD code = GetLastError();
+		if (code == ERROR_MOD_NOT_FOUND) {
+			// сама библиотека есть (путь проверен в V) - нет её зависимостей
+			snprintf(err, err_len, "не найдены библиотеки, нужные ONNX Runtime: установите "
+				"Microsoft Visual C++ Redistributable (x64) - https://aka.ms/vs/17/release/vc_redist.x64.exe");
+		} else {
+			snprintf(err, err_len, "LoadLibrary: ошибка %lu", (unsigned long)code);
+		}
+	}
+	return (void *)h;
+}
+#define vr_dlsym(h, name) ((void *)GetProcAddress((HMODULE)(h), name))
+#define vr_dlclose(h) FreeLibrary((HMODULE)(h))
+#else
+#include <dlfcn.h>
+
+static void *vr_dlopen(const char *path, char *err, int err_len) {
+	void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+	if (h == NULL) {
+		snprintf(err, err_len, "%s", dlerror());
+	}
+	return h;
+}
+#define vr_dlsym(h, name) dlsym(h, name)
+#define vr_dlclose(h) dlclose(h)
+#endif
+
 // vr_ort_load - загрузить библиотеку ORT по пути; 0 - успех (или уже
 // загружена), иначе текст ошибки в err
 static int vr_ort_load(const char *path, char *err, int err_len) {
 	if (vr_api != NULL) {
 		return 0;
 	}
-	void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+	void *h = vr_dlopen(path, err, err_len);
 	if (h == NULL) {
-		snprintf(err, err_len, "%s", dlerror());
 		return 1;
 	}
-	VrGetApiBase get_base = (VrGetApiBase)dlsym(h, "OrtGetApiBase");
+	VrGetApiBase get_base = (VrGetApiBase)vr_dlsym(h, "OrtGetApiBase");
 	if (get_base == NULL) {
 		snprintf(err, err_len, "в библиотеке нет OrtGetApiBase");
-		dlclose(h);
+		vr_dlclose(h);
 		return 1;
 	}
 	const OrtApi *api = get_base()->GetApi(ORT_API_VERSION);
 	if (api == NULL) {
 		snprintf(err, err_len, "несовместимая версия библиотеки (нужен API %d)", ORT_API_VERSION);
-		dlclose(h);
+		vr_dlclose(h);
 		return 1;
 	}
 	OrtEnv *env = NULL;
@@ -74,7 +123,7 @@ static int vr_ort_load(const char *path, char *err, int err_len) {
 	if (st != NULL) {
 		snprintf(err, err_len, "%s", api->GetErrorMessage(st));
 		api->ReleaseStatus(st);
-		dlclose(h);
+		vr_dlclose(h);
 		return 1;
 	}
 	// Библиотека остаётся загруженной до конца процесса
@@ -108,7 +157,14 @@ static VrModel *vr_model_open(const char *path, char *err, int err_len) {
 	char *name = NULL;
 	if (vr_take_error(api->CreateSessionOptions(&opts), err, err_len)) goto fail;
 	if (vr_take_error(api->SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL), err, err_len)) goto fail;
-	if (vr_take_error(api->CreateSession(vr_env, path, opts, &m->sess), err, err_len)) goto fail;
+#ifdef _WIN32
+	wchar_t *wpath = vr_wide(path);
+	OrtStatus *st = api->CreateSession(vr_env, wpath, opts, &m->sess);
+	free(wpath);
+#else
+	OrtStatus *st = api->CreateSession(vr_env, path, opts, &m->sess);
+#endif
+	if (vr_take_error(st, err, err_len)) goto fail;
 	api->ReleaseSessionOptions(opts);
 	opts = NULL;
 	if (vr_take_error(api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &m->mem), err, err_len)) goto fail;

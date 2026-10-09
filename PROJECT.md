@@ -1659,7 +1659,9 @@ en), прежние имена функций — их ищут код и `tools
 при запуске (`i18n.set` в `main` до окна и потоков; `Settings.lang`, ''
 — язык системы `system_lang()`), дальше
 таблицы только читаются — `tr` безопасна из потоков (воркеры, ошибки
-модулей). Поиск: язык → английский → ключ (русский). Смена языка — в
+модулей). До `set` (тесты, константы) модуль сам (`fn init`) ставит
+ядру исходный и текущий язык — русский: иначе `pl` брал правило
+английского («8 группы»). Поиск: язык → английский → ключ (русский). Смена языка — в
 «Настройки - Интерфейс», применяется после перезапуска (подпись об этом
 сразу на выбранном языке — `tr_in`).
 
@@ -1706,7 +1708,7 @@ vraw — одно GUI-приложение: исходники `module main` л�
 зависимости зависимостей), `lib/` — все .so из `ldd`, кроме glibc,
 libstdc++ и libgcc_s (своя копия ломала бы драйверы, которые SDL
 подгружает из системы), `lensfun/` — база профилей (обновлённая из
-`~/.local/share`), README, `LICENSE` (MIT), `licenses/` и сводка
+`~/.local/share`), `LICENSE` (MIT), `licenses/` и сводка
 `THIRD_PARTY.md`. Лицензии: библиотеки из apt — пакет по `dpkg -S` (с
 архитектурой: у libjpeg есть и i386), текст `/usr/share/doc/<пакет>/
 copyright` и общие тексты из `/usr/share/common-licenses`, на которые он
@@ -1721,6 +1723,57 @@ glibc не старее системы сборки (2.39, Ubuntu 24.04); для
 Проверка — запуск в `bwrap` с пустыми `/usr/local/lib`, базами lensfun и
 `/dev/null` на месте системных копий библиотек из `lib/`: кадр
 открывается, профиль объектива находится.
+
+**Портабельная сборка для Windows** (`tools/windows.sh`, 09.10.2026;
+`--ai` — как на Linux): кросс-компиляция на Linux — `v -os windows -cc
+x86_64-w64-mingw32-gcc-posix -subsystem windows` (posix-вариант MinGW —
+ради libgomp; `-subsystem windows` — без окна консоли). Библиотеки —
+готовые пакеты MSYS2 mingw64 (msvcrt, как MinGW из Ubuntu):
+`tools/win_deps.py` разбирает базу репозитория, тянет SDL3, SDL3_ttf,
+SDL3_image, LibRaw (0.22, на Linux 0.21 — сборка по заголовку, API тот
+же), lensfun с зависимостями, сверяет SHA-256 и кладёт в
+`~/soft/mingw64-vraw` (`include/`, `lib/` с библиотеками импорта,
+`bin/` с DLL, `dlls.tsv` — DLL → пакет, `packages.tsv` — версия,
+лицензия, исходный пакет). Итог — `dist/vraw-windows/` и
+`dist/vraw-windows-x86_64.zip` (~12 МБ): `vraw.exe`, рядом 25 DLL
+(обход `objdump -p` от exe, системные DLL не берутся; SDL3_image грузит
+кодеки AVIF/JXL/… по требованию — они не нужны), `lensfun/`, лицензии
+пакетов из `share/licenses/` и ссылки на исходные пакеты MSYS2 в
+`THIRD_PARTY.md` (в обеих сборках — на английском; README в сборки не
+кладётся).
+
+Платформенные места кода (суффиксы `_nix.c.v` / `_windows.c.v`, V сам
+берёт нужный): `bigbuf/os_*` — `mmap` / `VirtualAlloc`; `sys_*.c.v` —
+свободная память (`/proc/meminfo` / `GlobalMemoryStatusEx`) и приоритет
+потока экспорта (`setpriority` / `SetThreadPriority`: на Windows
+приоритет не наследуется потоками LibRaw); `raw/open_*` — LibRaw
+открывает файл по UTF-16 пути (`libraw_open_wfile`: char*-путь там в
+кодировке ANSI, кириллица ломалась бы). Тоже ради путей: JPEG/PNG/BMP
+stbi кодирует в память (`imgio/stbmem.v`, `stbi_write_*_to_func`), в
+файл пишет `os` (он на Windows открывает файлы по UTF-16). ONNX Runtime
+(`ai/ort_shim.h`): `LoadLibraryExW` вместо `dlopen`, путь модели в
+`CreateSession` — `wchar_t`; для Windows качается zip
+`onnxruntime-win-x64` (82 МБ из-за .pdb — при распаковке системным `tar`
+Windows 10+ пропускаются), библиотеке нужен Microsoft Visual C++
+Redistributable — нет его — ошибка загрузки с ссылкой на установщик.
+Проверено под Wine 9 (09.10.2026; на настоящей Windows — ещё нет, см.
+ROADMAP): окно, открытие CR3 из папки с кириллицей, профиль объектива из
+`lensfun/`, тесты `raw/`, `imgio/`, `bigbuf/`, экспорта, кадрирования
+(собранные `-os windows` exe), запись JPEG/PNG/TIFF в кириллический путь,
+ONNX Runtime и NAFNet. Найденное: с LTO (`-flto`, его включает
+`-prod`) MinGW собирает vraw.exe с пустым окном — нет панели, холста,
+заглушки, при любом отрисовщике; примеры vgui с LTO рисуются нормально,
+`-gc none` не помогает, необъявленных C-функций нет — причина не
+найдена, сборка идёт с `-fno-lto` (тот же `-O2`). Заодно vgui теперь
+перерисовывает окно целиком по `SDL_EVENT_RENDER_TARGETS_RESET`
+(профилактика: Direct3D теряет текстуры при сбросе устройства; под Wine
+не воспроизводилось). Баланс белого «как снято» у LibRaw
+0.22 (Windows) немного другой, чем у 0.21 (Linux): IMG_0991 — 5900 K / 2
+против 5600 K / 10. Как проверять: Xvfb `:99`, отдельный `WINEPREFIX`
+в черновике, `wine vraw.exe Z:\путь\кадр.CR3`, снимок `xwd -root` →
+`ffmpeg` в PNG; отладочная сборка — без `-subsystem windows` (иначе
+вывод V некуда писать), `SDL_RENDER_DRIVER=software|opengl` — сравнить
+отрисовщики.
 
 Файлы: `app.v` — State, окно, панель, пересчёты, `main()`; `ai_nr.v` —
 AI-шумодав в окне; `wb_ui.v` — секция «Баланс белого»; `history.v`

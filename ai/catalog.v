@@ -124,18 +124,32 @@ pub fn (m ModelInfo) size() i64 {
 }
 
 // ONNX Runtime: официальная сборка с GitHub (MIT). Заголовки для сборки
-// vraw - в ai/include той же версии.
+// vraw - в ai/include той же версии. Для Windows - zip (82 МБ: внутри
+// отладочные .pdb, при распаковке пропускаются), библиотеке нужны DLL
+// Microsoft Visual C++ (обычно уже стоят).
 pub const runtime_version = '1.30.0'
-pub const runtime_file = ModelFile{
-	name:   'onnxruntime-linux-x64-${runtime_version}.tgz'
-	url:    'https://github.com/microsoft/onnxruntime/releases/download/v${runtime_version}/onnxruntime-linux-x64-${runtime_version}.tgz'
-	size:   11306877
-	sha256: 'a5ed5a3cac51fbb2e90da632ae43d19212faaa20e76484e62bcb7c23ddb3b3fd'
+pub const runtime_file = $if windows {
+	ModelFile{
+		name:   'onnxruntime-win-x64-${runtime_version}.zip'
+		url:    'https://github.com/microsoft/onnxruntime/releases/download/v${runtime_version}/onnxruntime-win-x64-${runtime_version}.zip'
+		size:   82645522
+		sha256: 'c6ba983baf5681af108599675d2a89c2d145512d02de28aed0bff177cd0ba949'
+	}
+} $else {
+	ModelFile{
+		name:   'onnxruntime-linux-x64-${runtime_version}.tgz'
+		url:    'https://github.com/microsoft/onnxruntime/releases/download/v${runtime_version}/onnxruntime-linux-x64-${runtime_version}.tgz'
+		size:   11306877
+		sha256: 'a5ed5a3cac51fbb2e90da632ae43d19212faaa20e76484e62bcb7c23ddb3b3fd'
+	}
 }
+
+// runtime_lib_name - библиотека ORT внутри папки runtime
+pub const runtime_lib_name = $if windows { 'lib/onnxruntime.dll' } $else { 'lib/libonnxruntime.so.1' }
 
 // runtime_lib - путь к библиотеке ORT в папке runtime; пусто - не
 // установлена
 pub fn runtime_lib(p Places) string {
-	lib := os.join_path(p.runtime, 'lib', 'libonnxruntime.so.1')
+	lib := os.join_path(p.runtime, runtime_lib_name)
 	return if os.exists(lib) { lib } else { '' }
 }

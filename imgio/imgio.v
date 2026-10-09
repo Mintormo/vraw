@@ -5,7 +5,6 @@ module imgio
 // и GIF (свой: палитра 256 цветов медианным сечением, дизеринг
 // Флойда-Стейнберга, LZW). Без vgui - годится для фонового потока.
 import os
-import stbi
 import i18n
 
 pub enum Format {
@@ -111,15 +110,14 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	}
 	match f {
 		.jpeg {
-			stbi.stbi_write_jpg(path, w, h, 3, rgb.data, o.quality)!
-			add_meta(path, o, jpeg_with_exif, jpeg_with_icc)!
+			os.write_file_array(path, with_meta(stb_jpg(w, h, rgb, o.quality)!, o, jpeg_with_exif,
+				jpeg_with_icc)!)!
 		}
 		.png {
-			stbi.stbi_write_png(path, w, h, 3, rgb.data, w * 3)!
-			add_meta(path, o, png_with_exif, png_with_icc)!
+			os.write_file_array(path, with_meta(stb_png(w, h, rgb)!, o, png_with_exif, png_with_icc)!)!
 		}
 		.bmp {
-			stbi.stbi_write_bmp(path, w, h, 3, rgb.data)!
+			os.write_file_array(path, stb_bmp(w, h, rgb)!)!
 		}
 		.tiff {
 			os.write_file_array(path, encode_tiff(w, h, rgb, o.exif, o.icc)!)!
@@ -136,18 +134,14 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	}
 }
 
-// add_meta - вставить EXIF и ICC-профиль в только что записанный stbi
-// файл (stb пишет сразу в файл; перечитать 8 МБ JPEG - миллисекунды)
-fn add_meta(path string, o WriteOpts, with_exif fn ([]u8, Exif) ![]u8, with_icc fn ([]u8, []u8) ![]u8) ! {
-	if isnil(o.exif) && o.icc.len == 0 {
-		return
-	}
-	mut data := os.read_bytes(path)!
+// with_meta - вставить EXIF и ICC-профиль в закодированный stbi файл
+fn with_meta(file []u8, o WriteOpts, with_exif fn ([]u8, Exif) ![]u8, with_icc fn ([]u8, []u8) ![]u8) ![]u8 {
+	mut data := file.clone()
 	if !isnil(o.exif) {
 		data = with_exif(data, *o.exif)!
 	}
 	if o.icc.len > 0 {
 		data = with_icc(data, o.icc)!
 	}
-	os.write_file_array(path, data)!
+	return data
 }
