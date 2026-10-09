@@ -33,9 +33,9 @@ command -v "$cc" >/dev/null || { echo "Нет $cc - apt install gcc-mingw-w64-x8
 rm -rf "$out" "$zipf"
 mkdir -p "$out"
 
-# -fno-lto: с LTO (его включает -prod) MinGW собирает vraw.exe, у которого
-# окно пустое - нет панели, холста, заглушки (09.10.2026, под Wine; примеры
-# vgui с LTO рисуются нормально, причина не найдена). Без LTO - тот же -O2.
+# -fno-lto: с LTO (его включает -prod) у vraw.exe пустое окно. Причина -
+# ошибка V: трамплин замыканий портит xmm15, на Windows x64 он сохраняемый
+# (vlang/v#29822). Без LTO - тот же -O2; вернуть LTO после исправления в V.
 echo "Сборка..."
 "$v" -prod -os windows -cc "$cc" -enable-globals -subsystem windows \
 	-cflags "-I$pfx/include -fno-lto" -ldflags "-L$pfx/lib -fno-lto" \
