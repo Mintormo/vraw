@@ -317,6 +317,12 @@ mut:
 	clip         EditState
 	clip_groups  []string
 	m_paste      &vgui.MenuItem = unsafe { nil }
+	// Доступность (avail.v): пункты меню с условиями, пункты пресетов
+	// (меню пересобирается), панель правки активна (без кадра - нет)
+	avail         []AvailItem
+	m_presets     []&vgui.MenuItem
+	m_preset_save &vgui.MenuItem = unsafe { nil }
+	panel_live    bool = true
 	bar          &vgui.MenuBar  = unsafe { nil }
 	presets_menu int = -1
 	paste_fn     fn (EditState, []string, string) = unsafe { nil }
@@ -2473,6 +2479,7 @@ fn main() {
 			start_history(mut st)
 		}
 		show_frame(mut st, path, mut app)
+		sync_avail(mut st)
 		if adopt {
 			show_loading(mut st, true) // итог - из prefetch_take
 			return
@@ -2499,6 +2506,7 @@ fn main() {
 			lens_lb.text = i18n.tr(lens_no_info)
 			show_placeholder(mut cv, mut placeholder)
 			sync_view_bg(mut st)
+			sync_avail(mut st)
 			nm.show_error(res.err)
 			return
 		}
@@ -2557,6 +2565,7 @@ fn main() {
 		if st.load_msg.len > 0 {
 			nm.show_warning(st.load_msg)
 		}
+		sync_avail(mut st)
 		// Сосед в ленте - заранее, в фоне (prefetch.v)
 		prefetch_next(mut st)
 	}
@@ -2601,6 +2610,7 @@ fn main() {
 	strip.on_select = fn [mut st] (idx int, text string) {
 		strip_info_text(mut st)
 		pair_select(mut st, idx) // при сравнении - этот кадр слева
+		sync_avail(mut st) // отбор, вставка, сравнение - по выделенным
 	}
 	st.strip = strip
 	mut strip_info := vgui.label('')
@@ -2749,6 +2759,7 @@ fn main() {
 		show_loading(mut st, false)
 		show_placeholder(mut cv, mut placeholder)
 		sync_view_bg(mut st)
+		sync_avail(mut st)
 	}
 
 	// Открыть папку: все RAW - в ленте, в области просмотра ничего
@@ -2990,6 +3001,7 @@ fn main() {
 	hk_add(mut st, 'file.open_dir', 'Файл', mut m_open_dir)
 	hk_add(mut st, 'file.export', 'Файл', mut m_export)
 	hk_add(mut st, 'file.quit', 'Файл', mut m_quit)
+	avail_add(mut st, .export, [m_export])
 
 	mut m_undo := vgui.menu_action(i18n.tr('Отменить'))
 	m_undo.shortcut = 'Ctrl+Z'
@@ -3023,7 +3035,6 @@ fn main() {
 	}
 	mut m_paste := vgui.menu_action(i18n.tr('Вставить настройки'))
 	m_paste.shortcut = 'Ctrl+Shift+V'
-	m_paste.enabled = false
 	m_paste.on_click = fn [mut st] () {
 		if st.clip_groups.len > 0 {
 			st.paste_fn(st.clip, st.clip_groups, i18n.tr('Вставка настроек'))
@@ -3073,6 +3084,12 @@ fn main() {
 	hk_add(mut st, 'edit.autotone', 'Правка', mut m_autotone)
 	hk_add(mut st, 'edit.reset_tone', 'Правка', mut m_reset)
 	hk_add(mut st, 'edit.settings', 'Правка', mut m_settings)
+	avail_add(mut st, .undo, [m_undo])
+	avail_add(mut st, .redo, [m_redo])
+	avail_add(mut st, .frame, [m_copy, m_reset])
+	avail_add(mut st, .paste, [m_paste])
+	avail_add(mut st, .frames, [m_all])
+	avail_add(mut st, .pixels, [m_crop, m_spots, m_pick, m_autotone])
 	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
 	st.bar = bar
 	st.import_presets = fn [mut st, mut app, win, mut nm] () {
@@ -3170,6 +3187,7 @@ fn main() {
 		st.settings.auto_advance = v
 		save_settings(st.settings)
 	}
+	avail_add(mut st, .target, pick_items.filter(it.kind != .separator))
 	pick_items << m_advance
 	bar.add_menu(i18n.tr('Отбор'), pick_items)
 	pick_ids := ['pick.rate0', 'pick.rate1', 'pick.rate2', 'pick.rate3', 'pick.rate4',
@@ -3318,6 +3336,11 @@ fn main() {
 		mut it := view_items[i]
 		hk_add(mut st, id, 'Вид', mut it)
 	}
+	avail_add(mut st, .frame, [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_jpeg,
+		m_clipwarn])
+	avail_add(mut st, .pair, [m_pair])
+	avail_add(mut st, .swap, [m_swap])
+	avail_add(mut st, .mask, [m_mask])
 
 	mut exp_row := edit_row(mut st, mut exp, lbl_w, val_w)
 	// Ряд «Автотон» - кнопка по своей ширине, слева
@@ -3610,6 +3633,8 @@ fn main() {
 	})
 	app.add_window(win)
 
+	// Без кадра доступно только открытие (avail.v)
+	sync_avail(mut st)
 	// Путь к RAW можно передать аргументом: vraw файл.CR3
 	if os.args.len > 1 && os.exists(os.args[1]) {
 		open_file(os.args[1])

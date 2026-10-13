@@ -522,6 +522,7 @@ fn sync_strip(mut st State) {
 	}
 	center_strip(mut st)
 	strip_info_text(mut st)
+	sync_avail(mut st)
 }
 
 // strip_info_text - подпись над лентой: папка, «N из M», при выделении
@@ -571,6 +572,7 @@ fn select_all_frames(mut st State) {
 	mut strip := st.strip
 	strip.set_selection(idx)
 	strip_info_text(mut st)
+	sync_avail(mut st)
 }
 
 // strip_item_width - ширина ячейки ленты под высоту её панели pane_h

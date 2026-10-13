@@ -207,6 +207,7 @@ fn refresh_history(mut st State) {
 			lb.scroll_y = top + lb.item_height - view_h
 		}
 	}
+	sync_avail(mut st) // «Отменить», «Вернуть», «Маска фильтра»
 }
 
 // set_edit выставляет снимок в State и во все виджеты правки - без

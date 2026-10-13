@@ -154,6 +154,7 @@ fn set_pair(mut st State, on bool) {
 		pair_layout(mut st)
 	}
 	on_off_menu(st.m_pair, st.pair_on)
+	sync_avail(mut st)
 }
 
 fn on_off_menu(m &vgui.MenuItem, on bool) {

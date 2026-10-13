@@ -268,10 +268,7 @@ fn copy_settings(mut st State, groups []string) {
 	st.clip_groups = groups.clone()
 	st.settings.copy_groups = groups.clone()
 	save_settings(st.settings)
-	if !isnil(st.m_paste) {
-		mut m := st.m_paste
-		m.enabled = groups.len > 0
-	}
+	sync_avail(mut st)
 	if !isnil(st.nm) {
 		mut nm := st.nm
 		nm.show_info(i18n.trf('Скопировано: {0}', '${groups_text(groups.len)}'))
@@ -486,12 +483,14 @@ fn rebuild_presets_menu(mut st State) {
 	}
 	mut items := []&vgui.MenuItem{}
 	presets := list_presets(presets_dir())
+	st.m_presets.clear()
 	for p in presets {
 		mut it := vgui.menu_action(p.name)
 		it.on_click = fn [mut st, p] () {
 			apply_preset(mut st, p)
 		}
 		items << it
+		st.m_presets << it
 	}
 	if presets.len == 0 {
 		mut none_ := vgui.menu_action(i18n.tr('Пресетов нет'))
@@ -506,6 +505,7 @@ fn rebuild_presets_menu(mut st State) {
 		}
 	}
 	items << m_save
+	st.m_preset_save = m_save
 	mut m_manage := vgui.menu_action(i18n.tr('Управление пресетами...'))
 	m_manage.on_click = fn [mut st] () {
 		if !isnil(st.show_presets) {
@@ -515,6 +515,7 @@ fn rebuild_presets_menu(mut st State) {
 	items << m_manage
 	mut bar := st.bar
 	bar.set_items(st.presets_menu, items)
+	sync_avail(mut st)
 	if !isnil(st.presets_ui) {
 		fill_presets_ui(mut st, presets)
 	}
