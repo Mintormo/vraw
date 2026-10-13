@@ -412,6 +412,7 @@ fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, mut 
 		ai_cache: cache
 		progress: StageProgress(progress)
 		size:     job.settings.export_size_opts()
+		bits16:   job.settings.export_bits16(job.format)
 	)!
 	defer {
 		img.free()

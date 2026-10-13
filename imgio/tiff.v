@@ -2,7 +2,7 @@ module imgio
 
 import i18n
 
-// TIFF: baseline RGB 8 бит, little-endian, полосы по tiff_rows_per_strip
+// TIFF: baseline RGB 8 бит (или 16, encode_tiff16), little-endian, полосы по tiff_rows_per_strip
 // строк, сжатие Deflate (Adobe, тег 8) с горизонтальным предиктором (2):
 // в полосе хранятся разности соседних пикселей строки - так сжатие
 // фотографии заметно лучше. Deflate - zlib-компрессор из stb_image_write
@@ -51,7 +51,19 @@ fn zlib_compress(data []u8) ![]u8 {
 // encode_tiff - TIFF кадра; exif не nil - теги EXIF в IFD кадра и
 // Exif IFD за ним (exif.v); icc не пуст - тег InterColorProfile (icc.v)
 fn encode_tiff(w int, h int, rgb []u8, exif &Exif, icc []u8) ![]u8 {
-	row := w * 3
+	return tiff_encode(w, h, rgb, false, exif, icc)
+}
+
+// encode_tiff16 - TIFF 16 бит на канал: rgb - u16 в машинном порядке
+// (w * h * 6 байт); предиктор - разности 16-битных отсчётов (по модулю
+// 2^16), в файле - little-endian
+fn encode_tiff16(w int, h int, rgb []u8, exif &Exif, icc []u8) ![]u8 {
+	return tiff_encode(w, h, rgb, true, exif, icc)
+}
+
+fn tiff_encode(w int, h int, rgb []u8, b16 bool, exif &Exif, icc []u8) ![]u8 {
+	bps := if b16 { 16 } else { 8 }
+	row := if b16 { w * 6 } else { w * 3 }
 	strips := (h + tiff_rows_per_strip - 1) / tiff_rows_per_strip
 	mut out := []u8{cap: rgb.len / 2}
 	out << [u8(`I`), `I`, 42, 0]
@@ -67,6 +79,15 @@ fn encode_tiff(w int, h int, rgb []u8, exif &Exif, icc []u8) ![]u8 {
 		for y in y0 .. y1 {
 			src := y * row
 			dst := (y - y0) * row
+			if b16 {
+				p := unsafe { &u16(&rgb[src]) }
+				for x in 0 .. w * 3 {
+					v := unsafe { if x < 3 { p[x] } else { p[x] - p[x - 3] } }
+					buf[dst + 2 * x] = u8(v)
+					buf[dst + 2 * x + 1] = u8(v >> 8)
+				}
+				continue
+			}
 			buf[dst] = rgb[src]
 			buf[dst + 1] = rgb[src + 1]
 			buf[dst + 2] = rgb[src + 2]
@@ -87,7 +108,7 @@ fn encode_tiff(w int, h int, rgb []u8, exif &Exif, icc []u8) ![]u8 {
 	mut tags := [
 		long_entry(256, u32(w)), // ImageWidth
 		long_entry(257, u32(h)), // ImageLength
-		shorts_entry(258, [8, 8, 8]), // BitsPerSample
+		shorts_entry(258, [bps, bps, bps]), // BitsPerSample
 		short_entry(259, 8), // Compression: Deflate
 		short_entry(262, 2), // Photometric: RGB
 		longs_entry(273, offsets), // StripOffsets

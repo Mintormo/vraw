@@ -42,6 +42,9 @@ mut:
 	// копирайт - в каждый файл (пусто - тега нет)
 	export_no_exif bool
 	exif_copyright string
+	// TIFF и PNG - в 8 бит на канал, а не в 16 (imgio has_16bit):
+	// отрицание - в старом settings.json поля нет, по умолчанию 16 бит
+	export_8bit bool
 	// окно «Экспорт» (export_setup.v) - последний выбор: папка ('raw' -
 	// рядом с RAW, 'dir' - export_dir), шаблон имени, файл уже есть
 	// ('number' - добавить номер, 'overwrite'), размер на выход
@@ -95,6 +98,11 @@ mut:
 // export_fmt - формат экспорта из настроек (неизвестный - JPEG)
 fn (s &Settings) export_fmt() imgio.Format {
 	return imgio.format_by_key(s.export_format) or { imgio.Format.jpeg }
+}
+
+// export_bits16 - экспорт в формате f пишется в 16 бит на канал
+fn (s &Settings) export_bits16(f imgio.Format) bool {
+	return !s.export_8bit && f.has_16bit()
 }
 
 const jpeg_q_min = 50
@@ -163,6 +171,7 @@ fn settings_from(s Settings) Settings {
 		export_format: s.export_fmt().key()
 		export_no_ai:  s.export_no_ai
 		export_no_exif: s.export_no_exif
+		export_8bit:    s.export_8bit
 		exif_copyright: s.exif_copyright.trim_space()
 		export_dir_mode: if s.export_dir_mode == 'dir' && s.export_dir != '' { 'dir' } else { 'raw' }
 		export_dir:      s.export_dir

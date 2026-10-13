@@ -445,6 +445,32 @@ pub fn resize_rgb_sharp(src []u8, w int, h int, nw int, nh int, amount f32) []u8
 // RGB nw x nh во f32, 0..255; результат - вне сборщика (bigbuf):
 // освобождает вызывающий
 fn resize_rgb_f32(src []u8, w int, h int, nw int, nh int) []f32 {
+	return resize_f32(unsafe { &u8(src.data) }, w, h, nw, nh, 1)
+}
+
+// resize_rgb16_sharp - resize_rgb_sharp для 16-битного RGB (src - npix * 6
+// байт, pipeline.stride16): результат - так же 16 бит, w * h * 6 байт
+pub fn resize_rgb16_sharp(src []u8, w int, h int, nw int, nh int, amount f32) []u8 {
+	mut f := resize_f32(unsafe { &u16(src.data) }, w, h, nw, nh, f32(1.0 / 257.0))
+	defer {
+		bigbuf.free(mut f)
+	}
+	if amount > 0 {
+		out_sharpen(mut f, nw, nh, amount)
+	}
+	mut out := []u8{len: f.len * 2}
+	unsafe {
+		mut q := &u16(out.data)
+		for i, v in f {
+			q[i] = u16(int(clamp255(v) * 257.0 + 0.5))
+		}
+	}
+	return out
+}
+
+// resize_f32 - пересчёт RGB-кадра с каналами T (u8 или u16), значения ×k
+// (к тонам 0..255)
+fn resize_f32[T](src &T, w int, h int, nw int, nh int, k f32) []f32 {
 	// По x: w -> nw, строки h
 	mut tmp := bigbuf.new_f32(nw * h * 3)
 	defer {
@@ -453,12 +479,15 @@ fn resize_rgb_f32(src []u8, w int, h int, nw int, nh int) []f32 {
 	wx := resample_weights(w, nw)
 	for y in 0 .. h {
 		for x in 0 .. nw {
-			for k in wx[x] {
-				s := (y * w + k.i) * 3
+			for tp in wx[x] {
+				s := (y * w + tp.i) * 3
 				t := (y * nw + x) * 3
-				tmp[t] += f32(src[s]) * k.w
-				tmp[t + 1] += f32(src[s + 1]) * k.w
-				tmp[t + 2] += f32(src[s + 2]) * k.w
+				tw := tp.w * k
+				unsafe {
+					tmp[t] += f32(src[s]) * tw
+					tmp[t + 1] += f32(src[s + 1]) * tw
+					tmp[t + 2] += f32(src[s + 2]) * tw
+				}
 			}
 		}
 	}
@@ -470,11 +499,11 @@ fn resize_rgb_f32(src []u8, w int, h int, nw int, nh int) []f32 {
 			mut r := f32(0)
 			mut g := f32(0)
 			mut b := f32(0)
-			for k in wy[y] {
-				s := (k.i * nw + x) * 3
-				r += tmp[s] * k.w
-				g += tmp[s + 1] * k.w
-				b += tmp[s + 2] * k.w
+			for tp in wy[y] {
+				s := (tp.i * nw + x) * 3
+				r += tmp[s] * tp.w
+				g += tmp[s + 1] * tp.w
+				b += tmp[s + 2] * tp.w
 			}
 			t := (y * nw + x) * 3
 			out[t] = r

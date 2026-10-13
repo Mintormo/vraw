@@ -290,3 +290,161 @@ fn test_bad_size() {
 	write(tmp_path('x.png'), .png, 10, 10, []u8{len: 5}) or { return }
 	assert false
 }
+
+// gradient16 - 16-битный градиент (u16 в машинном порядке, w * h * 6
+// байт): все 65536 уровней, не кратные 257 - младший байт значим
+fn gradient16(w int, h int) []u8 {
+	mut out := []u8{len: w * h * 6}
+	unsafe {
+		mut p := &u16(out.data)
+		for y in 0 .. h {
+			for x in 0 .. w {
+				i := (y * w + x) * 3
+				p[i] = u16(x * 65535 / (w - 1))
+				p[i + 1] = u16(y * 65535 / (h - 1))
+				p[i + 2] = u16((x * 7919 + y * 104729) % 65536)
+			}
+		}
+	}
+	return out
+}
+
+// u16_ne - отсчёты big-/little-endian в буфер u16 машинного порядка
+fn u16_ne(b []u8, big bool) []u8 {
+	mut out := []u8{len: b.len}
+	unsafe {
+		mut p := &u16(out.data)
+		for i in 0 .. b.len / 2 {
+			p[i] = if big {
+				u16(b[2 * i]) << 8 | b[2 * i + 1]
+			} else {
+				u16(b[2 * i + 1]) << 8 | b[2 * i]
+			}
+		}
+	}
+	return out
+}
+
+// decode_png16 - отсчёты 16-битного RGB PNG (только фильтр Sub, как пишет
+// encode_png16), машинный порядок
+fn decode_png16(d []u8) !([]u8, int, int) {
+	assert d[12..16].bytestr() == 'IHDR'
+	w := int(u32(d[16]) << 24 | u32(d[17]) << 16 | u32(d[18]) << 8 | d[19])
+	h := int(u32(d[20]) << 24 | u32(d[21]) << 16 | u32(d[22]) << 8 | d[23])
+	assert d[24] == 16 && d[25] == 2
+	mut idat := []u8{}
+	mut at := 8
+	for at < d.len {
+		n := int(u32(d[at]) << 24 | u32(d[at + 1]) << 16 | u32(d[at + 2]) << 8 | d[at + 3])
+		if d[at + 4..at + 8].bytestr() == 'IDAT' {
+			idat << d[at + 8..at + 8 + n]
+		}
+		at += 12 + n
+	}
+	raw := zlib.decompress(idat)!
+	row := w * 6
+	mut be := []u8{cap: w * h * 6}
+	for y in 0 .. h {
+		o := y * (row + 1)
+		assert raw[o] == 1
+		mut line := raw[o + 1..o + 1 + row].clone()
+		for x in 6 .. row {
+			line[x] += line[x - 6]
+		}
+		be << line
+	}
+	return u16_ne(be, true), w, h
+}
+
+// TIFF и PNG 16 бит: без потерь, все 16 бит значимы; PNG понимает и stb
+// (он сводит 16 бит в 8 - старший байт)
+fn test_lossless16() {
+	w, h := 301, 157
+	rgb := gradient16(w, h)
+	pp := tmp_path('t16.png')
+	write(pp, .png, w, h, rgb, bits16: true, icc: srgb_icc())!
+	png, pw, ph := decode_png16(os.read_bytes(pp)!)!
+	assert pw == w && ph == h
+	assert png == rgb
+	s8 := load_stbi(pp)!
+	unsafe {
+		p := &u16(rgb.data)
+		for i in 0 .. w * h * 3 {
+			d := int(s8[i]) - int(p[i] >> 8)
+			assert d >= -1 && d <= 1
+		}
+	}
+	tp := tmp_path('t16.tif')
+	write(tp, .tiff, w, h, rgb, bits16: true)!
+	d := os.read_bytes(tp)!
+	// BitsPerSample (258): три SHORT по смещению - 16, 16, 16
+	ifd := int(get_u32_le(d, 4))
+	for i in 0 .. get_u16_le(d, ifd) {
+		e := ifd + 2 + i * 12
+		if get_u16_le(d, e) == 258 {
+			at := int(get_u32_le(d, e + 8))
+			assert get_u16_le(d, at) == 16 && get_u16_le(d, at + 4) == 16
+		}
+	}
+	tif16, tw, th := decode_tiff16(d)!
+	assert tw == w && th == h
+	assert tif16 == rgb
+}
+
+// decode_tiff16 - 16-битный TIFF: decode_tiff даёт полосы как байты (его
+// предиктор по байтам здесь неверен), поэтому полосы - заново по u16
+fn decode_tiff16(d []u8) !([]u8, int, int) {
+	ifd := int(get_u32_le(d, 4))
+	mut offs := []u32{}
+	mut cnts := []u32{}
+	mut w := 0
+	mut h := 0
+	for i in 0 .. get_u16_le(d, ifd) {
+		e := ifd + 2 + i * 12
+		tag := get_u16_le(d, e)
+		count := int(get_u32_le(d, e + 4))
+		v := get_u32_le(d, e + 8)
+		match tag {
+			256 { w = int(v) }
+			257 { h = int(v) }
+			273, 279 {
+				mut vals := []u32{}
+				if count == 1 {
+					vals << v
+				} else {
+					for k in 0 .. count {
+						vals << get_u32_le(d, int(v) + k * 4)
+					}
+				}
+				if tag == 273 {
+					offs = vals.clone()
+				} else {
+					cnts = vals.clone()
+				}
+			}
+			else {}
+		}
+	}
+	mut out := []u8{cap: w * h * 6}
+	for s in 0 .. offs.len {
+		strip := u16_ne(zlib.decompress(d[int(offs[s])..int(offs[s] + cnts[s])])!, false)
+		unsafe {
+			mut p := &u16(strip.data)
+			for y in 0 .. strip.len / (w * 6) {
+				for x in 3 .. w * 3 {
+					p[y * w * 3 + x] += p[y * w * 3 + x - 3]
+				}
+			}
+		}
+		out << strip
+	}
+	return out, w, h
+}
+
+// 16 бит - только TIFF и PNG
+fn test_bits16_formats() {
+	assert Format.png.has_16bit() && Format.tiff.has_16bit()
+	rgb := gradient16(4, 4)
+	write(tmp_path('x16.jpg'), .jpeg, 4, 4, rgb, bits16: true) or { return }
+	assert false
+}

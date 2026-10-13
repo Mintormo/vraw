@@ -833,6 +833,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		ai_cache: job.ai_cache
 		progress: StageProgress(progress)
 		size:     job.size
+		bits16:   job.settings.export_bits16(job.format)
 	) or {
 		if err is ExportCancelled {
 			report(mut app, on_done, .cancelled, i18n.tr('Экспорт отменён'))
@@ -854,7 +855,13 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 	}
 	size_mb := f64(os.file_size(job.dst)) / 1024 / 1024
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	q := if job.format == .jpeg { i18n.trf(', качество {0}', '${job.quality}') } else { '' }
+	q := if job.format == .jpeg {
+		i18n.trf(', качество {0}', '${job.quality}')
+	} else if img.bits16 {
+		i18n.tr(', 16 бит')
+	} else {
+		''
+	}
 	no_ai := if job.no_ai { i18n.tr(', без AI-шумодава') } else { '' }
 	report(mut app, on_done, .saved, i18n.trf('Сохранено: {0} ({1}, {2}x{3}, {4} МБ{5}{6}, {7} с)', '${job.dst}', '${job.format.name()}', '${img.width}', '${img.height}', '${size_mb:.1f}', '${q}', '${no_ai}', '${sec:.1f}'))
 }

@@ -8,7 +8,8 @@ module main
 // пересветов) -> коррекция объектива (виньетирование, затем дисторсия +
 // TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> Capture-резкость
 // -> маска -> кадрирование и поворот (сырьё и маска) -> pipeline -> размер
-// «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит.
+// «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит (TIFF и PNG
+// - по умолчанию 16, ExportOpts.bits16).
 import time
 import raw
 import lens
@@ -45,14 +46,14 @@ fn correct_lens(buf &u16, w int, h int, m raw.Meta, db &lens.Database, use_prof 
 	lens_full(buf, w, h, c, m.focal, m.aperture, vign, zoom, man)
 }
 
-// Image - проявленный 8-битный RGB-кадр и метаданные RAW (для EXIF)
-// Image - готовый кадр экспорта; rgb бывает вне сборщика (bigbuf) -
-// после записи освобождать free()
+// Image - готовый кадр экспорта (RGB) и метаданные RAW (для EXIF); rgb
+// бывает вне сборщика (bigbuf) - после записи освобождать free()
 struct Image {
 	width  int
 	height int
+	bits16 bool // rgb - u16 на канал (pipeline.stride16)
 mut:
-	rgb  []u8 // width * height * 3
+	rgb  []u8 // width * height * 3 байт (bits16 - * 6)
 	meta raw.Meta
 }
 
@@ -98,10 +99,19 @@ fn write_image(path string, f imgio.Format, img Image, quality int, s &Settings)
 	icc := if f.has_exif() { imgio.srgb_icc() } else { []u8{} }
 	if !s.export_no_exif && f.has_exif() {
 		e := export_exif(img.meta, s.exif_copyright)
-		imgio.write(path, f, img.width, img.height, img.rgb, quality: quality, exif: &e, icc: icc)!
+		imgio.write(path, f, img.width, img.height, img.rgb,
+			quality: quality
+			exif:    &e
+			icc:     icc
+			bits16:  img.bits16
+		)!
 		return
 	}
-	imgio.write(path, f, img.width, img.height, img.rgb, quality: quality, icc: icc)!
+	imgio.write(path, f, img.width, img.height, img.rgb,
+		quality: quality
+		icc:     icc
+		bits16:  img.bits16
+	)!
 }
 
 // ExportStage - этапы проявки полного кадра, в порядке выполнения.
@@ -237,10 +247,11 @@ struct ExportOpts {
 	progress ?StageProgress
 	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
 	half     bool       // половинный размер, как превью (левый кадр сравнения, pair.v)
+	bits16   bool       // 16 бит на канал (Settings.export_bits16)
 }
 
-// develop_full - проявка RAW-файла по настройкам кадра e в 8-битный RGB
-// полного размера. e - с производными полями (камерная кривая и таблицы
+// develop_full - проявка RAW-файла по настройкам кадра e в 8-битный (с
+// o.bits16 - 16-битный) RGB полного размера. e - с производными полями (камерная кривая и таблицы
 // кривых в params, как у живого st.edit); db - база lensfun (nil - без
 // коррекции объектива). Свой LibRaw (открывает и закрывает файл сам) -
 // годится для фонового потока. AI-шумодав (e.ai > 0) - модель по всему
@@ -376,19 +387,25 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	if e.params.haze != 0 {
 		haze = pipeline.haze_map_big(src, gw, gh)
 	}
-	mut rgb := bigbuf.new_u8(gw * gh * 3)
+	stride := if o.bits16 { pipeline.stride16 } else { 3 }
+	mut rgb := bigbuf.new_u8(gw * gh * stride)
 	// Градиентные фильтры - по пикселям кадра после геометрии
 	ep := with_lmap(e.params, pipeline.mask_map(out_geom(&e), w, h, true, gw, gh))
-	pipeline.apply_image(src, mask, &haze, gw, gh, ep, scale, mut rgb, 3)
+	pipeline.apply_image(src, mask, &haze, gw, gh, ep, scale, mut rgb, stride)
 	// Размер на выход (окно «Экспорт»): только уменьшение, с резкостью на
 	// выход (она - только при уменьшении)
 	fw, fh := export_dims(o.size, gw, gh)
 	if fw != gw || fh != gh {
-		small := pipeline.resize_rgb_sharp(rgb, gw, gh, fw, fh, o.size.sharp)
+		small := if o.bits16 {
+			pipeline.resize_rgb16_sharp(rgb, gw, gh, fw, fh, o.size.sharp)
+		} else {
+			pipeline.resize_rgb_sharp(rgb, gw, gh, fw, fh, o.size.sharp)
+		}
 		bigbuf.free(mut rgb)
 		return Image{
 			width:  fw
 			height: fh
+			bits16: o.bits16
 			rgb:    small
 			meta:   meta
 		}
@@ -396,6 +413,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	return Image{
 		width:  fw
 		height: fh
+		bits16: o.bits16
 		rgb:    rgb
 		meta:   meta
 	}

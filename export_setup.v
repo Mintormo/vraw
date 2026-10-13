@@ -205,6 +205,7 @@ mut:
 	fmt_cb  &vgui.ComboBox  = unsafe { nil }
 	q_sl    &vgui.Slider    = unsafe { nil }
 	q_vl    &vgui.Label     = unsafe { nil }
+	b16_cb  &vgui.CheckBox  = unsafe { nil }
 	size_cb &vgui.ComboBox  = unsafe { nil }
 	sa      &vgui.Spinbox   = unsafe { nil } // длинная сторона / ширина / проценты
 	sb      &vgui.Spinbox   = unsafe { nil } // высота (вписать в Ш × В)
@@ -366,6 +367,10 @@ fn sync_export_setup(mut st State) {
 	q.enabled = f == .jpeg
 	mut qv := u.q_vl
 	qv.text = if f == .jpeg { '${s.jpeg_quality}' } else { '-' }
+	// 16 бит - только TIFF и PNG; у остальных флажок снят и недоступен
+	mut bcb := u.b16_cb
+	bcb.enabled = f.has_16bit()
+	bcb.checked = s.export_bits16(f)
 	mut scb := u.size_cb
 	scb.set_selected(math.max(0, export_size_keys.index(s.export_size)))
 	mut sa := u.sa
@@ -628,6 +633,22 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		export_setup_changed(mut st)
 	}
 	u.fmt_cb = fmt_cb
+	// 16 бит на канал (TIFF, PNG): запас для дальнейшей обработки в
+	// другом редакторе; файл примерно вдвое крупнее
+	mut b16_cb := vgui.checkbox(i18n.tr('16 бит'))
+	b16_cb.on_change = fn [mut st] (v bool) {
+		if st.suppress {
+			return
+		}
+		st.settings.export_8bit = !v
+		export_setup_changed(mut st)
+	}
+	u.b16_cb = b16_cb
+	mut fmt_row := vgui.create_hbox_fill()
+	fmt_row.set_spacing(8)
+	fmt_row.add(vgui.label(i18n.tr('Формат')), min: lbl_col)
+	fmt_row.add(fmt_cb, flex: 1)
+	fmt_row.add(b16_cb)
 	mut q_vl := value_label('')
 	u.q_vl = q_vl
 	mut q_sl := vgui.slider_horizontal(jpeg_q_min, 100, st.settings.jpeg_quality)
@@ -811,7 +832,7 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(row(i18n.tr('Имя файла'), name))
 	body.add(indented(name_note, lbl_col + 8))
 	body.add(row(i18n.tr('Если файл есть'), ex_cb))
-	body.add(row(i18n.tr('Формат'), fmt_cb))
+	body.add(fmt_row)
 	body.add(q_row)
 	body.add(indented(q_note, lbl_col + 8))
 	body.add(size_row)

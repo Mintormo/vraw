@@ -306,3 +306,48 @@ fn test_export_sharp_settings() {
 	s.export_sharp = 'bogus'
 	assert s.export_size_opts().sharp == 0
 }
+
+// Экспорт в 16 бит: тот же кадр, что в 8 бит (старший уровень - в
+// пределах 1, дизер 8 бит выключен), и с уменьшением. Кадр - тестовый
+// CR3 или VRAW_TEST_CR3.
+fn test_develop_full16() {
+	path := os.getenv_opt('VRAW_TEST_CR3') or { os.join_path(@VMODROOT, 'IMG_0991.CR3') }
+	if !os.exists(path) {
+		eprintln('нет тестового CR3, пропуск')
+		return
+	}
+	mut e := neutral_edit()
+	e.lens_corr = false
+	e.params.dither = false
+	e.params.exposure = 0.5
+	e.params.sharp.amount = 40
+	ed := with_derived(e, CamLook{}, pipeline.CamColor{})
+	for size in [ExportSize{}, ExportSize{
+		mode:  'long'
+		long:  1600
+		sharp: 0.8
+	}] {
+		mut a := develop_full(path, ed, unsafe { nil }, size: size)!
+		mut b := develop_full(path, ed, unsafe { nil }, size: size, bits16: true)!
+		defer {
+			a.free()
+			b.free()
+		}
+		assert b.bits16 && !a.bits16
+		assert a.width == b.width && a.height == b.height
+		n := a.width * a.height * 3
+		assert b.rgb.len == n * 2
+		mut fine := 0
+		unsafe {
+			q := &u16(b.rgb.data)
+			for i in 0 .. n {
+				d := int(a.rgb[i]) - int((u32(q[i]) + 128) / 257)
+				assert d >= -1 && d <= 1
+				if q[i] % 257 != 0 {
+					fine++
+				}
+			}
+		}
+		assert fine > n / 2
+	}
+}
