@@ -205,6 +205,7 @@ mut:
 	fmt_cb  &vgui.ComboBox  = unsafe { nil }
 	q_sl    &vgui.Slider    = unsafe { nil }
 	q_vl    &vgui.Label     = unsafe { nil }
+	q_row   &vgui.HBox      = unsafe { nil } // выключается целиком (не JPEG)
 	b16_cb  &vgui.CheckBox  = unsafe { nil }
 	size_cb &vgui.ComboBox  = unsafe { nil }
 	sa      &vgui.Spinbox   = unsafe { nil } // длинная сторона / ширина / проценты
@@ -213,6 +214,7 @@ mut:
 	unit    &vgui.Label     = unsafe { nil }
 	size_row &vgui.HBox     = unsafe { nil } // пересобирается под режим
 	sharp_cb &vgui.ComboBox = unsafe { nil }
+	sharp_row &vgui.HBox    = unsafe { nil }
 	size_mode string = '?' // режим, под который собран size_row
 	ex_cb   &vgui.ComboBox  = unsafe { nil }
 	load_cb &vgui.ComboBox  = unsafe { nil }
@@ -364,7 +366,7 @@ fn sync_export_setup(mut st State) {
 	fcb.set_selected(imgio.formats.index(f))
 	mut q := u.q_sl
 	q.set_value(s.jpeg_quality)
-	q.enabled = f == .jpeg
+	set_enabled(u.q_row, f == .jpeg)
 	mut qv := u.q_vl
 	qv.text = if f == .jpeg { '${s.jpeg_quality}' } else { '-' }
 	// 16 бит - только TIFF и PNG; у остальных флажок снят и недоступен
@@ -415,7 +417,7 @@ fn sync_export_setup(mut st State) {
 	// Резкость на выход - только при уменьшении: «Как есть» - недоступна
 	mut shcb := u.sharp_cb
 	shcb.set_selected(math.max(0, export_sharp_keys.index(s.export_sharp)))
-	shcb.enabled = s.export_size != ''
+	set_enabled(u.sharp_row, s.export_size != '')
 	mut ecb := u.ex_cb
 	ecb.set_selected(math.max(0, export_exists_keys.index(s.export_exists)))
 	mut acb := u.ai_cb
@@ -668,6 +670,7 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	q_row.set_spacing(8)
 	q_row.add(vgui.label(i18n.tr('Качество JPEG')), min: lbl_col)
 	q_row.add(q_sl, flex: 1)
+	u.q_row = q_row
 	// Ширина значения - под «100»: ползунок не дёргается от числа цифр
 	q_row.add(q_vl, min: column_width(mut dlg.win, ['100'], 8))
 	mut q_note := vgui.label(i18n.trf('Больше - лучше и крупнее файл; {0} - хороший баланс', '${jpeg_q_default}'))
@@ -837,7 +840,8 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(indented(q_note, lbl_col + 8))
 	body.add(size_row)
 	body.add(indented(size_note, lbl_col + 8))
-	body.add(row(i18n.tr('Резкость на выход'), sharp_cb))
+	u.sharp_row = row(i18n.tr('Резкость на выход'), sharp_cb)
+	body.add(u.sharp_row)
 	body.add(indented(sharp_note, lbl_col + 8))
 	body.add(exif_row)
 	body.add(indented(exif_note, lbl_col + 8))

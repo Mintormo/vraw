@@ -506,7 +506,7 @@ fn sync_ai_ui(mut st State) {
 		} else {
 			rb.text = i18n.tr('Скачать модель...')
 			rb.icon_name = 'download'
-			rb.enabled = st.panel_live
+			rb.enabled = true
 			rh.text = i18n.trf('Модель {0} не скачана - Правка - Настройки', '${model_title(sid)}')
 		}
 	}
@@ -524,7 +524,7 @@ fn sync_ai_ui(mut st State) {
 	} else {
 		b.text = i18n.tr('Скачать модель...')
 		b.icon_name = 'download'
-		b.enabled = st.panel_live
+		b.enabled = true
 		hint.text = i18n.trf('Модель {0} не скачана - Правка - Настройки', '${model_title(id)}')
 	}
 }

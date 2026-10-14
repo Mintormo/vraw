@@ -162,6 +162,8 @@ mut:
 	menu       &vgui.MenuBar   = unsafe { nil }
 	acc        &vgui.Accordion = unsafe { nil }
 	sec_w      []&vgui.Widget
+	// ряды slider_row по ползунку: выключается ряд целиком (set_slider_enabled)
+	slider_rows map[voidptr]&vgui.HBox
 	sec_open   []bool
 	panel_keys []string
 	m_bg     []&vgui.MenuItem
@@ -1042,7 +1044,19 @@ fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, 
 	row.add(sl, flex: 1)
 	row.add(vl, min: vw)
 	row.add(b)
+	st.slider_rows[voidptr(sl)] = row
 	return row
+}
+
+// set_slider_enabled - ползунок панели активен или нет. Ряд slider_row
+// гасится целиком (подпись, значение, сброс): отключённый контейнер vgui
+// гасит всё поддерево.
+fn set_slider_enabled(st &State, mut sl vgui.Slider, on bool) {
+	if row := st.slider_rows[voidptr(sl)] {
+		set_enabled(row, on)
+	} else {
+		sl.enabled = on
+	}
 }
 
 // column_width - ширина колонки панели: максимум по строкам-кандидатам,
@@ -1196,7 +1210,7 @@ mut:
 fn make_placeholder(th vgui.Theme) &Placeholder {
 	mut bg := vgui.canvas(960, 720)
 	bg.stretch = true
-	bg.enabled = false
+	bg.passive = true
 	bg.set_wheel_zoom(false)
 	bg.set_pan_buttons(0)
 

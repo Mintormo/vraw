@@ -69,6 +69,7 @@ mut:
 	orient_btn  &vgui.Button   = unsafe { nil }
 	aw          &vgui.Spinbox  = unsafe { nil }
 	ah          &vgui.Spinbox  = unsafe { nil }
+	c_row       &vgui.HBox     = unsafe { nil } // «Своя w : h», только при своей пропорции
 	total       &vgui.Label    = unsafe { nil }
 	grid_cb     &vgui.ComboBox = unsafe { nil }
 	horizon_btn &vgui.Button   = unsafe { nil }
@@ -902,8 +903,7 @@ fn sync_crop_ui(mut st State) {
 	mut ah := u.ah
 	aw.set_value(e.crop_aw)
 	ah.set_value(e.crop_ah)
-	aw.enabled = e.crop_aspect == 'custom'
-	ah.enabled = aw.enabled
+	set_enabled(u.c_row, e.crop_aspect == 'custom')
 	if !isnil(u.angle_sl) {
 		mut asl := u.angle_sl
 		asl.set_value(e.geom.angle) // под suppress: подпись и снимок, без пересчёта
@@ -1049,6 +1049,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	c_row.add(colon)
 	c_row.add(ah, flex: 1)
 	c_row.add(icon_slot(), min: icon_slot_w)
+	u.c_row = c_row
 
 	mut total := vgui.label(i18n.tr('Итог: -'))
 	st.secondary_labels << total

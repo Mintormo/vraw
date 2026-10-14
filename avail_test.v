@@ -51,6 +51,7 @@ fn test_panel_lock() {
 	mut sl := vgui.slider_horizontal(0, 1, 0)
 	mut b := vgui.button('Автотон')
 	mut cb := vgui.checkbox('Коррекция объектива')
+	cb.enabled = false // профиля объектива нет (свой sync)
 	mut row := vgui.create_hbox_fill()
 	row.add(sl)
 	row.add(b)
@@ -58,17 +59,18 @@ fn test_panel_lock() {
 	sec.add(row)
 	sec.add(cb)
 	st.sec_w = [&vgui.Widget(sec)]
-	st.lens_cb = cb
 	sync_avail(mut st)
+	// Гасится корень раздела, собственные флаги детей не трогаются
 	assert !st.panel_live
-	assert !sl.enabled && !b.enabled && !cb.enabled
+	assert !vgui.widget_enabled(st.sec_w[0])
+	assert sl.enabled && b.enabled && !cb.enabled
 	st.raw_path = '/x/IMG_0001.CR3'
 	st.loading = true
 	sync_avail(mut st)
 	assert st.panel_live
-	assert sl.enabled && b.enabled
-	// Профиль объектива ещё не найден - флажок коррекции по-прежнему неактивен
-	assert !cb.enabled
+	assert vgui.widget_enabled(st.sec_w[0])
+	// Флажок коррекции остался таким, каким его сделал свой sync
+	assert sl.enabled && b.enabled && !cb.enabled
 }
 
 fn test_panel_lock_before_panel() {
@@ -81,4 +83,8 @@ fn test_panel_lock_before_panel() {
 	st.sec_w = [&vgui.Widget(sl)]
 	sync_avail(mut st)
 	assert !st.panel_live && !sl.enabled
+	st.raw_path = '/x/IMG_0001.CR3'
+	st.loading = true
+	sync_avail(mut st)
+	assert st.panel_live && sl.enabled
 }

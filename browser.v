@@ -319,7 +319,7 @@ fn strip_cell(mut st State, idx int) &StripCell {
 	mut cv := vgui.canvas(thumb_w, thumb_h)
 	// Вписывание с сохранением пропорций (auto_fit): любая высота ленты
 	cv.stretch = false
-	cv.enabled = false // пассивный: щелчок уходит в список
+	cv.passive = true // только рисует: щелчок уходит в список
 	cv.set_wheel_zoom(false)
 	cv.set_pan_buttons(0)
 	// Звёзды и флажок - поверх миниатюры, без правки её пикселей

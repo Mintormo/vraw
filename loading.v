@@ -30,7 +30,7 @@ mut:
 fn make_load_overlay(th vgui.Theme) &LoadOverlay {
 	mut bg := vgui.canvas(480, 360)
 	bg.stretch = true
-	bg.enabled = false
+	bg.passive = true
 	bg.set_wheel_zoom(false)
 	bg.set_pan_buttons(0)
 	mut ring := vgui.progress_circular()

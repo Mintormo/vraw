@@ -90,9 +90,12 @@ fn sync_avail(mut st State) {
 }
 
 // set_panel_live - разделы панели правки (все, и скрытые) активны или
-// нет. Обход дерева - только при смене; при включении виджеты с
-// условной доступностью (объектив, кадрирование, фильтры, пятна, AI)
-// получают её заново от своих sync_*: обход включил их все.
+// нет. Флаг ставится корню раздела: отключённый контейнер vgui гасит
+// ввод и вид всего поддерева (и подписей), не трогая флаги детей, -
+// при включении виджеты с условной доступностью (объектив,
+// кадрирование, фильтры, пятна, AI) остаются такими, какими их
+// сделали их sync_*. Аккордеон не трогается: разделы открываются и без
+// кадра.
 fn set_panel_live(mut st State, on bool) {
 	// Панели ещё нет (меню пресетов строится раньше) - запомнить нечего
 	if on == st.panel_live || st.sec_w.len == 0 {
@@ -100,47 +103,17 @@ fn set_panel_live(mut st State, on bool) {
 	}
 	st.panel_live = on
 	for w in st.sec_w {
-		if !isnil(w) {
-			set_controls_enabled(w, on)
-		}
+		set_enabled(w, on)
 	}
-	if !on {
-		return
-	}
-	if !isnil(st.lens_cb) {
-		mut cb := st.lens_cb
-		cb.enabled = !isnil(st.corr)
-	}
-	sync_crop_ui(mut st)
-	sync_mask_ui(mut st)
-	sync_spot_ui(mut st)
-	sync_ai_ui(mut st)
 }
 
-// set_controls_enabled - enabled у всех элементов управления поддерева.
-// Вкладки (TabBox) и аккордеон не трогаются: разделы открываются и без
-// кадра.
-fn set_controls_enabled(root &vgui.Widget, on bool) {
-	vgui.walk_widgets(root, fn [on] (x &vgui.Widget) {
-		mut w := unsafe { x }
-		if mut w is vgui.Slider {
-			w.enabled = on
-		} else if mut w is vgui.Button {
-			w.enabled = on
-		} else if mut w is vgui.CheckBox {
-			w.enabled = on
-		} else if mut w is vgui.ComboBox {
-			w.enabled = on
-		} else if mut w is vgui.Spinbox {
-			w.enabled = on
-		} else if mut w is vgui.TextInput {
-			w.enabled = on
-		} else if mut w is vgui.CurveEditor {
-			w.enabled = on
-		} else if mut w is vgui.Canvas {
-			w.enabled = on
-		} else if mut w is vgui.ListBox {
-			w.enabled = on
-		}
-	})
+// set_enabled - enabled любого виджета, в т.ч. HBox/VBox (их флаг не
+// публичный). Контейнер гасит всё поддерево: ряд «подпись | элемент»
+// выключается целиком, подпись тоже рисуется неактивной.
+fn set_enabled(w &vgui.Widget, on bool) {
+	if isnil(w) {
+		return
+	}
+	mut x := unsafe { w }
+	vgui.set_widget_enabled(mut x, on)
 }

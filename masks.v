@@ -1160,7 +1160,7 @@ fn sync_mask_ui(mut st State) {
 	}
 	st.suppress = was
 	for mut sl in u.sliders {
-		sl.enabled = valid
+		set_slider_enabled(st, mut sl, valid)
 	}
 	// Ограничение диапазоном: режим и ползунки по нему
 	ri := if valid { range_index(st.edit.params.masks[st.mask_sel]) } else { 0 }
@@ -1173,10 +1173,10 @@ fn sync_mask_ui(mut st State) {
 		rcb.enabled = valid
 	}
 	for mut sl in u.lum_sl {
-		sl.enabled = valid && ri & 1 != 0
+		set_slider_enabled(st, mut sl, valid && ri & 1 != 0)
 	}
 	for mut sl in u.col_sl {
-		sl.enabled = valid && ri & 2 != 0
+		set_slider_enabled(st, mut sl, valid && ri & 2 != 0)
 	}
 	if !isnil(u.pick_btn) {
 		u.pick_btn.enabled = valid
@@ -1187,7 +1187,7 @@ fn sync_mask_ui(mut st State) {
 	// Настройки кисти - когда выделена кисть
 	brush := valid && st.edit.params.masks[st.mask_sel].shape(st.mask_part).kind == .brush
 	for mut bsl in u.brush_sl {
-		bsl.enabled = brush
+		set_slider_enabled(st, mut bsl, brush)
 	}
 	if !isnil(u.auto_cb) {
 		u.auto_cb.enabled = brush
