@@ -30,7 +30,7 @@ mkdir -p "$out/lib"
 # DT_RPATH (а не новый DT_RUNPATH): путь $ORIGIN/lib действует и для
 # зависимостей зависимостей (freetype у SDL3_ttf и т.п.)
 echo "Сборка..."
-"$v" -prod -cc gcc -enable-globals \
+"$v" -prod -cc gcc \
 	-ldflags '-Wl,-rpath,$ORIGIN/lib -Wl,--disable-new-dtags' \
 	-o "$out/vraw" "$root"
 

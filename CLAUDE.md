@@ -36,18 +36,18 @@ vraw — одно GUI-приложение на vgui (консольной ве�
 - Тяжёлые эксперименты на Python (квантование, калибровка ORT) — ТОЛЬКО
   под `systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=0`:
   калибровка однажды съела 14 ГБ, OOM убил консоль.
-- vgui: модуль ищется через симлинк `~/.vmodules/vgui -> ~/projects/vgui-python/v/vgui`.
+- vgui: модуль ищется через симлинк `~/.vmodules/vgui -> ~/projects/vgui`.
   Библиотеки SDL3 — в `/usr/local/lib`. У vgui есть свой CLAUDE.md с контрактами —
   при работе над GUI сверяться с ним.
 
 ```bash
 cd ~/projects/vraw
-~/soft/v/v -prod -cc gcc -enable-globals .     # -> ./vraw
-~/soft/v/v -cc gcc -enable-globals test .      # все тесты (рекурсивно, с модулями)
+~/soft/v/v -prod -cc gcc .     # -> ./vraw
+~/soft/v/v -cc gcc test .      # все тесты (рекурсивно, с модулями)
 tools/portable.sh                              # портабельная папка dist/vraw/ (Linux)
 ```
 
-- Сборка и тесты — ТОЛЬКО с `-cc gcc -enable-globals` (требование vgui).
+- Сборка и тесты — ТОЛЬКО с `-cc gcc` (требование vgui).
 - `-prod` (оптимизация gcc) — рабочая сборка: пайплайн в ~2.5 раза быстрее
   (превью ~19 мс с потоками вместо ~150). Цена — дольше компиляция (GUI ~30 с).
   Для быстрых итераций при отладке можно собирать без `-prod`.

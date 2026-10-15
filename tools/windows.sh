@@ -40,7 +40,7 @@ mkdir -p "$out"
 grep -q 'amd64 && windows' "$HOME/soft/v/vlib/builtin/closure/closure.c.v" ||
 	{ echo "V без правки трамплина замыканий (vlang/v#29822) - см. комментарий"; exit 1; }
 echo "Сборка..."
-"$v" -prod -os windows -cc "$cc" -enable-globals -subsystem windows \
+"$v" -prod -os windows -cc "$cc" -subsystem windows \
 	-cflags "-I$pfx/include" -ldflags "-L$pfx/lib" \
 	-o "$out/vraw.exe" "$root"
 

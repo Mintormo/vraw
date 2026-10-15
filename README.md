@@ -2,7 +2,7 @@
 
 Проявка RAW (CR3 и другие форматы, которые понимает LibRaw) в JPEG, PNG,
 TIFF, BMP, QOI или GIF. Написано на V.
-Настольное приложение на [vgui](../vgui-python) с собственным тональным
+Настольное приложение на [vgui](../vgui) с собственным тональным
 пайплайном и неразрушающим редактированием.
 
 ## Зависимости
@@ -12,15 +12,15 @@ TIFF, BMP, QOI или GIF. Написано на V.
 - для AI-шумодава ничего ставить не нужно: ONNX Runtime и модели программа
   скачивает сама («Правка - Настройки») в папки `onnxruntime/` и `models/`
   рядом с `vraw`; там же — `settings.json`. Без них всё, кроме AI, работает
-- модуль vgui — симлинк `~/.vmodules/vgui -> ~/projects/vgui-python/v/vgui`
+- модуль vgui — симлинк `~/.vmodules/vgui -> ~/projects/vgui`
   (уже создан) и библиотеки SDL3 в `/usr/local/lib`
 
 ## Сборка
 
 ```bash
 cd ~/projects/vraw
-~/soft/v/v -prod -cc gcc -enable-globals .     # -> ./vraw
-~/soft/v/v -cc gcc -enable-globals test .      # все тесты
+~/soft/v/v -prod -cc gcc .     # -> ./vraw
+~/soft/v/v -cc gcc test .      # все тесты
 ```
 
 Портабельная версия для Linux — папка с программой, библиотеками и базой
