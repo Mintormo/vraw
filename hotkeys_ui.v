@@ -1,16 +1,17 @@
 module main
 
 // Вкладка «Горячие клавиши» окна настроек: действия по разделам меню, у
-// каждого - кнопка с сочетанием (щелчок - ждать нажатия: новое сочетание,
-// Esc - отмена, Backspace/Delete - снять) и сброс к умолчанию. Нажатие
-// ловит HkCapture - виджет диалога после корня (события получает первым).
+// каждого - поле сочетания vgui.ShortcutInput (щелчок - ждать нажатия:
+// новое сочетание, Esc - отмена, Backspace/Delete - снять, занятые
+// навигацией - отказ) и сброс к умолчанию. Сочетание поле пишет по месту
+// клавиши - в том же виде, что vgui.shortcut_from_event у KeyWatch.
 import vgui
 import i18n
 
-// HkRow - ряд действия: кнопка сочетания и сброс
+// HkRow - ряд действия: поле сочетания и сброс
 struct HkRow {
-	btn   &vgui.Button = unsafe { nil }
-	reset &vgui.Button = unsafe { nil }
+	input &vgui.ShortcutInput = unsafe { nil }
+	reset &vgui.Button        = unsafe { nil }
 }
 
 const hk_none = 'нет'
@@ -33,29 +34,41 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 				continue
 			}
 			idx := i
-			mut b := vgui.button(i18n.tr(hk_none))
-			b.on_click = fn [mut st, mut u, idx] () {
-				u.hk_wait = if u.hk_wait == idx { -1 } else { idx }
-				u.hk_msg.text = ''
-				sync_hotkeys_ui(mut u, st)
+			mut si := vgui.shortcut_input(h.item.shortcut)
+			si.empty_text = i18n.tr(hk_none)
+			si.wait_text = i18n.tr(hk_wait_text)
+			si.reserved = hk_reserved.clone()
+			// Замыкания - через локальные переменные (CLAUDE.md, грабли V)
+			on_wait := fn [mut u] (waiting bool) {
+				if waiting {
+					u.hk_msg.text = ''
+				}
 			}
+			si.on_wait = on_wait
+			// Новое сочетание ('' - снято) или занятое навигацией: hk_set
+			// назначает или объясняет, почему нельзя
+			on_set := fn [mut st, mut u, idx] (sc string) {
+				u.hk_msg.text = hk_set(mut st, idx, sc)
+			}
+			si.on_change = on_set
+			si.on_reject = on_set
 			mut r := vgui.button('')
 			r.icon_name = 'rotate-ccw'
 			r.icon_size = 15
 			r.style = .flat
 			r.on_click = fn [mut st, mut u, idx] () {
-				u.hk_wait = -1
+				hk_cancel_wait(mut u)
 				u.hk_msg.text = hk_set(mut st, idx, st.hk[idx].def)
 			}
 			mut row := vgui.create_hbox_fill()
 			row.set_spacing(6)
 			row.add(vgui.label(h.name), min: name_w)
-			row.add(b, min: key_w)
+			row.add(si, min: key_w)
 			row.add(r, min: icon_slot_w)
 			row.add(vgui.create_spacer(), flex: 1)
 			list.add(row)
 			u.hk_rows << HkRow{
-				btn:   b
+				input: si
 				reset: r
 			}
 		}
@@ -67,7 +80,7 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 	u.hk_msg = msg
 	mut all := vgui.button(i18n.tr('Вернуть все'))
 	all.on_click = fn [mut st, mut u] () {
-		u.hk_wait = -1
+		hk_cancel_wait(mut u)
 		u.hk_msg.text = ''
 		hk_reset_all(mut st)
 	}
@@ -87,64 +100,26 @@ fn build_hotkeys_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) &vgui.V
 	return v
 }
 
-// sync_hotkeys_ui - кнопки по текущим сочетаниям; ждущая - подсвечена
+// sync_hotkeys_ui - поля по текущим сочетаниям (ждущее нажатия не трогать)
 fn sync_hotkeys_ui(mut u SettingsUi, st &State) {
 	for i, r in u.hk_rows {
 		if i >= st.hk.len {
 			break
 		}
 		h := st.hk[i]
-		mut b := r.btn
-		if u.hk_wait == i {
-			b.text = i18n.tr(hk_wait_text)
-			b.style = .accent
-		} else {
-			b.text = if h.item.shortcut.len > 0 { h.item.shortcut } else { i18n.tr(hk_none) }
-			b.style = .normal
+		mut si := r.input
+		if !si.is_waiting() {
+			si.set_shortcut(h.item.shortcut)
 		}
 		mut rb := r.reset
 		rb.enabled = h.item.shortcut != h.def
 	}
 }
 
-// HkCapture - ловит нажатие для ждущей кнопки (виджет диалога настроек)
-struct HkCapture {
-mut:
-	st &State      = unsafe { nil }
-	u  &SettingsUi = unsafe { nil }
-}
-
-fn (mut c HkCapture) draw(mut _ vgui.RenderContext) {}
-
-fn (mut c HkCapture) handle_event(ev &vgui.GuiEvent, _ &vgui.App) bool {
-	if isnil(c.u) || c.u.hk_wait < 0 || ev.typ != .key_down {
-		return false
+// hk_cancel_wait - прервать ожидание нажатия во всех полях вкладки
+fn hk_cancel_wait(mut u SettingsUi) {
+	for r in u.hk_rows {
+		mut si := r.input
+		si.cancel()
 	}
-	mut u := c.u
-	mut st := c.st
-	idx := u.hk_wait
-	key := hk_key_name(ev.scancode)
-	if key.len == 0 {
-		return true // модификатор сам по себе - ждать дальше
-	}
-	mods := ev.mod_keys & (vgui.sdl_kmod_ctrl | vgui.sdl_kmod_alt | vgui.sdl_kmod_shift)
-	if mods == 0 && key == 'Escape' {
-		u.hk_wait = -1
-		u.hk_msg.text = ''
-		sync_hotkeys_ui(mut u, st)
-		return true
-	}
-	if mods == 0 && (key == 'Backspace' || key == 'Delete') {
-		u.hk_wait = -1
-		u.hk_msg.text = hk_set(mut st, idx, '')
-		return true
-	}
-	sc := hk_event_name(ev)
-	if hk_is_reserved(sc) {
-		u.hk_msg.text = hk_set(mut st, idx, sc) // сообщение «занято», ждём дальше
-		return true
-	}
-	u.hk_wait = -1
-	u.hk_msg.text = hk_set(mut st, idx, sc)
-	return true
 }

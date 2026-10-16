@@ -3,42 +3,6 @@ module main
 import vgui
 import json2
 
-// Сочетание из текста - канонический вид: регистр и порядок не важны
-fn test_hk_norm() {
-	assert hk_norm('ctrl+shift+o') == 'Ctrl+Shift+O'
-	assert hk_norm('Shift+Ctrl+O') == 'Ctrl+Shift+O'
-	assert hk_norm('alt+shift+f5') == 'Shift+Alt+F5'
-	assert hk_norm('r') == 'R'
-	assert hk_norm('0') == '0'
-	assert hk_norm('Ctrl+0') == 'Ctrl+0'
-	assert hk_norm('esc') == 'Escape'
-	assert hk_norm('pagedown') == 'PageDown'
-	assert hk_norm('Ctrl+[') == 'Ctrl+['
-	assert hk_norm('') == ''
-	assert hk_norm('Ctrl+') == ''
-	assert hk_norm('Ctrl+Чужая') == ''
-	assert hk_norm('F13') == ''
-}
-
-// Имя клавиши - по месту (scancode), не по раскладке
-fn test_hk_key_name() {
-	assert hk_key_name(4) == 'A'
-	assert hk_key_name(21) == 'R'
-	assert hk_key_name(29) == 'Z'
-	assert hk_key_name(30) == '1'
-	assert hk_key_name(39) == '0'
-	assert hk_key_name(58) == 'F1'
-	assert hk_key_name(69) == 'F12'
-	assert hk_key_name(47) == '['
-	assert hk_key_name(224) == '' // Ctrl сам по себе
-	ev := vgui.GuiEvent{
-		scancode: 21
-		keycode:  int(`к`) // русская раскладка
-		mod_keys: vgui.sdl_kmod_ctrl | vgui.sdl_kmod_shift
-	}
-	assert hk_event_name(&ev) == 'Ctrl+Shift+R'
-}
-
 fn hk_state() &State {
 	mut st := &State{}
 	mut a := vgui.menu_action('Открыть')

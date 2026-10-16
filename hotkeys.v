@@ -6,10 +6,10 @@ module main
 // постоянным ключом (hk_add): сочетание по умолчанию - то, что задано
 // пункту в коде, своё - из settings.hotkeys («ключ=сочетание», пусто после
 // «=» - снято). Сочетание пишется в поле shortcut пункта (меню его
-// показывает) в каноническом виде hk_norm: «Ctrl+Shift+Alt+Клавиша».
+// показывает) в каноническом виде vgui.shortcut_normalize: «Ctrl+Shift+Alt+Клавиша».
 //
 // Нажатия разбирает KeyWatch (compare.v): имя сочетания строится по месту
-// клавиши (scancode, hk_event_name), а не по букве раскладки - в русской
+// клавиши (scancode, vgui.shortcut_from_event), а не по букве раскладки - в русской
 // раскладке SDL отдаёт в keycode «к» вместо R, и меню vgui такие сочетания
 // не узнаёт. Найденный пункт срабатывает как из меню (hk_fire), событие
 // дальше не идёт.
@@ -38,131 +38,6 @@ const hk_reserved = ['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Enter', 'Esc
 
 // hk_fixed_note - что не меняется (подпись в окне)
 const hk_fixed_note = 'Не меняются: стрелки влево/вправо, Home/End - кадры ленты; Enter, Esc; пробел - 100% / вписать; «\\» (удерживать) - до/после; Ctrl+Y - вернуть'
-
-// Места клавиш (scancode SDL, USB HID) -> имя в сочетании
-const hk_sc_names = {
-	45: '-'
-	46: '='
-	47: '['
-	48: ']'
-	49: '\\'
-	51: ';'
-	52: "'"
-	53: '`'
-	54: ','
-	55: '.'
-	56: '/'
-	40: 'Enter'
-	41: 'Escape'
-	42: 'Backspace'
-	43: 'Tab'
-	44: 'Space'
-	73: 'Insert'
-	74: 'Home'
-	75: 'PageUp'
-	76: 'Delete'
-	77: 'End'
-	78: 'PageDown'
-	79: 'Right'
-	80: 'Left'
-	81: 'Down'
-	82: 'Up'
-}
-
-// hk_key_name - имя клавиши по месту (scancode); '' - не клавиша сочетания
-// (модификаторы, неизвестные)
-fn hk_key_name(sc int) string {
-	if sc >= 4 && sc <= 29 {
-		return u8(`A` + sc - 4).ascii_str()
-	}
-	if sc >= 30 && sc <= 38 {
-		return u8(`1` + sc - 30).ascii_str()
-	}
-	if sc == 39 {
-		return '0'
-	}
-	if sc >= 58 && sc <= 69 {
-		return 'F${sc - 57}'
-	}
-	return hk_sc_names[sc] or { '' }
-}
-
-// hk_compose - каноническое сочетание: модификаторы в порядке Ctrl, Shift,
-// Alt и клавиша
-fn hk_compose(ctrl bool, shift bool, alt bool, key string) string {
-	if key.len == 0 {
-		return ''
-	}
-	mut s := ''
-	if ctrl {
-		s += 'Ctrl+'
-	}
-	if shift {
-		s += 'Shift+'
-	}
-	if alt {
-		s += 'Alt+'
-	}
-	return s + key
-}
-
-// hk_event_name - сочетание нажатия (по месту клавиши); '' - не сочетание
-fn hk_event_name(ev &vgui.GuiEvent) string {
-	return hk_compose(ev.mod_keys & vgui.sdl_kmod_ctrl != 0, ev.mod_keys & vgui.sdl_kmod_shift != 0,
-		ev.mod_keys & vgui.sdl_kmod_alt != 0, hk_key_name(ev.scancode))
-}
-
-// hk_norm - сочетание из текста (настройки, код) в каноническом виде:
-// регистр и порядок модификаторов не важны; неизвестная клавиша - ''
-fn hk_norm(s string) string {
-	mut ctrl := false
-	mut shift := false
-	mut alt := false
-	mut key := ''
-	for p in s.split('+') {
-		t := p.trim_space()
-		match t.to_lower() {
-			'ctrl' { ctrl = true }
-			'shift' { shift = true }
-			'alt' { alt = true }
-			'' {}
-			else { key = hk_canon_key(t) }
-		}
-	}
-	// «Ctrl++» - клавиша «+» не поддерживается (её место - «=»)
-	return hk_compose(ctrl, shift, alt, key)
-}
-
-// hk_canon_key - имя клавиши как у hk_key_name (буквы - заглавные)
-fn hk_canon_key(t string) string {
-	if t.len == 1 {
-		c := t[0]
-		if c >= `a` && c <= `z` {
-			return u8(c - 32).ascii_str()
-		}
-		if (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) {
-			return t
-		}
-	}
-	l := t.to_lower()
-	if l.len >= 2 && l.len <= 3 && l[0] == `f` {
-		n := l[1..].int()
-		if n >= 1 && n <= 12 && '${n}' == l[1..] {
-			return 'F${n}'
-		}
-	}
-	for _, name in hk_sc_names {
-		if name.to_lower() == l {
-			return name
-		}
-	}
-	return match l {
-		'esc' { 'Escape' }
-		'return' { 'Enter' }
-		'del' { 'Delete' }
-		else { '' }
-	}
-}
 
 // hk_is_reserved - сочетание занято навигацией (не назначается)
 fn hk_is_reserved(sc string) bool {
@@ -193,7 +68,7 @@ fn hk_with(list []string, id string, sc string, def string) []string {
 // hk_add - зарегистрировать пункт меню как действие: по умолчанию - его
 // сочетание из кода, своё из настроек - сразу в пункт
 fn hk_add(mut st State, id string, group string, mut item vgui.MenuItem) {
-	def := hk_norm(item.shortcut)
+	def := vgui.shortcut_normalize(item.shortcut)
 	st.hk << HotItem{
 		id:    id
 		group: group
@@ -202,7 +77,7 @@ fn hk_add(mut st State, id string, group string, mut item vgui.MenuItem) {
 		item:  item
 	}
 	sc, ok := hk_override(&st.settings, id)
-	n := hk_norm(sc)
+	n := vgui.shortcut_normalize(sc)
 	item.shortcut = if ok && !hk_is_reserved(n) { n } else { def }
 }
 
@@ -255,7 +130,7 @@ fn hk_fire(mut item vgui.MenuItem) bool {
 // hk_dispatch - нажатие в главном окне (KeyWatch): действие с таким
 // сочетанием срабатывает; true - событие забрано
 fn hk_dispatch(mut st State, ev &vgui.GuiEvent) bool {
-	i := hk_find(st, hk_event_name(ev))
+	i := hk_find(st, vgui.shortcut_from_event(ev))
 	if i < 0 {
 		return false
 	}

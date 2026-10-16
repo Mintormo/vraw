@@ -74,7 +74,6 @@ mut:
 	// Горячие клавиши (hotkeys_ui.v): ряды по индексу st.hk, ждущий
 	// нажатия ряд (-1 - нет), сообщение
 	hk_rows []HkRow
-	hk_wait int = -1
 	hk_msg  &vgui.Label = unsafe { nil }
 	// подписи со вписанными сочетаниями (полноэкранный режим, F8 и F6)
 	fs_cap  &vgui.Label = unsafe { nil }
@@ -120,12 +119,12 @@ fn show_settings(mut st State, mut app vgui.App, parent &vgui.Window) {
 	}
 	mut u := st.sui
 	st.del_armed = ''
-	u.hk_wait = -1
+	hk_cancel_wait(mut u)
 	u.hk_msg.text = ''
 	sync_settings_ui(mut st)
 	mut d := u.dlg
 	if !d.is_open() {
-		show_dialog(mut d, u.scroll, parent, 0, 0)
+		d.show()
 	}
 }
 
@@ -457,11 +456,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 
 	u.scroll = dialog_scroll(outer)
 	dlg.add_widget(u.scroll)
-	// Нажатие для кнопки сочетания - раньше кнопок и полей
-	dlg.add_widget(&HkCapture{
-		st: st
-		u:  u
-	})
 	app.add_dialog(dlg)
 	st.sui = u
 	paint_settings(mut st)

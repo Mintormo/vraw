@@ -118,7 +118,7 @@ fn show_export(mut st State, mut app vgui.App, parent &vgui.Window) {
 	paint_export(mut st)
 	mut d := st.eui.dlg
 	if !d.is_open() {
-		show_dialog(mut d, st.eui.scroll, parent, 0, 0)
+		d.show()
 	}
 }
 

@@ -582,7 +582,7 @@ fn show_groups(mut st State, mut app vgui.App, parent &vgui.Window, preset bool)
 		cb.set_checked(g in st.settings.copy_groups)
 	}
 	if !d.is_open() {
-		show_dialog(mut d, u.scroll, parent, 0, 0)
+		d.show()
 	}
 	if preset {
 		d.win.set_default_focus_text_input(name)
@@ -757,8 +757,8 @@ fn show_presets(mut st State, mut app vgui.App, parent &vgui.Window) {
 	mut u := st.presets_ui
 	mut d := u.dlg
 	if !d.is_open() {
-		// размер - заданный при создании (presets_w × presets_h)
-		show_dialog(mut d, u.scroll, parent, presets_w, presets_h)
+		// размер - заданный при создании (presets_w × presets_h), не больше экрана
+		d.show()
 	}
 }
 

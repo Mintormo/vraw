@@ -153,7 +153,6 @@ mut:
 	// Полноэкранный режим (panel.v): окно на весь экран без меню, панели
 	// и ленты; в настройки не пишется
 	fullscreen bool
-	work_w     f32 = 1440 // ширина окна (рабочей области), px (PanelFit)
 	win        &vgui.Window = unsafe { nil }
 	// Раскладка окна (panel.v): корень (меню + рабочая область), меню,
 	// аккордеон панели, виджеты разделов и их раскрытость (по индексу
@@ -1476,7 +1475,7 @@ fn main() {
 	mut app := vgui.create_app(theme: theme)!
 	// Тема приложения: окно без своей темы получит её в add_window
 	// Размер по умолчанию - золотое сечение: 1440 / 890 ~ 1.618
-	mut win := vgui.create_window(title: 'vraw', width: 1440, height: 890)! // = State.work_w
+	mut win := vgui.create_window(title: 'vraw', width: 1440, height: 890)!
 	// Масштаб интерфейса прошлого запуска (uiscale.v): окно на экране
 	// того же размера, внутри - крупнее или мельче
 	ui_k := f32(ui_scale_pct(settings.ui_scale)) / 100
@@ -3599,7 +3598,7 @@ fn main() {
 	mut top := vgui.splitter_horizontal()
 	top.bar_size = 3
 	// Ширину панели перетащили - запомнить в пикселях (при изменении окна
-	// она держится, fit_panel_ratio); текущий кадр ленты снова по центру
+	// она держится - Splitter.keep); текущий кадр ленты снова по центру
 	top.on_resize = fn [mut st] (r f32) {
 		panel_dragged(mut st)
 		center_strip(mut st)
@@ -3615,10 +3614,6 @@ fn main() {
 	// Сочетания меню - и в полноэкранном режиме, где полоса скрыта
 	bar.keys_when_hidden = true
 	layout_work(mut st)
-	// Ширина панели в пикселях при изменении окна - до раскладки корня
-	win.add_widget(&PanelFit{
-		st: st
-	})
 	win.add_widget(root)
 	// Менеджер уведомлений - после корневого контейнера: рисуется поверх
 	// всего окна, события получает первым (Window обходит виджеты с конца).

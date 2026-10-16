@@ -191,18 +191,24 @@ fn layout_work(mut st State) {
 	if !panel_on(st) {
 		root.add(st.viewer, flex: 1)
 	} else {
-		fit_panel_ratio(mut st)
+		// Панель держит ширину в пикселях (Splitter.keep): при изменении окна
+		// растёт или сжимается только просмотр; узкое окно ужимает панель до
+		// min, настройка при этом не меняется
 		if st.settings.panel_left {
 			sp.min_first = panel_min_w
 			sp.min_second = viewer_min_w
 			sp.set_first(st.right)
 			sp.set_second(st.viewer)
+			sp.set_keep(.first, panel_width(st))
 		} else {
 			sp.min_first = viewer_min_w
 			sp.min_second = panel_min_w
 			sp.set_first(st.viewer)
 			sp.set_second(st.right)
+			sp.set_keep(.second, panel_width(st))
 		}
+		// Доля - сразу (center_strip ниже её читает), а не на следующей раскладке
+		sp.apply_keep()
 		root.add(sp, flex: 1)
 	}
 	if !isnil(st.m_panel) {
@@ -231,62 +237,14 @@ fn panel_width(st &State) f32 {
 	return if st.settings.panel_w > 0 { f32(st.settings.panel_w) } else { panel_start_w }
 }
 
-// fit_panel_ratio - доля сплиттера «просмотр | панель» под ширину панели в
-// пикселях при ширине окна st.work_w: Splitter держит долю, а панель - свою
-// ширину, поэтому при изменении окна растёт или сжимается только просмотр.
-// Узкое окно - панель уже (до panel_min_w), настройка при этом не меняется.
-fn fit_panel_ratio(mut st State) {
-	if isnil(st.hsplit) {
-		return
-	}
-	mut sp := st.hsplit
-	usable := st.work_w - sp.bar_size
-	if usable <= 0 {
-		return
-	}
-	mut pw := panel_width(st)
-	if pw > usable - viewer_min_w {
-		pw = usable - viewer_min_w
-	}
-	if pw < panel_min_w {
-		pw = panel_min_w
-	}
-	pf := pw / usable
-	sp.ratio = if st.settings.panel_left { pf } else { 1 - pf }
-}
-
-// PanelFit - невидимый виджет окна ПЕРЕД корнем: в раскладке кадра
-// (arrange, до сплиттера) замечает новую ширину окна и ставит долю
-// сплиттера под ширину панели (fit_panel_ratio). Через window_resize было бы
-// на кадр позже: vgui рисует окно новой ширины до рассылки события.
-struct PanelFit {
-mut:
-	st &State = unsafe { nil }
-}
-
-fn (mut f PanelFit) arrange(mut ctx vgui.RenderContext) {
-	mut st := f.st
-	if ctx.screen_width > 0 && ctx.screen_width != st.work_w {
-		st.work_w = ctx.screen_width
-		fit_panel_ratio(mut st)
-	}
-}
-
-fn (mut f PanelFit) draw(mut _ vgui.RenderContext) {}
-
-fn (mut f PanelFit) handle_event(_ &vgui.GuiEvent, _ &vgui.App) bool {
-	return false
-}
-
 // panel_dragged - ширину панели перетащили: запомнить её в пикселях
+// (Splitter.keep_size - уже новая ширина)
 fn panel_dragged(mut st State) {
 	sp := st.hsplit
-	usable := sp.bounds.w - sp.bar_size
-	if usable <= 0 {
+	if sp.keep_size <= 0 {
 		return
 	}
-	pf := if st.settings.panel_left { sp.ratio } else { 1 - sp.ratio }
-	st.settings.panel_w = int(pf * usable + 0.5)
+	st.settings.panel_w = int(sp.keep_size + 0.5)
 	save_settings(st.settings)
 }
 
@@ -321,7 +279,7 @@ fn set_panel_left(mut st State, left bool) {
 	}
 	st.settings.panel_left = left
 	save_settings(st.settings)
-	layout_work(mut st) // доля под сторону - fit_panel_ratio
+	layout_work(mut st) // удерживаемая панель - с другой стороны
 	sync_settings_ui(mut st)
 }
 

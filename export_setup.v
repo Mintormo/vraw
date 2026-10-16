@@ -250,7 +250,7 @@ fn show_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) {
 	sync_export_setup(mut st)
 	mut d := st.xs.dlg
 	if !d.is_open() {
-		show_dialog(mut d, st.xs.scroll, parent, 0, 0)
+		d.show()
 	}
 }
 
