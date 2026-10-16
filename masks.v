@@ -1431,12 +1431,12 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	add_row.add(add_r, flex: 1)
 	add_row.add(add_b, flex: 1)
 
-	mut on_b := icon_button(mut st, 'eye', i18n.tr('Включить / выключить фильтр'))
+	mut on_b := icon_button('eye', i18n.tr('Включить / выключить фильтр'))
 	on_b.on_click = fn [mut st] () {
 		toggle_mask(mut st)
 	}
 	u.on_btn = on_b
-	mut del_b := icon_button(mut st, 'trash-2', i18n.tr('Удалить фильтр'))
+	mut del_b := icon_button('trash-2', i18n.tr('Удалить фильтр'))
 	del_b.on_click = fn [mut st] () {
 		delete_mask(mut st)
 	}
@@ -1463,15 +1463,13 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		rename_mask(mut st, s)
 	}
 	u.name_in = name_in
-	mut name_tip := vgui.tooltip(i18n.tr('Имя фильтра в списке: введите и нажмите Enter'))
-	name_tip.attach(name_in)
-	st.tips << name_tip
+	name_in.tooltip = i18n.tr('Имя фильтра в списке: введите и нажмите Enter')
 	mut name_row := vgui.create_hbox_fill()
 	name_row.set_spacing(6)
 	name_row.add(vgui.label(i18n.tr('Имя')), min: lbl_w)
 	name_row.add(name_in, flex: 1)
 
-	mut done_b := icon_button(mut st, 'check', i18n.tr('Готово: снять выделение (Esc)'))
+	mut done_b := icon_button('check', i18n.tr('Готово: снять выделение (Esc)'))
 	done_b.on_click = fn [mut st] () {
 		select_mask(mut st, -1)
 	}
@@ -1501,7 +1499,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		select_part(mut st, idx - 1)
 	}
 	u.form_cb = form_cb
-	mut pdel_b := icon_button(mut st, 'trash-2', i18n.tr('Удалить часть'))
+	mut pdel_b := icon_button('trash-2', i18n.tr('Удалить часть'))
 	pdel_b.on_click = fn [mut st] () {
 		delete_part(mut st)
 	}
@@ -1763,7 +1761,7 @@ fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		mask_changed(mut st, 'mask_range', i18n.trf('Фильтр {0}: ограничение - {1}', '${i + 1}', i18n.tr(range_modes[idx]).to_lower()))
 	}
 	u.range_cb = rcb
-	mut pick := icon_button(mut st, 'pipette', i18n.tr('Пипетка цвета: щёлкните по цвету на снимке'))
+	mut pick := icon_button('pipette', i18n.tr('Пипетка цвета: щёлкните по цвету на снимке'))
 	pick.on_click = fn [mut st] () {
 		set_mask_pick(mut st, !st.mask_pick && mask_active(st))
 	}

@@ -182,7 +182,6 @@ mut:
 	hk       []HotItem
 	hk_texts []fn ()
 	grade_wheels     []&GradeWheel // круги раздела «Цветокоррекция» (grade_ui.v)
-	tips     []&vgui.Tooltip // подсказки кнопок-значков (icon_button)
 	// AI-шумодав (ai_nr.v): где лежат модели и ORT, кэши моделей по id
 	// (модель грузится при первом прогоне), результат модели по raw_linear,
 	// номер сырья и модель, из которых он посчитан; raw_gen
@@ -997,9 +996,7 @@ fn show_lens(st &State, mut lens_cb vgui.CheckBox, mut lens_lb vgui.Label) {
 }
 
 // icon_button - плоская кнопка со значком Lucide (встроен в vgui) и
-// всплывающей подсказкой. Подсказка - отдельный виджет vgui.Tooltip:
-// копится в st.tips, в окно добавляется после корневого контейнера
-// (рисуется поверх всего). Button.tooltip в vgui не рисуется.
+// всплывающей подсказкой Button.tooltip (её рисует сама кнопка).
 // update_title - заголовок окна: «IMG_0817.CR3 - vraw», без кадра - «vraw»
 // (длинное тире в заголовках vgui нельзя)
 fn update_title(mut st State) {
@@ -1010,22 +1007,18 @@ fn update_title(mut st State) {
 	w.set_title(if st.raw_path == '' { 'vraw' } else { '${os.file_name(st.raw_path)} - vraw' })
 }
 
-fn icon_button(mut st State, icon string, tip string) &vgui.Button {
+fn icon_button(icon string, tip string) &vgui.Button {
 	mut b := vgui.button('')
 	b.icon_name = icon
 	b.icon_size = 15
 	b.style = .flat
-	if tip.len > 0 {
-		mut t := vgui.tooltip(tip)
-		t.attach(b)
-		st.tips << t
-	}
+	b.tooltip = tip
 	return b
 }
 
 // reset_button - сброс одного параметра: значок «вернуть назад»
-fn reset_button(mut st State, tip string) &vgui.Button {
-	return icon_button(mut st, 'rotate-ccw', tip)
+fn reset_button(tip string) &vgui.Button {
+	return icon_button('rotate-ccw', tip)
 }
 
 // slider_row собирает стандартный ряд панели: подпись, ползунок, значение
@@ -1034,7 +1027,7 @@ fn reset_button(mut st State, tip string) &vgui.Button {
 // Ширины колонок подписи/значения общие на всю панель - считаются в main
 // через column_width, чтобы колонки рядов были выровнены.
 fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32) &vgui.HBox {
-	mut b := reset_button(mut st, i18n.tr('Сбросить'))
+	mut b := reset_button(i18n.tr('Сбросить'))
 	b.on_click = fn [mut sl, def] () {
 		sl.set_value(def)
 	}
@@ -1557,9 +1550,7 @@ fn main() {
 			else {}
 		}
 	}
-	mut hist_tip := vgui.tooltip(i18n.tr('Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба'))
-	hist_tip.attach(hist)
-	st.tips << hist_tip
+	hist.tooltip = i18n.tr('Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба')
 
 	// Уведомления (тосты) вместо статусной строки: начало/окончание
 	// обработки, ошибки. NotificationManager добавляется напрямую в окно
@@ -1972,7 +1963,7 @@ fn main() {
 		st.curve_btns << b
 		ch_row.add(b, flex: 1)
 	}
-	mut curve_reset := reset_button(mut st, i18n.tr('Сбросить кривую канала'))
+	mut curve_reset := reset_button(i18n.tr('Сбросить кривую канала'))
 	curve_reset.on_click = fn [mut st, mut cv, mut hist] () {
 		st.edit.curve_pts[st.curve_ch] = identity_curve()
 		curves_to_params(mut st)
@@ -2355,9 +2346,8 @@ fn main() {
 	mut ba_lb := vgui.label(i18n.tr('До: первая запись'))
 	st.secondary_labels << ba_lb
 	st.ba_lb = ba_lb
-	mut b_ba := icon_button(mut st, 'git-compare', i18n.tr('Выделенная запись - «до» для сравнения'))
-	mut ba_tip := st.tips.last()
-	st.hk_texts << fn [st, mut ba_tip] () {
+	mut b_ba := icon_button('git-compare', i18n.tr('Выделенная запись - «до» для сравнения'))
+	st.hk_texts << fn [st, mut b_ba] () {
 		keys := [hk_key(st, 'view.split'), hk_key(st, 'view.sbs')]
 		mut t := i18n.tr('Выделенная запись - «до» для сравнения')
 		if keys[0].len > 0 || keys[1].len > 0 {
@@ -2370,7 +2360,7 @@ fn main() {
 			}
 			t += ' (${parts.join(', ')})'
 		}
-		ba_tip.text = t
+		b_ba.tooltip = t
 	}
 	b_ba.on_click = fn [mut st] () {
 		if isnil(st.hist_lb) {
@@ -2378,7 +2368,7 @@ fn main() {
 		}
 		set_ba_ref(mut st, st.hist_lb.selected)
 	}
-	mut b_ba0 := reset_button(mut st, i18n.tr('«До» - первая запись'))
+	mut b_ba0 := reset_button(i18n.tr('«До» - первая запись'))
 	b_ba0.on_click = fn [mut st] () {
 		set_ba_ref(mut st, 0)
 	}
@@ -3362,11 +3352,9 @@ fn main() {
 	b_autotone.icon_name = 'wand-sparkles'
 	b_autotone.icon_size = 15
 	b_autotone.on_click = auto_tone_fn
-	mut at_tip := vgui.tooltip(i18n.tr('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме'))
-	at_tip.attach(b_autotone)
-	st.tips << at_tip
-	st.hk_texts << fn [st, mut at_tip] () {
-		at_tip.text = i18n.tr('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме') +
+	b_autotone.tooltip = i18n.tr('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме')
+	st.hk_texts << fn [st, mut b_autotone] () {
+		b_autotone.tooltip = i18n.tr('Экспозиция, контраст, тени/света, чёрные и белые по гистограмме') +
 			hk_paren(st, 'edit.autotone')
 	}
 	st.hk_texts << fn [mut st, mut ph] () {
@@ -3636,10 +3624,6 @@ fn main() {
 	// всего окна, события получает первым (Window обходит виджеты с конца).
 	// Свои цвета vraw по палитре темы (фоны панелей, разделители, подписи)
 	paint_ui(mut st, theme)
-	// Всплывающие подсказки кнопок-значков - поверх рабочей области
-	for t in st.tips {
-		win.add_widget(t)
-	}
 	win.add_widget(nm)
 	// Удержание «\» (до/после) и буквы в русской раскладке (compare.v)
 	win.add_widget(&KeyWatch{

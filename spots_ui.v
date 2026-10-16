@@ -597,7 +597,7 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_spot_mode(mut st, !st.spot_mode)
 	}
 	u.mode_btn = mode
-	mut clr := icon_button(mut st, 'trash-2', i18n.tr('Удалить все пятна'))
+	mut clr := icon_button('trash-2', i18n.tr('Удалить все пятна'))
 	clr.on_click = fn [mut st] () {
 		clear_spots(mut st)
 	}
@@ -612,12 +612,12 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut count := vgui.label(i18n.tr('Пятен нет'))
 	st.secondary_labels << count
 	u.count_lb = count
-	mut src := icon_button(mut st, 'shuffle', i18n.tr('Другой источник для пятна'))
+	mut src := icon_button('shuffle', i18n.tr('Другой источник для пятна'))
 	src.on_click = fn [mut st] () {
 		spot_new_source(mut st)
 	}
 	u.src_btn = src
-	mut del := icon_button(mut st, 'x', i18n.tr('Удалить пятно (Delete)'))
+	mut del := icon_button('x', i18n.tr('Удалить пятно (Delete)'))
 	del.on_click = fn [mut st] () {
 		delete_spot(mut st)
 	}

@@ -854,7 +854,6 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 
 	u.scroll = dialog_scroll(body)
 	dlg.add_widget(u.scroll)
-	dlg.add_widget(dir_note.tip) // после корня: рисуется поверх
 	app.add_dialog(dlg)
 	st.xs = u
 	paint_export_setup(mut st)

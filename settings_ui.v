@@ -144,36 +144,31 @@ fn note(mut u SettingsUi, text string) &vgui.Label {
 }
 
 // PathNote - вторичная подпись с путём: длинный путь обрезается
-// многоточием в начале (важен конец пути), полный - в подсказке при
-// наведении. Подсказку добавить в окно после корня (tip).
+// многоточием в начале (важен конец пути), полный - в подсказке подписи
+// (поле tooltip, показывает окно vgui).
 struct PathNote {
-	label &vgui.Label   = unsafe { nil }
-	tip   &vgui.Tooltip = unsafe { nil }
+	label &vgui.Label = unsafe { nil }
 	max   int // символов подписи вместе с префиксом - по ширине окна
 }
 
 const path_tip_line = 60 // символов в строке подсказки с путём
 
 fn path_note(prefix string, path string, max int) PathNote {
-	mut t := vgui.tooltip('')
-	// Перенос подсказки vgui - только по пробелам, в пути их обычно нет:
-	// строки режет path_tip, ширина - с запасом под них
-	t.max_width = 560
 	p := PathNote{
 		label: vgui.label('')
-		tip:   t
 		max:   max
 	}
 	p.set(prefix, path)
-	t.attach(p.label)
 	return p
 }
 
+// set - подпись и подсказка. Перенос подсказки vgui - только по пробелам, в
+// пути их обычно нет: строки режет path_tip, а строка без пробелов шире
+// подсказки просто раздвигает её окно.
 fn (p PathNote) set(prefix string, path string) {
 	mut l := p.label
 	l.text = prefix + elide_left(path, p.max - prefix.runes().len)
-	mut t := p.tip
-	t.set_text(path_tip(path))
+	l.tooltip = path_tip(path)
 }
 
 // elide_left - длинная строка с многоточием в начале
@@ -467,10 +462,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		st: st
 		u:  u
 	})
-	// Подсказки - после корня: рисуются поверх
-	for p in paths {
-		dlg.add_widget(p.tip)
-	}
 	app.add_dialog(dlg)
 	st.sui = u
 	paint_settings(mut st)

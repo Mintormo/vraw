@@ -963,7 +963,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_crop_mode(mut st, !st.crop_mode)
 	}
 	u.mode_btn = mode
-	mut reset := reset_button(mut st, i18n.tr('Сбросить кадрирование и поворот'))
+	mut reset := reset_button(i18n.tr('Сбросить кадрирование и поворот'))
 	reset.on_click = fn [mut st] () {
 		reset_crop(mut st)
 	}
@@ -994,7 +994,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		fit_ratio(mut st, i18n.trf('Пропорция: {0}', '${aspect_name(st.edit)}'))
 	}
 	u.aspect_cb = acb
-	mut orient := icon_button(mut st, 'rectangle-horizontal', i18n.tr('Горизонтальная / вертикальная рамка'))
+	mut orient := icon_button('rectangle-horizontal', i18n.tr('Горизонтальная / вертикальная рамка'))
 	orient.on_click = fn [mut st] () {
 		w0, h0 := crop_frame(st)
 		if st.edit.crop_aspect == '' {
@@ -1123,23 +1123,23 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	mut ph_row := edit_row(mut st, mut ph, lbl_w, val_w)
 
 	// Поворот на 90°, отражения, линия горизонта
-	mut r_ccw := icon_button(mut st, 'rotate-ccw-square', i18n.tr('Повернуть на 90° против часовой'))
+	mut r_ccw := icon_button('rotate-ccw-square', i18n.tr('Повернуть на 90° против часовой'))
 	r_ccw.on_click = fn [mut st] () {
 		rotate90(mut st, -1)
 	}
-	mut r_cw := icon_button(mut st, 'rotate-cw-square', i18n.tr('Повернуть на 90° по часовой'))
+	mut r_cw := icon_button('rotate-cw-square', i18n.tr('Повернуть на 90° по часовой'))
 	r_cw.on_click = fn [mut st] () {
 		rotate90(mut st, 1)
 	}
-	mut f_h := icon_button(mut st, 'flip-horizontal-2', i18n.tr('Отразить по горизонтали'))
+	mut f_h := icon_button('flip-horizontal-2', i18n.tr('Отразить по горизонтали'))
 	f_h.on_click = fn [mut st] () {
 		flip_frame(mut st, true)
 	}
-	mut f_v := icon_button(mut st, 'flip-vertical-2', i18n.tr('Отразить по вертикали'))
+	mut f_v := icon_button('flip-vertical-2', i18n.tr('Отразить по вертикали'))
 	f_v.on_click = fn [mut st] () {
 		flip_frame(mut st, false)
 	}
-	mut hz := icon_button(mut st, 'ruler', i18n.tr('Линия горизонта: проведите по горизонту (или вертикали) на снимке'))
+	mut hz := icon_button('ruler', i18n.tr('Линия горизонта: проведите по горизонту (или вертикали) на снимке'))
 	hz.on_click = fn [mut st] () {
 		if st.horizon {
 			st.horizon = false
@@ -1154,7 +1154,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		}
 	}
 	u.horizon_btn = hz
-	mut pl := icon_button(mut st, 'columns-2',
+	mut pl := icon_button('columns-2',
 		i18n.tr('Перспектива по двум линиям: проведите по двум вертикалям (или горизонталям) на снимке'))
 	pl.on_click = fn [mut st] () {
 		if st.persp_tool {
@@ -1178,9 +1178,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_angle_text(mut st, s)
 	}
 	u.angle_in = ain
-	mut ain_tip := vgui.tooltip(i18n.tr('Угол вручную, градусы (-45..45): введите и нажмите Enter'))
-	ain_tip.attach(ain)
-	st.tips << ain_tip
+	ain.tooltip = i18n.tr('Угол вручную, градусы (-45..45): введите и нажмите Enter')
 	mut tools := vgui.create_hbox_fill()
 	tools.set_spacing(6)
 	tools.add(vgui.label(i18n.tr('Повернуть')), min: lbl_w)
@@ -1228,9 +1226,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		b.on_click = fn [mut st, um] () {
 			upright_apply(mut st, um)
 		}
-		mut tip := vgui.tooltip(up_tips[i])
-		tip.attach(b)
-		st.tips << tip
+		b.tooltip = up_tips[i]
 		up_row.add(b, flex: 1)
 	}
 

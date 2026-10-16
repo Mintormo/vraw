@@ -561,7 +561,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	u.bar = bar
 	mut pct := value_label('')
 	u.pct = pct
-	mut cancel := icon_button(mut st, 'circle-x', i18n.tr('Отменить'))
+	mut cancel := icon_button('circle-x', i18n.tr('Отменить'))
 	cancel.on_click = fn [mut st] () {
 		ctl := st.ai_prev
 		if !isnil(ctl) {
@@ -596,7 +596,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	// не «сила по умолчанию», а выключение AI: как у классических
 	// ползунков, где сброс = 0 = шумодава нет (сила 100 и так по умолчанию,
 	// обычный сброс ничего бы не делал). Результат модели выбрасывается.
-	mut off := reset_button(mut st, i18n.tr('Сбросить AI-шумодав'))
+	mut off := reset_button(i18n.tr('Сбросить AI-шумодав'))
 	off.on_click = fn [mut st, mut app] () {
 		if st.edit.ai > 0 {
 			ai_turn_off(mut st, mut app)
@@ -636,7 +636,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 		ai_start(mut st, mut app)
 	}
 	u.redo = redo
-	mut off2 := reset_button(mut st, i18n.tr('Сбросить AI-шумодав'))
+	mut off2 := reset_button(i18n.tr('Сбросить AI-шумодав'))
 	off2.on_click = fn [mut st, mut app] () {
 		if st.edit.ai > 0 {
 			ai_turn_off(mut st, mut app)

@@ -213,14 +213,13 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		set_wb(mut st, mode, t, tint, text)
 	}
 	st.wb_cb = cb
-	mut pick := icon_button(mut st, 'pipette', i18n.tr('Пипетка: щёлкните по серому или белому на снимке'))
+	mut pick := icon_button('pipette', i18n.tr('Пипетка: щёлкните по серому или белому на снимке'))
 	pick.on_click = fn [mut st] () {
 		set_wb_pick(mut st, !st.wb_pick && st.linear.len > 0)
 	}
 	st.wb_pick_btn = pick
-	mut pick_tip := st.tips.last()
-	st.hk_texts << fn [st, mut pick_tip] () {
-		pick_tip.text = i18n.tr('Пипетка: щёлкните по серому или белому на снимке') +
+	st.hk_texts << fn [st, mut pick] () {
+		pick.tooltip = i18n.tr('Пипетка: щёлкните по серому или белому на снимке') +
 			hk_paren(st, 'edit.wb_pick')
 	}
 	mut mode_lb := vgui.label(i18n.tr('Режим'))
@@ -286,7 +285,7 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	st.wb_temp_sl = temp.sl
 	st.wb_tint_sl = tint.sl
 	// Сброс ползунка - «как снято» (а не 5000 K / 0)
-	mut t_reset := reset_button(mut st, i18n.tr('Как снято'))
+	mut t_reset := reset_button(i18n.tr('Как снято'))
 	t_reset.on_click = fn [mut st] () {
 		set_wb(mut st, '', 0, 0, i18n.tr(wb_names[0]))
 	}
@@ -296,7 +295,7 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	temp_row.add(temp.sl, flex: 1)
 	temp_row.add(temp.vl, min: val_w)
 	temp_row.add(t_reset)
-	mut n_reset := reset_button(mut st, i18n.tr('Как снято'))
+	mut n_reset := reset_button(i18n.tr('Как снято'))
 	n_reset.on_click = fn [mut st] () {
 		set_wb(mut st, '', 0, 0, i18n.tr(wb_names[0]))
 	}
