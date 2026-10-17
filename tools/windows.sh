@@ -31,12 +31,9 @@ command -v "$cc" >/dev/null || { echo "Нет $cc - apt install gcc-mingw-w64-x8
 rm -rf "$out" "$zipf"
 mkdir -p "$out"
 
-# Нужен V с исправленным трамплином замыканий: исходный портит xmm15, на
-# Windows x64 он сохраняемый (vlang/v#29822) - пустое окно, пустое превью
-# после кадрирования. Пока не исправлено в upstream - локальная правка
-# vlib/builtin/closure/closure.c.v (xmm5 под Windows), проверка ниже.
-grep -q 'amd64 && windows' "$HOME/soft/v/vlib/builtin/closure/closure.c.v" ||
-	{ echo "V без правки трамплина замыканий (vlang/v#29822) - см. комментарий"; exit 1; }
+# V не старее 14.10.2026: раньше трамплин замыканий портил xmm15, на
+# Windows x64 он сохраняемый (vlang/v#29822, исправлено #29831) - пустое
+# окно, пустое превью после кадрирования.
 echo "Сборка..."
 "$v" -prod -os windows -cc "$cc" -subsystem windows \
 	-cflags "-I$pfx/include" -ldflags "-L$pfx/lib" \

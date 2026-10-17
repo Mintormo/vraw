@@ -109,19 +109,14 @@ struct DetailJob {
 	margin int = detail_margin
 }
 
-// DetailAi - AI-шумодав фрагмента: плитки модели по полному кадру после
-// объектива (те же, что у экспорта - ai.TileCache), сила 1..100. tiles nil
-// или strength 0 - без AI.
+// DetailAi - AI-шумодав фрагмента: готовый результат модели по полному
+// кадру после объектива fw x fh (тот же, что берёт экспорт; считает его
+// кнопка AI, ai_nr.v), сила 1..100. Пусто или strength 0 - без AI.
 struct DetailAi {
-	tiles    &ai.TileCache = unsafe { nil }
-	model    ai.Runner     = ai.Runner(NoRunner{})
+	full     []u16
+	fw       int
+	fh       int
 	strength f32
-}
-
-struct NoRunner {}
-
-fn (n NoRunner) run(_ []f32, mut _ []f32, _ int, _ int) ! {
-	return error(i18n.tr('модели нет'))
 }
 
 // lens_piece - прямоугольник p кадра после коррекции объектива: профиль
@@ -178,29 +173,20 @@ fn detail_region(src &DetailSrc, job DetailJob) Region {
 
 // detail_prep - линейное сырьё фрагмента r.w x r.h RGB: то же, что та же
 // область полного кадра после подготовки и геометрии (develop_full до
-// pipeline.apply). ln - nil или пустой: без коррекции объектива. С AI
-// недостающие плитки модели считаются здесь же (долго: секунды на плитку;
-// progress - после каждой, false - отмена с ошибкой ai.Cancelled,
-// посчитанные плитки остаются в кэше).
-fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob, dai DetailAi, mut progress ai.Progress) ![]u16 {
+// pipeline.apply). ln - nil или пустой: без коррекции объектива. AI -
+// кусок готового результата модели (DetailAi), смешение по силе.
+fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob, dai DetailAi) ![]u16 {
 	w := src.w
 	h := src.h
 	p := detail_region(src, job)
-	mut buf := []u16{}
-	if !isnil(dai.tiles) && dai.strength > 0 {
-		// AI - как в экспорте: по сырью после объектива, до импульсов.
-		// Плиткам нужно своё окно (шире p), объектив - по нему
-		mut tc := dai.tiles
-		t := tc.grid.cover(ai.Rect{p.x, p.y, p.w, p.h})
-		wr := tc.grid.window(t)
-		win := Region{wr.x, wr.y, wr.w, wr.h}
-		lw := lens_piece(src, ln, job.man, win)
-		tc.fill(dai.model, t, unsafe { &u16(lw.data) }, wr, mut progress)!
-		den := tc.compose(ai.Rect{p.x, p.y, p.w, p.h})!
-		buf = pipeline.crop_region(unsafe { &u16(lw.data) }, win.w, 3, Region{p.x - win.x, p.y - win.y, p.w, p.h})
+	mut buf := lens_piece(src, ln, job.man, p)
+	// AI - как в экспорте: по сырью после объектива, до импульсов
+	if dai.strength > 0 && dai.full.len > 0 {
+		if dai.fw != w || dai.fh != h {
+			return error(i18n.tr('результат AI - другого размера'))
+		}
+		den := pipeline.crop_region(unsafe { &u16(dai.full.data) }, w, 3, p)
 		ai.blend(unsafe { &u16(buf.data) }, den, dai.strength / 100)
-	} else {
-		buf = lens_piece(src, ln, job.man, p)
 	}
 	pb := unsafe { &u16(buf.data) }
 	if job.nr[0] > 0 {

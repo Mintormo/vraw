@@ -74,6 +74,9 @@ mut:
 	dc         [3]f32
 	ai_applied f32
 	ai_linear  []u16 // пусто - результата модели нет
+	ai_full    []u16 // он же по полному кадру ai_fw x ai_fh (1:1, экспорт)
+	ai_fw      int
+	ai_fh      int
 	ai_model   string
 	bytes      i64
 }
@@ -87,7 +90,7 @@ fn frame_store(mut st State) {
 		return
 	}
 	frame_drop(mut st, st.raw_path)
-	ai_ok := st.ai_linear.len > 0 && st.ai_raw_gen == st.raw_gen
+	ai_ok := st.ai_linear.len > 0 && st.ai_full.len > 0 && st.ai_raw_gen == st.raw_gen
 	mut fc := &FrameCache{
 		path:       st.raw_path
 		lens_corr:  st.edit.lens_corr
@@ -105,6 +108,9 @@ fn frame_store(mut st State) {
 		dc:         st.dc_applied
 		ai_applied: st.ai_applied
 		ai_linear:  if ai_ok { share(st.ai_linear) } else { []u16{} }
+		ai_full:    if ai_ok { share(st.ai_full) } else { []u16{} }
+		ai_fw:      if ai_ok { st.ai_fw } else { 0 }
+		ai_fh:      if ai_ok { st.ai_fh } else { 0 }
 		ai_model:   if ai_ok { st.ai_lin_model } else { '' }
 	}
 	fc.bytes = frame_bytes(fc)
@@ -140,7 +146,7 @@ fn frame_put(mut st State, path string, res LoadResult) {
 fn frame_bytes(fc &FrameCache) i64 {
 	mut seen := []voidptr{}
 	mut n := i64(0)
-	for a in [fc.dev_linear, fc.raw_linear, fc.linear, fc.mask, fc.ai_linear] {
+	for a in [fc.dev_linear, fc.raw_linear, fc.linear, fc.mask, fc.ai_linear, fc.ai_full] {
 		if a.len > 0 && a.data !in seen {
 			seen << a.data
 			n += i64(a.len) * 2
@@ -158,6 +164,7 @@ fn frame_evict(mut st State, i int) {
 	drop(mut c.mask)
 	drop(mut c.cam_view)
 	drop(mut c.ai_linear)
+	drop(mut c.ai_full)
 	st.fcache.delete(i)
 }
 
@@ -201,6 +208,9 @@ fn frame_take(mut st State, path string, dev &raw.Developer) ?LoadResult {
 			dc_applied: c.dc
 			ai_applied: c.ai_applied
 			ai_linear:  c.ai_linear
+			ai_full:    c.ai_full
+			ai_fw:      c.ai_fw
+			ai_fh:      c.ai_fh
 			ai_model:   c.ai_model
 		}
 	}

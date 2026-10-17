@@ -239,8 +239,7 @@ pub fn denoise(m &Model, src &u16, w int, h int, mut progress Progress) ![]u16 {
 }
 
 // denoise_into - то же в готовый буфер out (w * h * 3; экспорт даёт буфер
-// вне сборщика - bigbuf). Плитки и их сложение - те же функции, что у
-// фрагмента (tiles.v): фрагмент 1:1 совпадает с этим проходом бит в бит.
+// вне сборщика - bigbuf). Сетка плиток и сшивка - tiles.v.
 pub fn denoise_into(m &Model, src &u16, w int, h int, mut out []u16, mut progress Progress) ! {
 	denoise_with(m, src, w, h, mut out, mut progress)!
 }

@@ -68,6 +68,9 @@ mut:
 	dc_applied [3]f32
 	ai_applied f32
 	ai_linear  []u16
+	ai_full    []u16 // из кэша кадров: результат модели по полному кадру
+	ai_fw      int
+	ai_fh      int
 	ai_model   string
 }
 
@@ -566,6 +569,7 @@ fn free_load(res LoadResult) {
 	drop(mut r.mask)
 	drop(mut r.cam_view)
 	drop(mut r.ai_linear)
+	drop(mut r.ai_full)
 }
 
 fn wait_loads(mut st State) {

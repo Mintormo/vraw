@@ -49,6 +49,11 @@ struct BatchJob {
 	// оценка секунд на кадр
 	ai_cache &ai.Cache = unsafe { nil }
 	ai_secs  f64
+	// Готовый результат модели открытого кадра (BatchItem.derived; своя
+	// ссылка - batch_worker отпускает в конце)
+	cur_ai []u16
+	cur_fw int
+	cur_fh int
 	ctl       &ExportCtl                  = unsafe { nil }
 	on_event  fn (&ExportCtl, BatchEvent) = unsafe { nil }
 }
@@ -265,6 +270,10 @@ fn (mut t BatchTally) add(r BatchDone) {
 // итог - report
 fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
+	mut cur_ai := unsafe { job.cur_ai }
+	defer {
+		drop(mut cur_ai)
+	}
 	mut level := load_level(job.settings.export_load)
 	apply_load(level)
 	// Кадров одновременно - не больше, чем помещается в свободную память
@@ -298,7 +307,7 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 		})
 		taken[dst] = true
 		e0 := it.edit
-		ai_secs := if e0.ai > 0 { job.ai_secs } else { 0 }
+		ai_secs := if e0.ai > 0 && !(it.derived && job.cur_ai.len > 0) { job.ai_secs } else { 0 }
 		post_batch(mut app, job, BatchEvent{
 			kind: .start
 			idx:  i
@@ -409,8 +418,12 @@ fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, mut 
 		return ExportCancelled{}
 	}
 	e := if it.derived { it.edit } else { batch_derive(it.src, it.edit, job.db)! }
+	reuse := it.derived && job.cur_ai.len > 0
 	mut img := develop_full(it.src, e, job.db,
 		ai_cache: cache
+		ai_full:  if reuse { job.cur_ai } else { []u16{} }
+		ai_fw:    job.cur_fw
+		ai_fh:    job.cur_fh
 		progress: StageProgress(progress)
 		size:     job.settings.export_size_opts()
 		bits16:   job.settings.export_bits16(job.format)

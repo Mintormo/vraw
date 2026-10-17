@@ -27,19 +27,13 @@ module main
 //   прежний.
 // Запрос - в долях видимой части превью: размер полного кадра воркер узнаёт
 // сам (у превью half-size нечётный край обрезан).
-// - AI-шумодав (если он есть в превью): модель считает плитки ПОЛНОГО
-//   кадра после объектива - те же, что у экспорта (ai.TileCache), поэтому
-//   фрагмент совпадает с экспортом. Плитки кэшируются: при прокрутке
-//   считаются только новые. Это долго (SCUNet ~2 с на плитку): пока
-//   считается, виден прежний фрагмент или увеличенное превью (с AI), снизу
-//   подпись «AI 1:1: плитка N из M»; ушли из 100% или сдвинули вид -
-//   прогон отменяется после текущей плитки, посчитанное остаётся.
+// - AI-шумодав (если он есть в превью): кнопка AI считает модель сразу по
+//   ПОЛНОМУ кадру после объектива (ai_nr.v, st.ai_full) - фрагмент берёт
+//   из него свой кусок, ничего не досчитывая, и совпадает с экспортом.
 import math
 import vgui
 import lens
-import ai
 import pipeline { Region }
-import i18n
 
 // Запас вокруг видимой части, в долях её размера: прокрутка на четверть
 // экрана - без пересчёта
@@ -49,9 +43,6 @@ const detail_min_scale = f32(1.01)
 // Настоящие 100%: пиксель полного кадра на пиксель экрана - зум холста
 // превью 1 / preview_scale
 const zoom_one = f32(1.0) / preview_scale
-// Плиток AI в кэше (3 x 256 x 256 f32 = 768 КБ каждая): ~150 МБ, экран
-// 100% с запасом - ~80 плиток
-const detail_tiles_max = 200
 // Полных кадров LibRaw в памяти (~150 МБ): один - открытого кадра, общий
 // у «после» и «до»
 const detail_srcs_max = 1
@@ -82,16 +73,8 @@ mut:
 	pending  bool // запрос во время работы - ещё проход после
 	drop     bool // кадр сменился во время работы - src и lens выбросить
 	threads  []thread
-	// AI на фрагменте: плитки модели (ключ - объектив кадра и модель),
-	// отмена идущего прогона, его прогресс (подпись) и запрошенный вид
-	tiles     &ai.TileCache = unsafe { nil }
-	tiles_key string
-	stop      &StopFlag = unsafe { nil }
-	ai_done   int
-	ai_total  int
-	run_key   string     // ключ подготовки идущего расчёта (со стороной)
-	run_frac  DetailFrac // его видимая часть с запасом
-	ai_failed string     // tiles_key, на котором модель не загрузилась
+	run_key  string     // ключ подготовки идущего расчёта (со стороной)
+	run_frac DetailFrac // его видимая часть с запасом
 	frag      [2]DetailFrag
 	// Шторка на 1:1: последние картинки «после» и «до» (RGBA фрагмента) -
 	// линию двигают без финального прохода
@@ -116,7 +99,6 @@ struct DetailPrep {
 	nr        [4]f32
 	dc        pipeline.Sharpen
 	ai_s      f32 // 0 - без AI
-	model     string
 	spots     []pipeline.Spot // удаление пятен (после подготовки, до геометрии)
 }
 
@@ -131,7 +113,6 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 			nr:        b.nr
 			dc:        b.params.sharp
 			ai_s:      ba_ai(st, b)
-			model:     st.ai_lin_model
 			spots:     b.spots
 		}
 	}
@@ -141,7 +122,6 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 		nr:        st.edit.nr
 		dc:        st.edit.params.sharp
 		ai_s:      ai_effective(st)
-		model:     ai.model.id
 		spots:     st.edit.spots
 	}
 }
@@ -163,35 +143,11 @@ struct DetailReq {
 	region    Region // задан (w > 0) - считать ровно его, а не frac с запасом
 	geom      pipeline.Geom
 	key       string
-	// AI: модель, плитки (готовые с тем же tiles_key или nil)
-	ai_cache  &ai.Cache     = unsafe { nil }
-	tiles     &ai.TileCache = unsafe { nil }
-	tiles_key string
-	stop      &StopFlag = unsafe { nil }
-	on_tick   fn (DetailTick) = unsafe { nil }
-}
-
-// DetailTick - прогресс плиток AI фрагмента (из воркера, post_result)
-struct DetailTick {
-	gen   int
-	done  int
-	total int
-}
-
-// DetailPoster - ai.Progress воркера 1:1: прогресс в главный поток, отмена
-// по флагу
-struct DetailPoster {
-mut:
-	app     &vgui.App = unsafe { nil }
-	stop    &StopFlag = unsafe { nil }
-	on_tick fn (DetailTick) = unsafe { nil }
-	gen     int
-}
-
-fn (mut p DetailPoster) step(done int, total int) bool {
-	mut app := p.app
-	post_result(mut app, p.on_tick, DetailTick{p.gen, done, total})
-	return !p.stop.stop
+	// AI: результат модели по полному кадру (своя ссылка, bufown.v -
+	// воркер отпускает; пусто - без AI)
+	ai_full []u16
+	ai_fw   int
+	ai_fh   int
 }
 
 struct DetailRes {
@@ -199,9 +155,6 @@ struct DetailRes {
 mut:
 	src       &DetailSrc    = unsafe { nil }
 	lens      &DetailLens   = unsafe { nil }
-	tiles     &ai.TileCache = unsafe { nil }
-	cancelled bool // AI отменён (вид сменился) - фрагмента нет
-	ai_err    bool // модель не загрузилась
 	lin       []u16
 	r         Region
 	ow        int
@@ -214,16 +167,10 @@ fn detail_prep_key(st &State, side int) string {
 	g := out_geom(&st.edit)
 	p := detail_prep_of(st, side)
 	return '${st.file_gen}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
-		p.model
+		st.ai_raw_gen
 	} else {
-		''
+		0
 	}}|${pipeline.spot_key(p.spots)}'
-}
-
-// detail_tiles_key - от чего зависят плитки модели: сырьё после объектива
-// и модель
-fn detail_tiles_key(st &State, p DetailPrep) string {
-	return '${st.raw_path}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.model}'
 }
 
 // detail_wanted - нужен ли слой детализации сейчас
@@ -234,11 +181,6 @@ fn detail_wanted(st &State) bool {
 	// Режим кадрирования - весь повёрнутый кадр; дымка и резкость
 	// показываются картой
 	if st.crop_mode || st.haze_show || st.dust_show || jpeg_active(st) {
-		return false
-	}
-	// AI в превью, а модель для фрагмента не загрузилась - увеличенное превью
-	p := detail_prep_of(st, side_after)
-	if p.ai_s > 0 && st.dt.ai_failed == detail_tiles_key(st, p) {
 		return false
 	}
 	cv := st.cv
@@ -350,7 +292,6 @@ fn detail_check(mut st State) {
 	}
 	if !detail_wanted(st) {
 		clear_details(mut st)
-		detail_cancel(mut st)
 		return
 	}
 	f := detail_frac(st)
@@ -371,16 +312,6 @@ fn detail_check(mut st State) {
 	}
 }
 
-// detail_cancel - идущий расчёт больше не нужен: прогон AI - остановить
-// после текущей плитки (посчитанные остаются в кэше)
-fn detail_cancel(mut st State) {
-	mut dt := st.dt
-	if dt.running && !isnil(dt.stop) {
-		mut f := dt.stop
-		f.stop = true
-	}
-}
-
 // find_src - готовый полный кадр по ключу или nil
 fn find_src(dt &DetailCtl, key string) &DetailSrc {
 	for s in dt.srcs {
@@ -398,24 +329,18 @@ fn detail_start(mut st State, side int) {
 	key := detail_prep_key(st, side)
 	run_key := '${side}|${key}'
 	if dt.running {
-		// Идущий расчёт и так даст нужное - ждать его (иначе любая
-		// перерисовка во время AI отменяла бы прогон)
+		// Идущий расчёт и так даст нужное - ждать его; иначе - ещё проход
+		// после него
 		if dt.run_key == run_key && frac_contains(dt.run_frac, detail_pad, detail_frac(st)) {
 			return
 		}
 		dt.pending = true
-		detail_cancel(mut st)
 		return
 	}
 	p := detail_prep_of(st, side)
 	src_key := st.raw_path
 	lens_key := '${st.raw_path}|${st.look.vign}|${st.look.zoom}'
-	mut ai_cache := unsafe { &ai.Cache(nil) }
-	if p.ai_s > 0 {
-		ai_cache = model_cache(mut st) or { unsafe { nil } }
-	}
-	tiles_key := detail_tiles_key(st, p)
-	stop := &StopFlag{}
+	use_ai := p.ai_s > 0 && st.ai_full.len > 0
 	// Шторка: «до» - ровно на месте готового «после» (сшиваются по линии)
 	fa := dt.frag[side_after]
 	region := if side == side_before && st.ba_split && !st.ba_hold && fa.lin.len > 0
@@ -432,7 +357,7 @@ fn detail_start(mut st State, side int) {
 		lens_key:  lens_key
 		prep:      DetailPrep{
 			...p
-			ai_s: if isnil(ai_cache) { f32(0) } else { p.ai_s }
+			ai_s: if use_ai { p.ai_s } else { f32(0) }
 		}
 		corr:      st.corr
 		vign:      st.look.vign
@@ -443,16 +368,11 @@ fn detail_start(mut st State, side int) {
 		region:    region
 		geom:      out_geom(&st.edit)
 		key:       key
-		ai_cache:  ai_cache
-		tiles:     if dt.tiles_key == tiles_key { dt.tiles } else { unsafe { nil } }
-		tiles_key: tiles_key
-		stop:      stop
-		on_tick:   st.dt_tick
+		ai_full:   if use_ai { share(st.ai_full) } else { []u16{} }
+		ai_fw:     st.ai_fw
+		ai_fh:     st.ai_fh
 	}
 	dt.running = true
-	dt.stop = stop
-	dt.ai_done = 0
-	dt.ai_total = 0
 	dt.run_key = run_key
 	dt.run_frac = detail_frac(st)
 	mut app := st.app
@@ -460,6 +380,11 @@ fn detail_start(mut st State, side int) {
 }
 
 fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
+	// Своя ссылка на результат AI - отпустить в конце (res.req её не читают)
+	mut ai_full := unsafe { req.ai_full }
+	defer {
+		drop(mut ai_full)
+	}
 	mut res := DetailRes{
 		req:  req
 		src:  req.src
@@ -482,52 +407,25 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 	} else {
 		frac_region(req.frac, ow, oh, detail_pad)
 	}
-	mut dai := DetailAi{}
-	if req.prep.ai_s > 0 {
-		res.tiles = req.tiles
-		if isnil(res.tiles) {
-			res.tiles = ai.new_tile_cache(res.src.w, res.src.h)
-		}
-		mut c := req.ai_cache
-		model := c.get() or {
-			res.ai_err = true
-			res.err = err.msg()
-			post_result(mut app, on_done, res)
-			return
-		}
-		dai = DetailAi{
-			tiles:    res.tiles
-			model:    ai.Runner(model)
-			strength: req.prep.ai_s
-		}
+	dai := DetailAi{
+		full:     req.ai_full
+		fw:       req.ai_fw
+		fh:       req.ai_fh
+		strength: req.prep.ai_s
 	}
 	if !r.is_empty() {
 		ln := if req.prep.use_lens { res.lens } else { unsafe { &DetailLens(nil) } }
-		mut prog := DetailPoster{
-			app:     app
-			stop:    req.stop
-			on_tick: req.on_tick
-			gen:     req.gen
-		}
 		res.lin = detail_prep(res.src, ln, DetailJob{
-			r:    r
-			geom: req.geom
+			r:     r
+			geom:  req.geom
 			nr:    req.prep.nr
 			dc:    req.prep.dc
 			spots: req.prep.spots
 			man:   req.prep.man
-		}, dai, mut prog) or {
-			if err is ai.Cancelled {
-				res.cancelled = true
-			} else {
-				res.err = err.msg()
-			}
+		}, dai) or {
+			res.err = err.msg()
 			[]u16{}
 		}
-	}
-	if !isnil(res.tiles) {
-		mut tc := res.tiles
-		tc.trim(detail_tiles_max)
 	}
 	res.r = r
 	res.ow = ow
@@ -539,10 +437,8 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 fn detail_done(mut st State, res DetailRes) {
 	mut dt := st.dt
 	dt.running = false
-	dt.stop = unsafe { nil }
-	dt.ai_total = 0
 	dt.run_key = ''
-	// То, что воркер собрал заново (полный кадр, объектив, плитки), -
+	// То, что воркер собрал заново (полный кадр, объектив), -
 	// теперь наше или лишнее
 	if dt.drop || res.req.gen != st.file_gen {
 		dt.drop = false
@@ -553,10 +449,6 @@ fn detail_done(mut st State, res DetailRes) {
 		if !isnil(res.lens) && voidptr(res.lens) != voidptr(dt.lens) {
 			mut l := res.lens
 			l.free()
-		}
-		if !isnil(res.tiles) && voidptr(res.tiles) != voidptr(dt.tiles) {
-			mut t := res.tiles
-			t.free()
 		}
 		detail_free(mut dt)
 		dt.pending = false
@@ -587,37 +479,8 @@ fn detail_done(mut st State, res DetailRes) {
 		dt.lens = res.lens
 		dt.lens_key = res.req.lens_key
 	}
-	if !isnil(res.tiles) && voidptr(res.tiles) != voidptr(dt.tiles) {
-		if !isnil(dt.tiles) {
-			mut t := dt.tiles
-			t.free()
-		}
-		dt.tiles = res.tiles
-		dt.tiles_key = res.req.tiles_key
-	}
-	mut cv := st.cv
-	cv.mark_dirty() // подпись прогресса AI
-	if res.ai_err {
-		// Модель не загрузилась: фрагмент с AI не посчитать - увеличенное
-		// превью (с AI) вместо него, один тост
-		dt.ai_failed = res.req.tiles_key
-		dt.pending = false
-		if !isnil(st.nm) {
-			mut nm := st.nm
-			nm.show_warning(i18n.trf('1:1 без AI: {0}', '${res.err}'))
-		}
-		detail_check(mut st)
-		return
-	}
 	if res.err.len > 0 {
 		dt.pending = false
-		return
-	}
-	if res.cancelled {
-		// Вид сменился посреди AI - новый расчёт по нему (готовые плитки
-		// возьмутся из кэша)
-		dt.pending = false
-		detail_check(mut st)
 		return
 	}
 	dt.frag[res.req.side] = DetailFrag{
@@ -643,31 +506,6 @@ fn has_src(dt &DetailCtl, p &DetailSrc) bool {
 		}
 	}
 	return false
-}
-
-// detail_tick - прогресс плиток AI (главный поток): подпись на холсте
-fn detail_tick(mut st State, t DetailTick) {
-	if isnil(st.dt) || t.gen != st.file_gen || !st.dt.running {
-		return
-	}
-	mut dt := st.dt
-	dt.ai_done = t.done
-	dt.ai_total = t.total
-	if !isnil(st.cv) {
-		mut cv := st.cv
-		cv.mark_dirty()
-	}
-}
-
-// detail_overlay - подпись прогресса AI на 1:1 (из on_overlay холста)
-fn detail_overlay(st &State, mut ctx vgui.RenderContext) {
-	if isnil(st.dt) || isnil(st.cv) || !st.dt.running || st.dt.ai_total <= 0
-		|| !detail_wanted(st) {
-		return
-	}
-	cv := st.cv
-	text := i18n.trf('AI 1:1: плитка {0} из {1}', '${st.dt.ai_done + 1}', '${st.dt.ai_total}')
-	ba_label(mut ctx, text, cv.bounds.x + 10, cv.bounds.y + cv.bounds.h - 30)
 }
 
 // frag_usable - фрагмент стороны есть для этого кадра (может быть по
@@ -828,7 +666,7 @@ fn detail_refresh(mut st State) {
 	detail_check(mut st)
 }
 
-// detail_free - выбросить полные кадры, объектив и плитки (смена кадра)
+// detail_free - выбросить полные кадры и объектив (смена кадра)
 fn detail_free(mut dt DetailCtl) {
 	if !isnil(dt.lens) {
 		mut l := dt.lens
@@ -836,13 +674,6 @@ fn detail_free(mut dt DetailCtl) {
 	}
 	dt.lens = unsafe { nil }
 	dt.lens_key = ''
-	if !isnil(dt.tiles) {
-		mut t := dt.tiles
-		t.free()
-	}
-	dt.tiles = unsafe { nil }
-	dt.tiles_key = ''
-	dt.ai_failed = ''
 	for i in 0 .. dt.srcs.len {
 		mut x := dt.srcs[i]
 		x.free()
@@ -861,7 +692,6 @@ fn detail_reset(mut st State) {
 	dt.seen = ''
 	if dt.running {
 		dt.drop = true
-		detail_cancel(mut st)
 	} else {
 		detail_free(mut dt)
 	}

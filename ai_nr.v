@@ -26,6 +26,8 @@ module main
 import time
 import vgui
 import ai
+import lens
+import raw
 import i18n
 
 // AiCtl - один прогон модели по превью. cancel пишет главный
@@ -45,16 +47,24 @@ mut:
 	eta    f64 = -1 // секунд до конца, < 0 - ещё неизвестно
 }
 
-// AiJob - прогон превью: копия raw_linear и её номер
+// AiJob - прогон по полному кадру: файл и коррекция объектива, как у
+// сырья превью номер raw_gen (полный кадр воркер проявляет сам), размер
+// превью w x h - для уменьшенной копии результата
 struct AiJob {
-	gen     int // file_gen кадра
-	raw_gen int
-	model   string // id модели
-	src     []u16 // своя ссылка (bufown.v), ai_worker отпускает
-	w       int
-	h       int
-	cache   &ai.Cache = unsafe { nil }
-	ctl     &AiCtl    = unsafe { nil }
+	gen      int // file_gen кадра
+	raw_gen  int
+	model    string // id модели
+	path     string
+	corr     &lens.Corrector = unsafe { nil } // nil - без профиля объектива
+	focal    f32
+	aperture f32
+	vign     f32
+	zoom     f32 = 1
+	man      lens.Manual
+	w        int
+	h        int
+	cache    &ai.Cache = unsafe { nil }
+	ctl      &AiCtl    = unsafe { nil }
 }
 
 struct AiResult {
@@ -63,7 +73,10 @@ mut:
 	gen       int
 	raw_gen   int
 	model     string
-	out       []u16
+	out       []u16 // уменьшенная копия - под сырьё превью (w x h)
+	full      []u16 // результат по полному кадру fw x fh
+	fw        int
+	fh        int
 	err       string
 	cancelled bool
 	secs      f64
@@ -117,13 +130,17 @@ fn ai_missing_text() string {
 	return i18n.tr('нет файлов шумодава рядом с программой (папки models и onnxruntime)')
 }
 
-// ai_estimate - оценка времени прогона модели, секунд: превью (открытый
-// кадр, без него - типичные 24 Мп) или полный кадр (вдвое больше по сторонам)
-fn ai_estimate(st &State, full bool) f64 {
+// ai_tip - подсказка кнопок прогона: что считается и что это даёт
+fn ai_tip() string {
+	return i18n.tr('Шумодав считается по полному кадру - потом увеличение 1:1 и экспорт без ожидания')
+}
+
+// ai_estimate - оценка времени прогона модели по полному кадру, секунд
+// (вдвое больше превью по сторонам; без кадра - типичные 24 Мп)
+fn ai_estimate(st &State) f64 {
 	w := if st.pw > 0 { st.pw } else { 3000 }
 	h := if st.ph > 0 { st.ph } else { 2000 }
-	k := if full { 2 } else { 1 }
-	return f64(ai.tile_count(w * k, h * k)) * ai.model.tile_secs
+	return f64(ai.tile_count(w * 2, h * 2)) * ai.model.tile_secs
 }
 
 // fmt_dur - «40 с» / «4 мин»
@@ -131,9 +148,18 @@ fn fmt_dur(sec f64) string {
 	return if sec < 60 { i18n.trf('{0} с', '${int(sec + 0.5)}') } else { i18n.trf('{0} мин', '${int(sec / 60 + 0.5)}') }
 }
 
-// ai_ready - ai_linear посчитан по текущему raw_linear и нужной моделью
+// ai_drop - выбросить результат модели (превью и полный кадр)
+fn ai_drop(mut st State) {
+	drop(mut st.ai_linear)
+	drop(mut st.ai_full)
+	st.ai_fw = 0
+	st.ai_fh = 0
+}
+
+// ai_ready - результат модели (полный кадр и копия под превью) посчитан
+// по текущему raw_linear и нужной моделью
 fn ai_ready(st &State) bool {
-	return st.ai_linear.len > 0 && st.ai_linear.len == st.raw_linear.len
+	return st.ai_linear.len > 0 && st.ai_linear.len == st.raw_linear.len && st.ai_full.len > 0
 		&& st.ai_raw_gen == st.raw_gen && st.ai_lin_model == ai.model.id
 }
 
@@ -154,7 +180,7 @@ fn prep_stale(st &State) bool {
 // кадр): результат модели больше не годится, идущий прогон превью - тоже
 fn raw_changed(mut st State) {
 	st.raw_gen++
-	drop(mut st.ai_linear)
+	ai_drop(mut st)
 	if !isnil(st.ai_prev) {
 		mut c := st.ai_prev
 		c.cancel = true
@@ -206,12 +232,18 @@ fn ai_check(mut st State, mut app vgui.App) {
 	job := AiJob{
 		gen:     st.file_gen
 		raw_gen: st.raw_gen
-		model:   id
-		src:     share(st.raw_linear) // только чтение: модель пишет в свой буфер
-		w:       st.pw
-		h:       st.ph
-		cache:   cache
-		ctl:     ctl
+		model:    id
+		path:     st.raw_path
+		corr:     if st.edit.lens_corr { st.corr } else { unsafe { nil } }
+		focal:    st.meta.focal
+		aperture: st.meta.aperture
+		vign:     st.look.vign
+		zoom:     st.look.zoom
+		man:      st.edit.lman
+		w:        st.pw
+		h:        st.ph
+		cache:    cache
+		ctl:      ctl
 	}
 	st.ai_threads << spawn ai_worker(job, mut app, st.ai_progress, st.ai_done)
 	sync_ai_ui(mut st)
@@ -229,7 +261,7 @@ fn ai_tell_stale(mut st State) {
 	}
 	st.ai_told = key
 	mut nm := st.nm
-	nm.show_info(i18n.tr('AI-шумодав: превью пока без него - «Пересчитать AI» в секции «Шумодав и ореолы» (экспорт посчитает сам)'))
+	nm.show_info(i18n.tr('AI-шумодав: снимок пока без него - «Пересчитать AI» в секции «Шумодав и ореолы» (экспорт посчитает сам)'))
 }
 
 // AiPoster - прогресс ai.denoise (в потоке воркера): в главный поток
@@ -275,47 +307,23 @@ fn (mut p AiPoster) step(done int, total int) bool {
 	return !c.cancel
 }
 
-// ai_worker - прогон модели по превью в spawn; без State и vgui, кроме
-// app.post (потокобезопасен по контракту vgui)
+// ai_worker - прогон модели по полному кадру в spawn; без State и vgui,
+// кроме app.post (потокобезопасен по контракту vgui). Полный кадр - как в
+// экспорте: свой LibRaw, коррекция объектива, модель; превью получает
+// уменьшенную копию результата (half_of), 1:1 и экспорт - сам результат.
 fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64), on_done fn (AiResult)) {
 	sw := time.new_stopwatch()
-	mut jsrc := unsafe { job.src }
-	defer {
-		drop(mut jsrc)
-	}
 	mut res := AiResult{
 		ctl:     job.ctl
 		gen:     job.gen
 		raw_gen: job.raw_gen
 		model:   job.model
 	}
-	mut cache := unsafe { job.cache }
-	if model := cache.get() {
-		mut progress := AiPoster{
-			app:         app
-			ctl:         job.ctl
-			on_progress: on_progress
-		}
-		mut out := own_new[u16](job.w * job.h * 3)
-		if _ := ai.denoise_into(model, unsafe { &u16(job.src.data) }, job.w, job.h, mut out, mut
-			progress)
-		{
-			res = AiResult{
-				...res
-				out: out
-			}
-		} else {
-			drop(mut out)
-			res = AiResult{
-				...res
-				err:       err.msg()
-				cancelled: err is ai.Cancelled
-			}
-		}
-	} else {
+	ai_full_run(job, mut app, on_progress, mut res) or {
 		res = AiResult{
 			...res
-			err: err.msg()
+			err:       err.msg()
+			cancelled: err is ai.Cancelled
 		}
 	}
 	res = AiResult{
@@ -325,12 +333,76 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 	post_result(mut app, on_done, res)
 }
 
+// ai_full_run - сам прогон: результат - в res (out, full, fw, fh)
+fn ai_full_run(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64), mut res AiResult) ! {
+	mut cache := unsafe { job.cache }
+	model := cache.get()!
+	mut d := raw.open(job.path)!
+	mut img := d.develop() or {
+		d.close()
+		return err
+	}
+	// Внутренние буферы LibRaw (~240 МБ) больше не нужны - отпустить сразу
+	d.close()
+	defer {
+		img.free()
+	}
+	fw := img.width
+	fh := img.height
+	buf := img.data_u16()
+	if !isnil(job.corr) || job.man.active() {
+		lens_full(buf, fw, fh, job.corr, job.focal, job.aperture, job.vign, job.zoom, job.man)
+	}
+	if job.ctl.cancel {
+		return ai.Cancelled{}
+	}
+	mut progress := AiPoster{
+		app:         app
+		ctl:         job.ctl
+		on_progress: on_progress
+	}
+	mut full := own_new[u16](fw * fh * 3)
+	ai.denoise_into(model, buf, fw, fh, mut full, mut progress) or {
+		drop(mut full)
+		return err
+	}
+	res.out = half_of(full, fw, fh, job.w, job.h)
+	res.full = full
+	res.fw = fw
+	res.fh = fh
+}
+
+// half_of - уменьшенная вдвое копия кадра fw x fh (линейный RGB) под
+// превью w x h: превью half-size - ячейка 2x2 полного кадра (нечётный
+// край у превью отрезан, raw.crop_half_edge), поэтому пиксель превью -
+// среднее своих четырёх
+fn half_of(full []u16, fw int, fh int, w int, h int) []u16 {
+	mut out := own_new[u16](w * h * 3)
+	if fw < 2 * w || fh < 2 * h {
+		return out
+	}
+	for y in 0 .. h {
+		r0 := 2 * y * fw * 3
+		r1 := r0 + fw * 3
+		o := y * w * 3
+		for x in 0 .. w {
+			i := 2 * x * 3
+			for c in 0 .. 3 {
+				sum := u32(full[r0 + i + c]) + full[r0 + i + 3 + c] + full[r1 + i + c] + full[r1 + i + 3 + c]
+				out[o + x * 3 + c] = u16((sum + 2) / 4)
+			}
+		}
+	}
+	return out
+}
+
 // ai_take - итог прогона превью (главный поток, из app.post)
 fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 	// Результат модели (bufown.v) - в State или отпускается
 	mut r := res
 	if st.ai_prev != res.ctl {
 		drop(mut r.out)
+		drop(mut r.full)
 		// Прогон, отменённый сменой сырья или кадра: если нужен - уже
 		// перезапускается (или будет запущен ai_check)
 		if st.ai_restart && res.gen == st.file_gen {
@@ -341,6 +413,7 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 	st.ai_prev = unsafe { nil }
 	if res.cancelled || res.err.len > 0 {
 		drop(mut r.out)
+		drop(mut r.full)
 	}
 	if res.cancelled {
 		// Отменил пользователь: AI кадра (если был включён) не трогаем -
@@ -360,11 +433,15 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 	}
 	if res.gen != st.file_gen || res.raw_gen != st.raw_gen || res.model != ai.model.id {
 		drop(mut r.out)
+		drop(mut r.full)
 		ai_check(mut st, mut app)
 		return
 	}
-	drop(mut st.ai_linear)
+	ai_drop(mut st)
 	st.ai_linear = res.out
+	st.ai_full = res.full
+	st.ai_fw = res.fw
+	st.ai_fh = res.fh
 	st.ai_raw_gen = res.raw_gen
 	st.ai_lin_model = res.model
 	if st.ai_wanted {
@@ -409,7 +486,7 @@ fn ai_turn_on(mut st State, mut app vgui.App) {
 fn ai_turn_off(mut st State, mut app vgui.App) {
 	st.edit.ai = 0
 	st.edit.ai_model = ''
-	drop(mut st.ai_linear)
+	ai_drop(mut st)
 	request_prep(mut st, mut app, false)
 	record(mut st, 'ai', i18n.tr('AI-шумодав: выкл'), false)
 	sync_ai_ui(mut st)
@@ -425,7 +502,7 @@ fn ai_forget(mut st State) {
 	}
 	st.ai_wanted = false
 	st.ai_restart = false
-	drop(mut st.ai_linear)
+	ai_drop(mut st)
 	st.ai_applied = 0
 	st.raw_gen++
 	sync_ai_ui(mut st)
@@ -460,15 +537,14 @@ fn sync_ai_ui(mut st State) {
 	u.stale.visible = stale
 	u.idle.visible = !running && !applied && !stale
 	if running {
-		what := i18n.tr('Превью')
 		if ctl.total == 0 {
 			u.bar.set_value(0)
 			u.pct.text = ''
-			u.status.text = i18n.trf('{0} · загрузка модели...', '${what}')
+			u.status.text = i18n.tr('Полный кадр · подготовка...')
 		} else {
 			u.bar.set_value(f32(ctl.done) / f32(ctl.total))
 			u.pct.text = '${ctl.done * 100 / ctl.total}%'
-			u.status.text = '${what} · ${fmt_eta(ctl.eta)}'
+			u.status.text = i18n.trf('Полный кадр · {0} из {1} · {2}', '${ctl.done}', '${ctl.total}', fmt_eta(ctl.eta))
 		}
 	}
 	if applied {
@@ -482,7 +558,7 @@ fn sync_ai_ui(mut st State) {
 		mut rh := u.redo_hint
 		rb.enabled = usable && !isnil(st.dev) && !st.loading
 		rh.text = if usable {
-			i18n.trf('{0} · превью пока без AI, пересчёт ~{1}', ai.model.title, '${fmt_dur(ai_estimate(st, false))}')
+			i18n.trf('{0} · снимок пока без AI, пересчёт ~{1}', ai.model.title, '${fmt_dur(ai_estimate(st))}')
 		} else {
 			i18n.trf('AI недоступен: {0}', ai_missing_text())
 		}
@@ -491,7 +567,7 @@ fn sync_ai_ui(mut st State) {
 	mut hint := u.hint
 	b.enabled = usable && !isnil(st.dev) && !st.loading
 	hint.text = if usable {
-		i18n.trf('{0} · превью ~{1}, экспорт ~{2}', ai.model.title, '${fmt_dur(ai_estimate(st, false))}', '${fmt_dur(ai_estimate(st, true))}')
+		i18n.trf('{0} · полный кадр ~{1}', ai.model.title, '${fmt_dur(ai_estimate(st))}')
 	} else {
 		i18n.trf('AI недоступен: {0}', ai_missing_text())
 	}
@@ -508,6 +584,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	start.icon_name = 'sparkles'
 	start.icon_size = 15
 	start.style = .accent
+	start.tooltip = ai_tip()
 	start.on_click = fn [mut st, mut app] () {
 		ai_start(mut st, mut app)
 	}
@@ -600,6 +677,7 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 	redo.icon_name = 'refresh-cw'
 	redo.icon_size = 15
 	redo.style = .accent
+	redo.tooltip = ai_tip()
 	redo.on_click = fn [mut st, mut app] () {
 		ai_start(mut st, mut app)
 	}

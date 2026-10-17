@@ -244,6 +244,11 @@ fn (mut a AiStage) step(done int, total int) bool {
 @[params]
 struct ExportOpts {
 	ai_cache &ai.Cache = unsafe { nil }
+	// Готовый результат модели по этому кадру (открытый кадр, кнопка AI,
+	// ai_nr.v) - вместо прогона модели; только чтение, держит вызывающий
+	ai_full []u16
+	ai_fw   int
+	ai_fh   int
 	progress ?StageProgress
 	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
 	half     bool       // половинный размер, как превью (левый кадр сравнения, pair.v)
@@ -254,8 +259,8 @@ struct ExportOpts {
 // o.bits16 - 16-битный) RGB полного размера. e - с производными полями (камерная кривая и таблицы
 // кривых в params, как у живого st.edit); db - база lensfun (nil - без
 // коррекции объектива). Свой LibRaw (открывает и закрывает файл сам) -
-// годится для фонового потока. AI-шумодав (e.ai > 0) - модель по всему
-// кадру, ~2.5 мин на 24 Мп. Отмена проверяется между этапами и между
+// годится для фонового потока. AI-шумодав (e.ai > 0) - готовый результат
+// (o.ai_full) или модель по всему кадру, ~16 мин на 24 Мп. Отмена проверяется между этапами и между
 // плитками AI.
 fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Image {
 	mut progress := o.progress or { StageProgress(NoStage{}) }
@@ -301,8 +306,11 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		}
 		correct_lens(buf, w, h, meta, db, e.lens_corr, e.vign, e.lens_zoom, e.lman)
 	}
-	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета
-	if e.ai > 0 {
+	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета.
+	// Результат модели уже есть (открытый кадр) - только смешение
+	if e.ai > 0 && o.ai_full.len > 0 && o.ai_fw == w && o.ai_fh == h {
+		ai.blend(buf, o.ai_full, e.ai / 100)
+	} else if e.ai > 0 {
 		if isnil(o.ai_cache) {
 			return error(i18n.tr('AI-шумодав недоступен'))
 		}

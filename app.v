@@ -190,7 +190,10 @@ mut:
 	// кнопка, ai_restart - прогон превью отменён сменой сырья.
 	ai_places   ai.Places
 	ai_cache    &ai.Cache = unsafe { nil } // модель AI (ai_nr.v), при первой надобности
-	ai_linear   []u16
+	ai_linear   []u16 // результат модели под превью (уменьшенный ai_full)
+	ai_full     []u16 // результат модели по полному кадру ai_fw x ai_fh (1:1, экспорт)
+	ai_fw       int
+	ai_fh       int
 	ai_raw_gen  int
 	ai_lin_model string
 	ai_told     string // «кадр/сырьё», о чьём устаревшем AI уже сказали
@@ -237,7 +240,6 @@ mut:
 	dt       &DetailCtl = unsafe { nil }
 	dt_check fn ()          = unsafe { nil } // detail_check через app.post
 	dt_done  fn (DetailRes) = unsafe { nil } // итог detail_worker
-	dt_tick  fn (DetailTick) = unsafe { nil } // прогресс плиток AI 1:1
 	tone_fx     fn () = unsafe { nil }
 	// Удаление дымки: карта кадра по st.linear (считается при первой
 	// надобности, сбрасывается с каждым новым linear), показ карты вместо
@@ -815,6 +817,9 @@ struct SaveJob {
 	settings  Settings   // EXIF и копирайт (write_image)
 	no_ai     bool // AI у кадра есть, но при экспорте отключён (для итога)
 	ai_cache  &ai.Cache  = unsafe { nil } // модель AI-шумодава (общая, при edit.ai > 0)
+	ai_full   []u16 // готовый результат модели (своя ссылка, save_worker отпускает)
+	ai_fw     int
+	ai_fh     int
 	ctl       &ExportCtl = unsafe { nil } // отмена и прогресс
 	on_stage  fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil } // прогресс - в главный поток
 }
@@ -824,6 +829,10 @@ struct SaveJob {
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
+	mut ai_full := unsafe { job.ai_full }
+	defer {
+		drop(mut ai_full)
+	}
 	apply_load(job.load)
 	mut progress := ExportPoster{
 		app:         app
@@ -832,6 +841,9 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 	}
 	mut img := develop_full(job.src, job.edit, job.db,
 		ai_cache: job.ai_cache
+		ai_full:  job.ai_full
+		ai_fw:    job.ai_fw
+		ai_fh:    job.ai_fh
 		progress: StageProgress(progress)
 		size:     job.size
 		bits16:   job.settings.export_bits16(job.format)
@@ -1503,9 +1515,6 @@ fn main() {
 	st.dt_done = fn [mut st] (res DetailRes) {
 		detail_done(mut st, res)
 	}
-	st.dt_tick = fn [mut st] (t DetailTick) {
-		detail_tick(mut st, t)
-	}
 	st.pal = make_palette(theme)
 	// База lensfun - один раз за запуск: дальше поиск профиля - доли мс
 	st.lens_db = load_lens_db()
@@ -1619,7 +1628,6 @@ fn main() {
 		ba_overlay(mut st, mut ctx) // шторка до/после
 		pair_overlay(st, mut ctx) // подпись открытого при сравнении кадров
 		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
-		detail_overlay(st, mut ctx) // прогресс AI на 1:1
 		sbs_sync(mut st, false) // бок о бок: зум и прокрутка - холсту «до»
 		detail_watch(mut st) // настоящий 1:1: изменился вид - фрагмент
 	}
@@ -2521,8 +2529,11 @@ fn main() {
 		st.dc_applied = res.dc_applied
 		st.ai_applied = res.ai_applied
 		if res.ai_linear.len > 0 {
-			drop(mut st.ai_linear)
+			ai_drop(mut st)
 			st.ai_linear = res.ai_linear
+			st.ai_full = res.ai_full
+			st.ai_fw = res.ai_fw
+			st.ai_fh = res.ai_fh
 			st.ai_lin_model = res.ai_model
 			st.ai_raw_gen = st.raw_gen
 		}
@@ -2835,13 +2846,15 @@ fn main() {
 		}
 		mut ai_cache := &ai.Cache(unsafe { nil })
 		mut ai_secs := 0.0
-		if edit.ai > 0 {
-			// Модель кадра (которой считано превью) - без неё не проявить
+		// Результат модели по полному кадру уже есть - экспорт берёт его
+		ai_reuse := edit.ai > 0 && ai_ready(st)
+		if edit.ai > 0 && !ai_reuse {
+			// Результата нет (AI из сайдкара) - экспорт считает модель сам
 			ai_cache = model_cache(mut st) or {
 				nm.show_error(i18n.trf('Экспорт с AI-шумодавом: {0}', '${err.msg()}'))
 				return
 			}
-			ai_secs = ai_estimate(st, true)
+			ai_secs = ai_estimate(st)
 		}
 		ctl := &ExportCtl{
 			src:     st.dev.path
@@ -2864,14 +2877,15 @@ fn main() {
 			load:     load_level(st.settings.export_load)
 			settings: st.settings
 			ai_cache: ai_cache
+			ai_full:  if ai_reuse { share(st.ai_full) } else { []u16{} }
+			ai_fw:    st.ai_fw
+			ai_fh:    st.ai_fh
 			ctl:      ctl
 			on_stage: st.exp_progress
 		}
 		st.exp = ctl
 		show_export(mut st, mut app, win)
 		export_started(mut st)
-		// Пока идёт экспорт, модели не удалить (модель может быть в работе)
-		sync_settings_ui(mut st)
 		st.save_threads << spawn save_worker(job, mut app, save_done)
 	}
 	st.exp_event = fn [mut st] (ctl &ExportCtl, ev BatchEvent) {
@@ -2886,12 +2900,17 @@ fn main() {
 		fmt := st.settings.export_fmt()
 		mut items, bad := batch_items(st, paths)
 		mut cache := &ai.Cache(unsafe { nil })
+		// Открытый кадр (derived) с готовым результатом модели - без прогона
+		cur_ai := ai_ready(st)
 		for mut it in items {
 			if it.edit.ai <= 0 {
 				continue
 			}
 			if st.settings.export_no_ai {
 				it.edit.ai = 0
+				continue
+			}
+			if it.derived && cur_ai {
 				continue
 			}
 			if isnil(cache) {
@@ -2917,7 +2936,10 @@ fn main() {
 			format:    fmt
 			db:        st.lens_db
 			ai_cache:  cache
-			ai_secs:   ai_estimate(st, true)
+			ai_secs:   ai_estimate(st)
+			cur_ai:    if cur_ai { share(st.ai_full) } else { []u16{} }
+			cur_fw:    st.ai_fw
+			cur_fh:    st.ai_fh
 			ctl:       ctl
 			on_event:  st.exp_event
 		}
