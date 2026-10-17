@@ -8,7 +8,6 @@ module main
 import os
 import json2
 import vgui
-import ai
 import lens
 import imgio
 import i18n
@@ -23,7 +22,6 @@ mut:
 	// язык интерфейса (код из i18n.langs; '' - как в системе); меняется
 	// после перезапуска
 	lang     string
-	ai_model   string = ai.default_model // модель для новых прогонов AI
 	// Кэш кадров в памяти (framecache.v): отрицание - в старом
 	// settings.json поля нет, кэш по умолчанию включён; предел, МБ (0 -
 	// frame_cache_mb_default)
@@ -167,7 +165,6 @@ fn settings_from(s Settings) Settings {
 		theme:      theme_keys[theme_index(s.theme)]
 		ui_scale:   ui_scale_pct(s.ui_scale)
 		lang:       if i18n.known(s.lang) { s.lang } else { '' }
-		ai_model:   if _ := ai.find_model_info(s.ai_model) { s.ai_model } else { ai.default_model }
 		export_format: s.export_fmt().key()
 		export_no_ai:  s.export_no_ai
 		export_no_exif: s.export_no_exif

@@ -80,55 +80,36 @@ fn lcg(s u32) u32 {
 	return s * 1664525 + 1013904223
 }
 
-// Каталог: у скачиваемых файлов есть размер и sha256, id уникальны,
-// модели по умолчанию и старых кадров - в каталоге
+// Каталог: модель - граф .onnx и веса, размеры известны (по ним installed)
 fn test_catalog() {
-	mut ids := []string{}
-	for m in models {
-		assert m.id !in ids
-		ids << m.id
-		assert m.files.len > 0
-		assert m.files[0].name.ends_with('.onnx')
-		assert m.tile_secs > 0
-		for f in m.files {
-			assert f.size > 0
-			if f.url != '' {
-				assert f.url.starts_with('https://')
-				assert f.sha256.len == 64
-			}
-		}
+	assert model.files.len > 0
+	assert model.files[0].name.ends_with('.onnx')
+	assert model.tile_secs > 0
+	for f in model.files {
+		assert f.size > 0
 	}
-	assert (find_model_info(default_model) or { panic('нет') }).downloadable()
-	assert find_model_info('nafnet_sidd_w32') != none
-	assert find_model_info('нет такой') == none
-	assert runtime_file.sha256.len == 64
 	// В пустой папке ничего не установлено
 	p := places(os.join_path(os.temp_dir(), 'vraw_ai_empty'))
-	assert !models[0].installed(p)
+	assert !model.installed(p)
 	assert runtime_lib(p) == ''
 }
 
-// Настоящие модели (все скачанные в models/ проекта, ORT - в onnxruntime/)
+// Настоящая модель (models/ проекта, ORT - в onnxruntime/: tools/fetch_ai.sh)
 // на шумном градиенте нечётного размера (две плитки по каждой оси, край
 // дополняется): шум падает в разы, средний уровень и градиент сохраняются,
 // отмена работает. Без ORT или моделей - пропуск.
-fn test_denoise_real_models() ! {
+fn test_denoise_real_model() ! {
 	p := places(@VMODROOT)
 	lib := runtime_lib(p)
 	if lib == '' {
 		eprintln('нет ONNX Runtime в ${p.runtime}, пропуск')
 		return
 	}
-	mut n := 0
-	for info in models {
-		if info.installed(p) {
-			check_model(info, new_cache(info.path(p), lib))!
-			n++
-		}
+	if !model.installed(p) {
+		eprintln('нет модели в ${p.models}, пропуск')
+		return
 	}
-	if n == 0 {
-		eprintln('нет моделей в ${p.models}, пропуск')
-	}
+	check_model(model, new_cache(model.path(p), lib))!
 }
 
 fn check_model(info ModelInfo, cache &Cache) ! {
@@ -181,25 +162,3 @@ fn check_model(info ModelInfo, cache &Cache) ! {
 	assert false, 'отмена не сработала'
 }
 
-// remove_runtime убирает папку движка и обрывки установки, чужое не трогает
-fn test_remove_runtime() ! {
-	root := os.join_path(os.vtmp_dir(), 'vraw_rm_rt_${os.getpid()}')
-	defer {
-		os.rmdir_all(root) or {}
-	}
-	p := places(root)
-	os.mkdir_all(os.join_path(p.runtime, 'lib'))!
-	os.write_file(os.join_path(p.runtime, runtime_lib_name), 'x')!
-	os.mkdir_all(p.runtime + '.tmp')!
-	os.write_file(p.runtime + os.file_ext(runtime_file.name), 'x')!
-	os.mkdir_all(p.models)!
-	assert runtime_lib(p) != ''
-	remove_runtime(p)!
-	assert runtime_lib(p) == ''
-	assert !os.exists(p.runtime)
-	assert !os.exists(p.runtime + '.tmp')
-	assert !os.exists(p.runtime + os.file_ext(runtime_file.name))
-	assert os.is_dir(p.models)
-	// Повторно - не ошибка
-	remove_runtime(p)!
-}

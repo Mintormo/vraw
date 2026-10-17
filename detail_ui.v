@@ -141,7 +141,7 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 		nr:        st.edit.nr
 		dc:        st.edit.params.sharp
 		ai_s:      ai_effective(st)
-		model:     ai_run_model(st)
+		model:     ai.model.id
 		spots:     st.edit.spots
 	}
 }
@@ -412,7 +412,7 @@ fn detail_start(mut st State, side int) {
 	lens_key := '${st.raw_path}|${st.look.vign}|${st.look.zoom}'
 	mut ai_cache := unsafe { &ai.Cache(nil) }
 	if p.ai_s > 0 {
-		ai_cache = ai_cache_for(mut st, p.model) or { unsafe { nil } }
+		ai_cache = model_cache(mut st) or { unsafe { nil } }
 	}
 	tiles_key := detail_tiles_key(st, p)
 	stop := &StopFlag{}

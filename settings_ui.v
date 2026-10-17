@@ -4,45 +4,14 @@ module main
 // оформление (тема и фон вокруг снимка - те же, что в меню «Вид»;
 // масштаб интерфейса), память
 // (кэш кадров, framecache.v); «Интерфейс» - панель инструментов и лента
-// кадров (panel.v); «Разделы панели» - какие и в каком порядке;
-// «AI-шумодав»: скачивание ONNX
-// Runtime и моделей в папки рядом с программой, выбор модели для новых
-// прогонов. Настройки экспорта - в окне «Экспорт» (export_setup.v). Диалог создаётся при первом открытии и живёт до выхода:
-// закрытие только прячет. Скачивание идёт в фоне (dl_worker) - окно можно
-// закрыть и работать дальше, итог - тостом в главном окне.
+// кадров (panel.v); «Разделы панели» - какие и в каком порядке; «Горячие
+// клавиши». AI-шумодаву настраивать нечего: модель и ONNX Runtime идут
+// вместе с vraw. Настройки экспорта - в окне «Экспорт» (export_setup.v).
+// Диалог создаётся при первом открытии и живёт до выхода: закрытие только
+// прячет.
 import vgui
-import ai
 import imgio
 import i18n
-
-// DlCtl - одно скачивание (ORT и/или модель). cancel пишет главный поток,
-// читает воркер между порциями данных; posted - только воркер (сколько
-// уже сообщено, чтобы не заваливать главный поток); done/total - главный
-// поток (для показа).
-@[heap]
-struct DlCtl {
-mut:
-	cancel bool
-	model  string // id модели, пусто - только ONNX Runtime
-	what   string // подпись: что качаем
-	posted i64
-	done   i64
-	total  i64
-}
-
-struct DlResult {
-	ctl       &DlCtl = unsafe { nil }
-	err       string
-	cancelled bool
-}
-
-// ModelRow - строка модели в окне
-struct ModelRow {
-	id    string
-	radio &vgui.RadioButton = unsafe { nil }
-	state &vgui.Label       = unsafe { nil }
-	btn   &vgui.Button      = unsafe { nil }
-}
 
 @[heap]
 struct SettingsUi {
@@ -54,13 +23,6 @@ mut:
 	scale_sp &vgui.Spinbox     = unsafe { nil } // свой, %
 	cache_ck &vgui.CheckBox    = unsafe { nil }
 	cache_cb &vgui.ComboBox    = unsafe { nil }
-	rt_state &vgui.Label       = unsafe { nil }
-	rt_btn   &vgui.Button      = unsafe { nil }
-	rows     []ModelRow
-	dl_box   &vgui.Stack       = unsafe { nil } // прогресс (скрыт без скачивания)
-	dl_bar   &vgui.ProgressBar = unsafe { nil }
-	dl_text  &vgui.Label       = unsafe { nil }
-	dl_stop  &vgui.Button      = unsafe { nil }
 	notes    []&vgui.Label // вторичные подписи - цвет по теме
 	// Интерфейс (panel.v): панель, её сторона, лента, разделы панели
 	panel_ck &vgui.CheckBox = unsafe { nil }
@@ -101,12 +63,6 @@ fn fmt_title(f imgio.Format) string {
 }
 
 const set_path_max = 76 // символов в строке пути (ширина окна минус поля)
-const rt_del_id = 'onnxruntime' // del_armed у ONNX Runtime (не id модели)
-
-fn fmt_mb(bytes i64) string {
-	return i18n.trf('{0} МБ', '${f64(bytes) / 1e6:.0f}')
-}
-
 // show_settings - открыть окно настроек (создать при первом вызове)
 fn show_settings(mut st State, mut app vgui.App, parent &vgui.Window) {
 	if isnil(st.sui) {
@@ -119,7 +75,6 @@ fn show_settings(mut st State, mut app vgui.App, parent &vgui.Window) {
 		}
 	}
 	mut u := st.sui
-	st.del_armed = ''
 	hk_cancel_wait(mut u)
 	u.hk_msg.text = ''
 	sync_settings_ui(mut st)
@@ -294,14 +249,9 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.cache_cb = cache_cb
 
-	// ── AI-шумодав: движок ──
-	// Колонки состояния и кнопок у строк ORT и моделей - по самым длинным
-	// их текстам (шрифтом окна): кнопки стоят ровной колонкой
+	// Колонки - по самым длинным текстам (шрифтом окна)
 	mut dw := &dlg.win
-	state_col := column_width(mut dw, [i18n.tr('установлен'), i18n.tr('нет · 11.0 МБ'), i18n.tr('скачана · 117.0 МБ'),
-		i18n.tr('нет в папке моделей')], 8)
-	btn_col := column_width(mut dw, [i18n.tr('Скачать'), i18n.tr('Удалить'), i18n.tr('Точно?')], 0) +
-		2 * vgui.measure_pad_x
+	btn_col := column_width(mut dw, [i18n.tr('Закрыть')], 0) + 2 * vgui.measure_pad_x
 	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Масштаб интерфейса'),
 		i18n.tr('Не больше')], 8)
 	// Списки оформления - одной ширины, по самому длинному пункту обоих
@@ -310,27 +260,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	look_items << i18n.tr_all(bg_names)
 	look_w := column_width(mut dw, look_items, 0) +
 		2 * theme_cb.pad + 24
-	mut rt_btn := vgui.button(i18n.tr('Скачать'))
-	// Как у моделей: нет движка - «Скачать», есть - «Удалить» с «Точно?»
-	rt_btn.on_click = fn [mut st, mut app] () {
-		if ai.runtime_lib(st.ai_places) == '' {
-			start_download(mut st, mut app, '')
-		} else if st.del_armed == rt_del_id {
-			delete_runtime(mut st)
-		} else {
-			st.del_armed = rt_del_id
-			sync_settings_ui(mut st)
-		}
-	}
-	u.rt_btn = rt_btn
-	mut rt_state := vgui.label('')
-	u.rt_state = rt_state
-	mut rt_row := vgui.create_hbox_fill()
-	rt_row.set_spacing(8)
-	rt_row.add(vgui.label('ONNX Runtime ${ai.runtime_version}'), flex: 1)
-	rt_row.add(rt_state, min: state_col)
-	rt_row.add(rt_btn, min: btn_col)
-
 	// ── Вкладка «Общие» ──
 	mut general := tab_page()
 	general.add(caption(i18n.tr('Оформление')))
@@ -356,103 +285,20 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	// ── Вкладка «Интерфейс» ──
 	iface, secs := build_iface_tab(mut st, mut u, mut dw)
 
-	// ── Вкладка «AI-шумодав» ──
-	mut body := tab_page()
-	body.add(caption(i18n.tr('AI-шумодав')))
-	body.add(rt_row)
-	body.add(note(mut u, i18n.tr('Движок нейросетей (открытый, MIT) - нужен всем моделям')))
-	body.add(vgui.label(i18n.tr('Модель (для новых прогонов; кадр помнит свою):')))
-
-	// ── Модели каталога: переключатель, состояние, кнопка ──
-	for info in ai.models {
-		id := info.id
-		mut radio := vgui.radio_button(info.title)
-		radio.radio_group = 'ai_model'
-		radio.on_change = fn [mut st, id] (v bool) {
-			if v && st.settings.ai_model != id {
-				st.settings.ai_model = id
-				save_settings(st.settings)
-				sync_ai_ui(mut st)
-				sync_settings_ui(mut st)
-			}
-		}
-		mut state := vgui.label('')
-		// Одна кнопка: нет модели - «Скачать», есть - «Удалить» (вторым
-		// нажатием: первое спрашивает «Точно?»)
-		mut btn := vgui.button(i18n.tr('Скачать'))
-		btn.on_click = fn [mut st, mut app, id] () {
-			info := ai.find_model_info(id) or { return }
-			if !info.installed(st.ai_places) {
-				start_download(mut st, mut app, id)
-			} else if st.del_armed == id {
-				delete_model(mut st, info)
-			} else {
-				st.del_armed = id
-				sync_settings_ui(mut st)
-			}
-		}
-		mut row := vgui.create_hbox_fill()
-		row.set_spacing(8)
-		row.add(radio, flex: 1)
-		row.add(state, min: state_col)
-		row.add(btn, min: btn_col)
-		body.add(row)
-		body.add(indented(note(mut u, i18n.tr(info.note)), radio.circle_size + radio.gap))
-		u.rows << ModelRow{
-			id:    id
-			radio: radio
-			state: state
-			btn:   btn
-		}
-	}
-
-	// ── Прогресс скачивания ──
-	mut dl_text := vgui.label('')
-	u.dl_text = dl_text
-	mut dl_bar := vgui.progress_bar_linear()
-	dl_bar.thickness = 6
-	u.dl_bar = dl_bar
-	mut dl_stop := vgui.button(i18n.tr('Отменить'))
-	dl_stop.on_click = fn [mut st] () {
-		if !isnil(st.dl) {
-			mut c := st.dl
-			c.cancel = true
-			if !isnil(st.sui) {
-				mut t := st.sui.dl_text
-				t.text = i18n.tr('Отмена...')
-			}
-		}
-	}
-	u.dl_stop = dl_stop
-	mut bar_row := vgui.create_hbox_fill()
-	bar_row.set_spacing(8)
-	bar_row.add(dl_bar, flex: 1)
-	bar_row.add(dl_stop, min: btn_col)
-	mut dl_v := vgui.create_vbox_fill()
-	dl_v.set_spacing(4)
-	dl_v.add(dl_text)
-	dl_v.add(bar_row)
-	u.dl_box = layer(dl_v)
-	body.add(u.dl_box)
-
 	mut tabs := vgui.tab_box()
 	tabs.add_tab(i18n.tr('Общие'), general)
 	tabs.add_tab(i18n.tr('Интерфейс'), iface)
 	tabs.add_tab(i18n.tr('Разделы панели'), secs)
 	tabs.add_tab(i18n.tr('Горячие клавиши'), build_hotkeys_tab(mut st, mut u, mut dw))
-	tabs.add_tab(i18n.tr('AI-шумодав'), body)
 
 	// ── Где что лежит, закрыть ──
 	mut outer := vgui.create_vbox_fill()
 	outer.set_padding(16)
 	outer.set_spacing(6)
 	outer.add(tabs, flex: 1)
-	paths := [path_note(i18n.tr('Настройки: '), settings_path(), set_path_max),
-		path_note(i18n.tr('Модели: '), st.ai_places.models, set_path_max)]
-	for p in paths {
-		u.notes << p.label
-		outer.add(p.label)
-	}
+	path := path_note(i18n.tr('Настройки: '), settings_path(), set_path_max)
+	u.notes << path.label
+	outer.add(path.label)
 	mut close := vgui.button(i18n.tr('Закрыть'))
 	close.style = .accent
 	close.on_click = fn [mut dlg] () {
@@ -695,62 +541,6 @@ fn sync_settings_ui(mut st State) {
 	sync_iface(mut u, st.settings)
 	sync_hotkeys_ui(mut u, st)
 	sync_hk_texts(mut u, st)
-	busy := !isnil(st.dl)
-	p := st.ai_places
-	have_rt := ai.runtime_lib(p) != ''
-	mut rs := u.rt_state
-	rs.text = if have_rt { i18n.tr('установлен') } else { i18n.trf('нет · {0}', '${fmt_mb(ai.runtime_file.size)}') }
-	mut rb := u.rt_btn
-	rt_armed := have_rt && st.del_armed == rt_del_id
-	rb.text = if !have_rt {
-		i18n.tr('Скачать')
-	} else if rt_armed {
-		i18n.tr('Точно?')
-	} else {
-		i18n.tr('Удалить')
-	}
-	rb.style = if rt_armed { .danger } else { .normal }
-	// Движок может быть в работе - как у кнопок «Удалить» моделей
-	rb.enabled = !busy && (!have_rt || (isnil(st.ai_prev) && isnil(st.exp)))
-	for r in u.rows {
-		info := ai.find_model_info(r.id) or { continue }
-		ok := info.installed(p)
-		mut radio := r.radio
-		radio.selected = st.settings.ai_model == r.id
-		mut s := r.state
-		mut b := r.btn
-		if ok {
-			s.text = i18n.trf('скачана · {0}', '${fmt_mb(info.size())}')
-			armed := st.del_armed == r.id
-			b.text = if armed { i18n.tr('Точно?') } else { i18n.tr('Удалить') }
-			b.style = if armed { .danger } else { .normal }
-			// Пока идёт скачивание или прогон AI - модель может быть в работе
-			b.enabled = !busy && isnil(st.ai_prev) && isnil(st.exp)
-		} else if info.downloadable() {
-			// Вместе с моделью докачается и движок, если его нет
-			extra := if have_rt { i64(0) } else { ai.runtime_file.size }
-			s.text = fmt_mb(info.size() + extra)
-			b.text = i18n.tr('Скачать')
-			b.style = .normal
-			b.enabled = !busy
-		} else {
-			s.text = i18n.tr('нет в папке моделей')
-			b.text = i18n.tr('Скачать')
-			b.style = .normal
-			b.enabled = false
-		}
-	}
-	mut box := u.dl_box
-	box.visible = busy
-	if busy {
-		c := st.dl
-		mut bar := u.dl_bar
-		bar.set_value(if c.total > 0 { f32(f64(c.done) / f64(c.total)) } else { 0 })
-		if !c.cancel {
-			mut t := u.dl_text
-			t.text = i18n.trf('Скачивание: {0} · {1} из {2}', '${c.what}', '${fmt_mb(c.done)}', '${fmt_mb(c.total)}')
-		}
-	}
 }
 
 // paint_settings - цвета окна по теме (при создании и смене темы)
@@ -762,156 +552,6 @@ fn paint_settings(mut st State) {
 	for i in 0 .. u.notes.len {
 		u.notes[i].color = st.pal.secondary
 	}
-}
-
-// delete_model - удалить скачанную модель (подтверждено вторым нажатием).
-// Кэш модели забывается: загруженная в память модель досчитает, что
-// начато, а новый прогон увидит «не скачана» (или скачанную заново).
-fn delete_model(mut st State, info ai.ModelInfo) {
-	st.del_armed = ''
-	ai.remove_model(st.ai_places, info) or {
-		if !isnil(st.nm) {
-			mut nm := st.nm
-			nm.show_error(i18n.trf('Не удалось удалить {0}: {1}', '${info.title}', '${err.msg()}'))
-		}
-	}
-	st.ai_caches.delete(info.id)
-	if !isnil(st.nm) && !info.installed(st.ai_places) {
-		mut nm := st.nm
-		nm.show_info(i18n.trf('Модель {0} удалена', '${info.title}'))
-	}
-	sync_settings_ui(mut st)
-	sync_ai_ui(mut st)
-}
-
-// delete_runtime - удалить ONNX Runtime (подтверждено вторым нажатием).
-// Загруженная библиотека досчитает до выхода из программы, но новые
-// прогоны AI без движка не начнутся (ai_usable), пока его не скачать.
-fn delete_runtime(mut st State) {
-	st.del_armed = ''
-	ai.remove_runtime(st.ai_places) or {
-		if !isnil(st.nm) {
-			mut nm := st.nm
-			nm.show_error(i18n.trf('Не удалось удалить {0}: {1}', 'ONNX Runtime', '${err.msg()}'))
-		}
-	}
-	if !isnil(st.nm) && ai.runtime_lib(st.ai_places) == '' {
-		mut nm := st.nm
-		nm.show_info(i18n.tr('ONNX Runtime удалён'))
-	}
-	sync_settings_ui(mut st)
-	sync_ai_ui(mut st)
-}
-
-// start_download - скачать модель (с движком, если его нет) или только
-// движок (model пусто). Одно скачивание за раз.
-fn start_download(mut st State, mut app vgui.App, model string) {
-	if !isnil(st.dl) {
-		return
-	}
-	st.del_armed = ''
-	need_rt := ai.runtime_lib(st.ai_places) == ''
-	mut parts := []string{}
-	mut total := i64(0)
-	if need_rt {
-		parts << 'ONNX Runtime'
-		total += ai.runtime_file.size
-	}
-	if model != '' {
-		info := ai.find_model_info(model) or { return }
-		parts << info.title
-		total += info.size()
-	}
-	if parts.len == 0 {
-		return
-	}
-	ctl := &DlCtl{
-		model: model
-		what:  parts.join(' + ')
-		total: total
-	}
-	st.dl = ctl
-	st.dl_threads << spawn dl_worker(st.ai_places, need_rt, ctl, mut app, st.dl_progress,
-		st.dl_done)
-	sync_settings_ui(mut st)
-}
-
-// DlTick - одно сообщение о прогрессе скачивания (post_result, post.v)
-struct DlTick {
-	on_progress fn (&DlCtl, i64) = unsafe { nil }
-	ctl         &DlCtl = unsafe { nil }
-	all         i64
-}
-
-fn deliver_dl_tick(t DlTick) {
-	t.on_progress(t.ctl, t.all)
-}
-
-// dl_progress_fn - прогресс одной части задания (base - байт до неё) в
-// главный поток; сообщается не чаще, чем раз в ~0.5 МБ
-fn dl_progress_fn(mut app vgui.App, ctl &DlCtl, base i64, on_progress fn (&DlCtl, i64)) fn (i64, i64) bool {
-	return fn [mut app, ctl, base, on_progress] (done i64, _ i64) bool {
-		mut c := unsafe { ctl }
-		all := base + done
-		if all - c.posted >= 500_000 || all == c.total {
-			c.posted = all
-			post_result(mut app, deliver_dl_tick, DlTick{
-				on_progress: on_progress
-				ctl:         ctl
-				all:         all
-			})
-		}
-		return !c.cancel
-	}
-}
-
-// dl_worker - скачивание в spawn: без State и vgui, кроме app.post
-fn dl_worker(p ai.Places, need_rt bool, ctl &DlCtl, mut app vgui.App, on_progress fn (&DlCtl, i64), on_done fn (DlResult)) {
-	mut res := DlResult{
-		ctl: ctl
-	}
-	mut base := i64(0)
-	mut failed := false
-	if need_rt {
-		ai.install_runtime(p, dl_progress_fn(mut app, ctl, base, on_progress)) or {
-			res = DlResult{
-				...res
-				err:       err.msg()
-				cancelled: err is ai.Cancelled
-			}
-			failed = true
-		}
-		base += ai.runtime_file.size
-	}
-	if !failed && ctl.model != '' {
-		if info := ai.find_model_info(ctl.model) {
-			ai.install_model(p, info, dl_progress_fn(mut app, ctl, base, on_progress)) or {
-				res = DlResult{
-					...res
-					err:       err.msg()
-					cancelled: err is ai.Cancelled
-				}
-			}
-		}
-	}
-	post_result(mut app, on_done, res)
-}
-
-// dl_take - итог скачивания (главный поток)
-fn dl_take(mut st State, res DlResult) {
-	st.dl = unsafe { nil }
-	if !isnil(st.nm) {
-		mut nm := st.nm
-		if res.cancelled {
-			nm.show_warning(i18n.tr('Скачивание отменено'))
-		} else if res.err != '' {
-			nm.show_error(i18n.trf('Не удалось скачать: {0}', '${res.err}'))
-		} else {
-			nm.show_success(i18n.trf('Скачано: {0}', '${res.ctl.what}'))
-		}
-	}
-	sync_settings_ui(mut st)
-	sync_ai_ui(mut st)
 }
 
 // fmt_cache_mb - предел кэша кадров в списке настроек

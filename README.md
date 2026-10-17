@@ -9,9 +9,10 @@ TIFF, BMP, QOI или GIF. Написано на V.
 
 - компилятор V (`~/soft/v/v`)
 - LibRaw: `sudo apt install libraw-dev`
-- для AI-шумодава ничего ставить не нужно: ONNX Runtime и модели программа
-  скачивает сама («Правка - Настройки») в папки `onnxruntime/` и `models/`
-  рядом с `vraw`; там же — `settings.json`. Без них всё, кроме AI, работает
+- AI-шумодав: модель SCUNet и ONNX Runtime лежат в папках `models/` и
+  `onnxruntime/` рядом с `vraw` (портабельная сборка кладёт их сама; для
+  `./vraw` из проекта — один раз `tools/fetch_ai.sh`). Настраивать ничего
+  не нужно; без них всё, кроме AI, работает. Рядом же — `settings.json`
 - модуль vgui — симлинк `~/.vmodules/vgui -> ~/projects/vgui`
   (уже создан) и библиотеки SDL3 в `/usr/local/lib`
 
@@ -29,7 +30,8 @@ cd ~/projects/vraw
 
 ```bash
 tools/portable.sh          # -> dist/vraw/ и dist/vraw-linux-x86_64.tar.gz
-tools/portable.sh --ai     # то же с моделями AI-шумодава и ONNX Runtime
+                           #    (вместе с моделью AI-шумодава и ONNX Runtime)
+tools/fetch_ai.sh          # модель и ONNX Runtime в корень проекта (для ./vraw)
 ```
 
 Распаковать архив куда угодно и запустить `vraw/vraw`.
@@ -138,14 +140,9 @@ MIT (файл `LICENSE`). Лицензии сторонних компонент
   справа или слева, лента снизу или сверху; «Разделы панели» — какие
   разделы панели показывать и в каком порядке (кнопки вверх/вниз, «Как
   было»; скрытый раздел только не виден — его настройки действуют);
-  «AI-шумодав» — скачивание ONNX Runtime (11 МБ) и моделей с проверкой
-  sha256 и докачкой при обрыве, выбор модели для новых прогонов:
-  - **SCUNet** (77 МБ) — точная, бережёт детали; превью ~4 мин, полный
-    кадр ~16 мин;
-  - **SCUNet GAN** (77 МБ) — резче, дорисовывает правдоподобную текстуру
-    (меньше всего «мыла»); время то же;
-  - **NAFNet** (117 МБ) — быстрая (~40 с / ~2.5 мин), но мылит; не
-    скачивается, только своим `tools/nafnet_export.py`.
+  «Горячие клавиши». AI-шумодаву настраивать нечего: модель одна —
+  **SCUNet** (точная, бережёт детали; превью ~4 мин, полный кадр ~16 мин),
+  она и ONNX Runtime идут вместе с программой.
 - RGB-гистограмма результата сверху панели.
 - Сплиттеры: ширину панели и высоту ленты можно менять мышью.
 - **Экспорт** (Ctrl+E): окно «Экспорт» — какие кадры (открытый,
@@ -181,9 +178,10 @@ imgio/     — запись кадра: JPEG/PNG/BMP (stbi), свои TIFF, QOI,
              EXIF (свой блок TIFF: APP1 в JPEG, eXIf в PNG),
              свой ICC-профиль sRGB (APP2, iCCP, тег TIFF) + тесты
 ai/        — AI-шумодав: ONNX Runtime через dlopen (C-прослойка
-             ort_shim.h, заголовки в ai/include), каталог моделей,
-             скачивание с докачкой, плитки с плавной сшивкой + тест
-tools/     — nafnet_export.py: модель NAFNet-SIDD-width32 в ONNX
+             ort_shim.h, заголовки в ai/include), модель SCUNet,
+             плитки с плавной сшивкой + тест
+tools/     — portable.sh / windows.sh — портабельные сборки, fetch_ai.sh —
+             модель и ONNX Runtime (sha256), i18n_check.py — переводы
 *.v        — приложение (module main): app.v — окно и панель, history.v —
              правки и история, sidecar.v — сайдкар, loader.v — фоновое
              открытие кадра, export.v / export_ui.v — экспорт и его
@@ -193,8 +191,8 @@ tools/     — nafnet_export.py: модель NAFNet-SIDD-width32 в ONNX
              pair.v — сравнение двух кадров, settings.v /
              settings_ui.v / themes.v — настройки, окно настроек и темы
              + тесты
-models/, onnxruntime/, settings.json — рядом с vraw, скачиваются и
-             пишутся программой (не в git)
+models/, onnxruntime/ — рядом с vraw, кладёт tools/fetch_ai.sh;
+settings.json — пишет программа (всё это не в git)
 ```
 
 ## Как это устроено

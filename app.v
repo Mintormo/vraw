@@ -189,7 +189,7 @@ mut:
 	// прогон превью (nil - нет), ai_wanted - нажата
 	// кнопка, ai_restart - прогон превью отменён сменой сырья.
 	ai_places   ai.Places
-	ai_caches   map[string]&ai.Cache
+	ai_cache    &ai.Cache = unsafe { nil } // модель AI (ai_nr.v), при первой надобности
 	ai_linear   []u16
 	ai_raw_gen  int
 	ai_lin_model string
@@ -208,11 +208,6 @@ mut:
 	// нет), его потоки и приёмники в главном потоке
 	sui           &SettingsUi = unsafe { nil }
 	open_settings fn ()       = unsafe { nil }
-	dl            &DlCtl      = unsafe { nil }
-	del_armed     string // id модели, чьё «Удалить» ждёт подтверждения
-	dl_threads    []thread
-	dl_progress   fn (&DlCtl, i64) = unsafe { nil }
-	dl_done       fn (DlResult)    = unsafe { nil }
 	// Экспорт (export_ui.v): идущий (nil - нет), его диалог и приёмник
 	// прогресса в главном потоке
 	exp          &ExportCtl = unsafe { nil }
@@ -1598,17 +1593,6 @@ fn main() {
 	st.ai_done = fn [mut st, mut app] (res AiResult) {
 		ai_take(mut st, mut app, res)
 	}
-	// Скачивание моделей (settings_ui.v): прогресс и итог
-	st.dl_progress = fn [mut st] (ctl &DlCtl, done i64) {
-		mut c := unsafe { ctl }
-		c.done = done
-		if st.dl == ctl {
-			sync_settings_ui(mut st)
-		}
-	}
-	st.dl_done = fn [mut st] (res DlResult) {
-		dl_take(mut st, res)
-	}
 	st.open_settings = fn [mut st, mut app, win] () {
 		show_settings(mut st, mut app, win)
 	}
@@ -2853,11 +2837,11 @@ fn main() {
 		mut ai_secs := 0.0
 		if edit.ai > 0 {
 			// Модель кадра (которой считано превью) - без неё не проявить
-			ai_cache = ai_cache_for(mut st, edit.ai_model) or {
+			ai_cache = model_cache(mut st) or {
 				nm.show_error(i18n.trf('Экспорт с AI-шумодавом: {0}', '${err.msg()}'))
 				return
 			}
-			ai_secs = ai_estimate(st, edit.ai_model, true)
+			ai_secs = ai_estimate(st, true)
 		}
 		ctl := &ExportCtl{
 			src:     st.dev.path
@@ -2901,8 +2885,7 @@ fn main() {
 		}
 		fmt := st.settings.export_fmt()
 		mut items, bad := batch_items(st, paths)
-		mut caches := map[string]&ai.Cache{}
-		mut secs := map[string]f64{}
+		mut cache := &ai.Cache(unsafe { nil })
 		for mut it in items {
 			if it.edit.ai <= 0 {
 				continue
@@ -2911,13 +2894,11 @@ fn main() {
 				it.edit.ai = 0
 				continue
 			}
-			m := it.edit.ai_model
-			if m !in caches {
-				caches[m] = ai_cache_for(mut st, m) or {
+			if isnil(cache) {
+				cache = model_cache(mut st) or {
 					nm.show_error(i18n.trf('Экспорт с AI-шумодавом ({0}): {1}', '${os.file_name(it.src)}', '${err.msg()}'))
 					return
 				}
-				secs[m] = ai_estimate(st, m, true)
 			}
 		}
 		if bad.len > 0 {
@@ -2935,8 +2916,8 @@ fn main() {
 			settings:  st.settings
 			format:    fmt
 			db:        st.lens_db
-			ai_caches: caches
-			ai_secs:   secs
+			ai_cache:  cache
+			ai_secs:   ai_estimate(st, true)
 			ctl:       ctl
 			on_event:  st.exp_event
 		}
@@ -3643,14 +3624,6 @@ fn main() {
 	for t in st.ai_threads {
 		t.wait()
 	}
-	// Скачивание - отменить (недокачанный .part удалится сам)
-	if !isnil(st.dl) {
-		mut c := st.dl
-		c.cancel = true
-	}
-	for t in st.dl_threads {
-		t.wait()
-	}
 	// Не обрывать записывающийся JPEG, если окно закрыли во время сохранения
 	// (экспорт с AI доработает до конца - это минуты, но файл важнее)
 	for t in st.save_threads {
@@ -3672,8 +3645,8 @@ fn main() {
 	if !isnil(st.lens_db) {
 		st.lens_db.free()
 	}
-	for _, c in st.ai_caches {
-		mut cc := unsafe { c }
+	if !isnil(st.ai_cache) {
+		mut cc := st.ai_cache
 		cc.free()
 	}
 }

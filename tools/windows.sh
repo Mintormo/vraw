@@ -12,8 +12,8 @@
 # Нужно: MinGW-w64 (apt: gcc-mingw-w64-x86-64) и библиотеки из MSYS2 -
 # python3 tools/win_deps.py (кладёт в ~/soft/mingw64-vraw, путь меняет
 # переменная VRAW_MINGW). Настройки, models/ и onnxruntime/ программа
-# держит рядом с exe, как и на Linux; с ключом --ai модели и ONNX Runtime
-# для Windows кладутся в папку готовыми.
+# держит рядом с exe, как и на Linux; модель и ONNX Runtime для Windows
+# кладёт tools/fetch_ai.sh.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,8 +24,6 @@ objdump=x86_64-w64-mingw32-objdump
 dist="$root/dist"
 out="$dist/vraw-windows"
 zipf="$dist/vraw-windows-x86_64.zip"
-with_ai=0
-[[ "${1:-}" == "--ai" ]] && with_ai=1
 
 [[ -f "$pfx/dlls.tsv" ]] || { echo "Нет библиотек MSYS2 в $pfx - запустить tools/win_deps.py"; exit 1; }
 command -v "$cc" >/dev/null || { echo "Нет $cc - apt install gcc-mingw-w64-x86-64"; exit 1; }
@@ -66,22 +64,9 @@ lf="$HOME/.local/share/lensfun/updates/version_1"
 mkdir -p "$out/lensfun"
 cp "$lf"/*.xml "$out/lensfun/"
 
-if ((with_ai)); then
-	cp -r "$root/models" "$out/models"
-	ort="$(python3 -I - <<'EOF'
-import re
-s = open('ai/catalog.v').read()
-print(re.search(r"\$if windows \{\s*ModelFile\{.*?url:\s*'([^']+)'", s, re.S).group(1))
-EOF
-)"
-	ort="${ort//\$\{runtime_version\}/$(grep -oP "runtime_version = '\K[^']+" "$root/ai/catalog.v")}"
-	tmp="$(mktemp -d)"
-	curl -sfL -o "$tmp/ort.zip" "$ort"
-	mkdir -p "$out/onnxruntime"
-	unzip -q "$tmp/ort.zip" -d "$tmp/x" -x '*.pdb' '*.lib' '*/include/*'
-	cp -r "$tmp"/x/*/. "$out/onnxruntime/"
-	rm -rf "$tmp"
-fi
+# AI-шумодав: модель и ONNX Runtime для Windows
+"$root/tools/fetch_ai.sh" "$out" windows
+rm -f "$out/onnxruntime/.version"
 
 
 # --- Лицензии -------------------------------------------------------------
@@ -92,7 +77,10 @@ lic="$out/licenses"
 own="$root/tools/licenses"
 mkdir -p "$lic"
 cp "$root/LICENSE" "$out/LICENSE"
-vgui_lic="$(readlink -f "$HOME/.vmodules/vgui")/../../LICENSE"
+# LICENSE - в корне репозитория vgui: модуль - он сам или его подпапка
+vgui_dir="$(readlink -f "$HOME/.vmodules/vgui")"
+vgui_lic="$vgui_dir/LICENSE"
+[[ -f "$vgui_lic" ]] || vgui_lic="$vgui_dir/../../LICENSE"
 [[ -f "$vgui_lic" ]] || { echo "Нет лицензии vgui: $vgui_lic"; exit 1; }
 cp "$vgui_lic" "$lic/vgui.txt"
 
@@ -131,7 +119,7 @@ for dll in $(printf '%s\n' "${!have[@]}" | sort -f); do
 	fi
 done
 
-for f in V libgc mbedtls stb Roboto-OFL Lucide-ISC SCUNet NAFNet; do
+for f in V libgc stb Roboto-OFL Lucide-ISC SCUNet; do
 	cp "$own/$f.txt" "$lic/$f.txt"
 done
 cat >>"$tp" <<'END'
@@ -143,7 +131,6 @@ cat >>"$tp" <<'END'
 | vgui (GUI library) | MIT | licenses/vgui.txt |
 | V standard library | MIT | licenses/V.txt |
 | Boehm GC (V garbage collector) | Boehm GC license (MIT-like) | licenses/libgc.txt |
-| Mbed TLS (HTTPS for model downloads) | Apache-2.0 | licenses/mbedtls.txt |
 | stb_image, stb_image_write, stb_image_resize2 | MIT / public domain | licenses/stb.txt |
 | Roboto font | SIL Open Font License 1.1 | licenses/Roboto-OFL.txt |
 | Lucide icons | ISC | licenses/Lucide-ISC.txt |
@@ -157,19 +144,24 @@ cat >>"$tp" <<'END'
 The database is the work of the lensfun project (https://lensfun.github.io),
 distributed unmodified.
 
-## AI denoise (ONNX Runtime and models are downloaded by the program - Edit - Settings; a build with --ai includes them)
+## AI denoise
 
 | Component | License | Text |
 |---|---|---|
 | ONNX Runtime (onnxruntime/ folder) | MIT | onnxruntime/LICENSE, onnxruntime/ThirdPartyNotices.txt |
-| SCUNet models (Kai Zhang et al., https://github.com/cszn/SCUNet) | Apache-2.0 | licenses/SCUNet.txt |
-| NAFNet model (https://github.com/megvii-research/NAFNet) | MIT | licenses/NAFNet.txt |
+| SCUNet model, real PSNR weights (models/ folder) | Apache-2.0 | licenses/SCUNet.txt, licenses/Apache-2.0.txt |
+
+SCUNet is the work of Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao,
+Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte and Luc Van Gool
+(https://github.com/cszn/SCUNet). The weights are distributed in ONNX
+format, converted from the original PyTorch weights by Heliosoph
+(https://huggingface.co/Heliosoph/scunet-onnx), otherwise unmodified.
 
 ONNX Runtime for Windows needs the Microsoft Visual C++ Redistributable
 (x64). Most computers already have it; if not, vraw says where to get it
 when AI denoise is turned on.
 END
-# Apache-2.0 (mbedtls, SCUNet) - общий текст
+# Apache-2.0 (SCUNet) - общий текст
 cp /usr/share/common-licenses/Apache-2.0 "$lic/Apache-2.0.txt"
 
 (cd "$dist" && zip -qr "$zipf" vraw-windows)

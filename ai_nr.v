@@ -1,15 +1,16 @@
 module main
 
-// AI-шумодав в окне: нейросеть (модуль ai: SCUNet, NAFNet) по кнопке, в
-// фоне, с прогрессом и отменой. Секция «Шумодав и ореолы», блок сверху.
+// AI-шумодав в окне: нейросеть (модуль ai: SCUNet) по кнопке, в фоне, с
+// прогрессом и отменой. Секция «Шумодав и ореолы», блок сверху.
 //
 // Как устроено:
-// - Модели и ONNX Runtime скачиваются в окне «Настройки» (settings_ui.v)
-//   в папки рядом с программой. Модель новых прогонов - из настроек
-//   (st.settings.ai_model); кадр с AI помнит свою (edit.ai_model), по ней
-//   идут пересчёт превью и экспорт. У каждой модели свой ai.Cache.
+// - Модель и ONNX Runtime идут вместе с vraw (папки рядом с программой,
+//   их кладёт сборка). Нет их - кнопки неактивны, подсказка - почему.
+//   Кадр с AI помнит модель (edit.ai_model) - для сайдкара; модель одна
+//   (ai.model; кадр со старой моделью - до 17.10.2026 их было три -
+//   пересчитывается этой), один ai.Cache (st.ai_cache).
 // - Модель считает превью (raw_linear - после коррекции объектива, до
-//   импульсов и вейвлета) один раз (NAFNet ~40 с, SCUNet ~4 мин);
+//   импульсов и вейвлета) один раз (~4 мин);
 //   результат - st.ai_linear, модель результата - st.ai_lin_model.
 // - Настройка кадра - edit.ai (сила 1..100, 0 - выключен): в истории и
 //   сайдкаре. Подготовка сырья смешивает raw_linear с ai_linear по силе
@@ -21,8 +22,7 @@ module main
 //   (объектив, другой кадр, откат истории) - ai_linear устарел
 //   (raw_gen): превью идёт без AI, блок показывает «Пересчитать AI» и
 //   сброс, один раз - тост. Экспорт с AI считает модель сам.
-// - Экспорт с AI считает модель на полном кадре (NAFNet ~2.5 мин, SCUNet
-//   ~16 мин) в save_worker; его прогресс - в диалоге экспорта (export_ui.v).
+// - Экспорт с AI считает модель на полном кадре (~16 мин) в save_worker; его прогресс - в диалоге экспорта (export_ui.v).
 import time
 import vgui
 import ai
@@ -93,55 +93,37 @@ mut:
 	run_icon  &vgui.Icon        = unsafe { nil }
 }
 
-// ai_run_model - модель прогона: у кадра с AI - его модель, иначе
-// выбранная в настройках
-fn ai_run_model(st &State) string {
-	return if st.edit.ai > 0 && st.edit.ai_model != '' {
-		st.edit.ai_model
-	} else {
-		st.settings.ai_model
-	}
-}
-
-// ai_cache_for - кэш модели (создаётся при первой надобности); ошибка -
+// model_cache - кэш модели (создаётся при первой надобности); ошибка -
 // понятный текст, чего не хватает
-fn ai_cache_for(mut st State, id string) !&ai.Cache {
-	if c := st.ai_caches[id] {
-		return c
+fn model_cache(mut st State) !&ai.Cache {
+	if !isnil(st.ai_cache) {
+		return st.ai_cache
 	}
-	info := ai.find_model_info(id) or { return error(i18n.trf('неизвестная модель {0}', '${id}')) }
 	lib := ai.runtime_lib(st.ai_places)
-	if lib == '' {
-		return error(i18n.tr('не скачан ONNX Runtime (Правка - Настройки)'))
+	if lib == '' || !ai.model.installed(st.ai_places) {
+		return error(ai_missing_text())
 	}
-	if !info.installed(st.ai_places) {
-		return error(i18n.trf('не скачана модель {0} (Правка - Настройки)', '${info.title}'))
-	}
-	c := ai.new_cache(info.path(st.ai_places), lib)
-	st.ai_caches[id] = c
-	return c
+	st.ai_cache = ai.new_cache(ai.model.path(st.ai_places), lib)
+	return st.ai_cache
 }
 
-// ai_usable - модель скачана вместе с ONNX Runtime
-fn ai_usable(st &State, id string) bool {
-	info := ai.find_model_info(id) or { return false }
-	return ai.runtime_lib(st.ai_places) != '' && info.installed(st.ai_places)
+// ai_usable - модель и ONNX Runtime лежат рядом с программой
+fn ai_usable(st &State) bool {
+	return ai.runtime_lib(st.ai_places) != '' && ai.model.installed(st.ai_places)
 }
 
-// model_title - короткое имя модели для подписей
-fn model_title(id string) string {
-	info := ai.find_model_info(id) or { return id }
-	return info.title
+// ai_missing_text - почему AI недоступен (файлы идут вместе с vraw)
+fn ai_missing_text() string {
+	return i18n.tr('нет файлов шумодава рядом с программой (папки models и onnxruntime)')
 }
 
 // ai_estimate - оценка времени прогона модели, секунд: превью (открытый
 // кадр, без него - типичные 24 Мп) или полный кадр (вдвое больше по сторонам)
-fn ai_estimate(st &State, id string, full bool) f64 {
-	info := ai.find_model_info(id) or { return 0 }
+fn ai_estimate(st &State, full bool) f64 {
 	w := if st.pw > 0 { st.pw } else { 3000 }
 	h := if st.ph > 0 { st.ph } else { 2000 }
 	k := if full { 2 } else { 1 }
-	return f64(ai.tile_count(w * k, h * k)) * info.tile_secs
+	return f64(ai.tile_count(w * k, h * k)) * ai.model.tile_secs
 }
 
 // fmt_dur - «40 с» / «4 мин»
@@ -152,7 +134,7 @@ fn fmt_dur(sec f64) string {
 // ai_ready - ai_linear посчитан по текущему raw_linear и нужной моделью
 fn ai_ready(st &State) bool {
 	return st.ai_linear.len > 0 && st.ai_linear.len == st.raw_linear.len
-		&& st.ai_raw_gen == st.raw_gen && st.ai_lin_model == ai_run_model(st)
+		&& st.ai_raw_gen == st.raw_gen && st.ai_lin_model == ai.model.id
 }
 
 // ai_effective - сила AI, с которой сейчас надо готовить сырьё (0 - без AI:
@@ -208,8 +190,8 @@ fn ai_check(mut st State, mut app vgui.App) {
 		sync_ai_ui(mut st)
 		return
 	}
-	id := ai_run_model(st)
-	cache := ai_cache_for(mut st, id) or {
+	id := ai.model.id
+	cache := model_cache(mut st) or {
 		if !isnil(st.nm) {
 			mut nm := st.nm
 			nm.show_error(i18n.trf('AI-шумодав: {0}', '${err.msg()}'))
@@ -376,7 +358,7 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		sync_ai_ui(mut st)
 		return
 	}
-	if res.gen != st.file_gen || res.raw_gen != st.raw_gen || res.model != ai_run_model(st) {
+	if res.gen != st.file_gen || res.raw_gen != st.raw_gen || res.model != ai.model.id {
 		drop(mut r.out)
 		ai_check(mut st, mut app)
 		return
@@ -491,41 +473,27 @@ fn sync_ai_ui(mut st State) {
 	}
 	if applied {
 		mut l := u.ok_label
-		l.text = i18n.trf('AI-шумодав применён · {0}', '${model_title(st.edit.ai_model)}')
+		l.text = i18n.trf('AI-шумодав применён · {0}', ai.model.title)
 	}
-	// Пересчёт AI кадра - его моделью; нет её - «Скачать модель...»
+	// Нет файлов модели - кнопки неактивны, подсказка - почему
+	usable := ai_usable(st)
 	if stale {
-		sid := st.edit.ai_model
 		mut rb := u.redo
 		mut rh := u.redo_hint
-		if ai_usable(st, sid) {
-			rb.text = i18n.tr('Пересчитать AI')
-			rb.icon_name = 'refresh-cw'
-			rb.enabled = !isnil(st.dev) && !st.loading
-			rh.text = i18n.trf('{0} · превью пока без AI, пересчёт ~{1}', '${model_title(sid)}', '${fmt_dur(ai_estimate(st, sid, false))}')
+		rb.enabled = usable && !isnil(st.dev) && !st.loading
+		rh.text = if usable {
+			i18n.trf('{0} · превью пока без AI, пересчёт ~{1}', ai.model.title, '${fmt_dur(ai_estimate(st, false))}')
 		} else {
-			rb.text = i18n.tr('Скачать модель...')
-			rb.icon_name = 'download'
-			rb.enabled = true
-			rh.text = i18n.trf('Модель {0} не скачана - Правка - Настройки', '${model_title(sid)}')
+			i18n.trf('AI недоступен: {0}', ai_missing_text())
 		}
 	}
-	// Кнопка: модель готова - запуск; нет - «Скачать модель...» (окно
-	// настроек, там и выбор модели)
-	id := st.settings.ai_model
-	ready := ai_usable(st, id)
 	mut b := u.start
 	mut hint := u.hint
-	if ready {
-		b.text = i18n.tr('Убрать шум (AI)')
-		b.icon_name = 'sparkles'
-		b.enabled = !isnil(st.dev) && !st.loading
-		hint.text = i18n.trf('{0} · превью ~{1}, экспорт ~{2}', '${model_title(id)}', '${fmt_dur(ai_estimate(st, id, false))}', '${fmt_dur(ai_estimate(st, id, true))}')
+	b.enabled = usable && !isnil(st.dev) && !st.loading
+	hint.text = if usable {
+		i18n.trf('{0} · превью ~{1}, экспорт ~{2}', ai.model.title, '${fmt_dur(ai_estimate(st, false))}', '${fmt_dur(ai_estimate(st, true))}')
 	} else {
-		b.text = i18n.tr('Скачать модель...')
-		b.icon_name = 'download'
-		b.enabled = true
-		hint.text = i18n.trf('Модель {0} не скачана - Правка - Настройки', '${model_title(id)}')
+		i18n.trf('AI недоступен: {0}', ai_missing_text())
 	}
 }
 
@@ -666,15 +634,8 @@ fn build_ai_block(mut st State, mut app vgui.App, mut strength EditSlider, lw f3
 }
 
 // ai_start - кнопка «Убрать шум (AI)» / «Пересчитать AI»: прогон превью
-// моделью кадра (ai_run_model); модели нет - окно настроек
 fn ai_start(mut st State, mut app vgui.App) {
-	if !ai_usable(st, ai_run_model(st)) {
-		if !isnil(st.open_settings) {
-			st.open_settings()
-		}
-		return
-	}
-	if isnil(st.dev) || st.loading {
+	if !ai_usable(st) || isnil(st.dev) || st.loading {
 		return
 	}
 	st.ai_wanted = true

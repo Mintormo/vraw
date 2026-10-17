@@ -45,9 +45,10 @@ struct BatchJob {
 	settings Settings // снимок: папка, имя, «файл есть», размер, качество
 	format   imgio.Format
 	db       &lens.Database = unsafe { nil }
-	// AI-шумодав: модели кадров (общие, только чтение) и оценки секунд
-	ai_caches map[string]&ai.Cache
-	ai_secs   map[string]f64
+	// AI-шумодав: модель (общая, только чтение; nil - AI ни у кого) и
+	// оценка секунд на кадр
+	ai_cache &ai.Cache = unsafe { nil }
+	ai_secs  f64
 	ctl       &ExportCtl                  = unsafe { nil }
 	on_event  fn (&ExportCtl, BatchEvent) = unsafe { nil }
 }
@@ -297,7 +298,7 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 		})
 		taken[dst] = true
 		e0 := it.edit
-		ai_secs := if e0.ai > 0 { job.ai_secs[e0.ai_model] or { 0 } } else { 0 }
+		ai_secs := if e0.ai > 0 { job.ai_secs } else { 0 }
 		post_batch(mut app, job, BatchEvent{
 			kind: .start
 			idx:  i
@@ -306,7 +307,7 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 			plan: export_plan(e0, ai_secs, job.format)
 		})
 		cache := if e0.ai > 0 {
-			job.ai_caches[e0.ai_model] or { unsafe { nil } }
+			job.ai_cache
 		} else {
 			unsafe { nil }
 		}
