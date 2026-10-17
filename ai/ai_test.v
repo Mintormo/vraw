@@ -180,3 +180,26 @@ fn check_model(info ModelInfo, cache &Cache) ! {
 	}
 	assert false, 'отмена не сработала'
 }
+
+// remove_runtime убирает папку движка и обрывки установки, чужое не трогает
+fn test_remove_runtime() ! {
+	root := os.join_path(os.vtmp_dir(), 'vraw_rm_rt_${os.getpid()}')
+	defer {
+		os.rmdir_all(root) or {}
+	}
+	p := places(root)
+	os.mkdir_all(os.join_path(p.runtime, 'lib'))!
+	os.write_file(os.join_path(p.runtime, runtime_lib_name), 'x')!
+	os.mkdir_all(p.runtime + '.tmp')!
+	os.write_file(p.runtime + os.file_ext(runtime_file.name), 'x')!
+	os.mkdir_all(p.models)!
+	assert runtime_lib(p) != ''
+	remove_runtime(p)!
+	assert runtime_lib(p) == ''
+	assert !os.exists(p.runtime)
+	assert !os.exists(p.runtime + '.tmp')
+	assert !os.exists(p.runtime + os.file_ext(runtime_file.name))
+	assert os.is_dir(p.models)
+	// Повторно - не ошибка
+	remove_runtime(p)!
+}

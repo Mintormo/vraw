@@ -101,6 +101,7 @@ fn fmt_title(f imgio.Format) string {
 }
 
 const set_path_max = 76 // символов в строке пути (ширина окна минус поля)
+const rt_del_id = 'onnxruntime' // del_armed у ONNX Runtime (не id модели)
 
 fn fmt_mb(bytes i64) string {
 	return i18n.trf('{0} МБ', '${f64(bytes) / 1e6:.0f}')
@@ -299,7 +300,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut dw := &dlg.win
 	state_col := column_width(mut dw, [i18n.tr('установлен'), i18n.tr('нет · 11.0 МБ'), i18n.tr('скачана · 117.0 МБ'),
 		i18n.tr('нет в папке моделей')], 8)
-	btn_col := column_width(mut dw, [i18n.tr('Скачать'), i18n.tr('Удалить'), i18n.tr('Точно?'), i18n.tr('Готов')], 0) +
+	btn_col := column_width(mut dw, [i18n.tr('Скачать'), i18n.tr('Удалить'), i18n.tr('Точно?')], 0) +
 		2 * vgui.measure_pad_x
 	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Масштаб интерфейса'),
 		i18n.tr('Не больше')], 8)
@@ -310,8 +311,16 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	look_w := column_width(mut dw, look_items, 0) +
 		2 * theme_cb.pad + 24
 	mut rt_btn := vgui.button(i18n.tr('Скачать'))
+	// Как у моделей: нет движка - «Скачать», есть - «Удалить» с «Точно?»
 	rt_btn.on_click = fn [mut st, mut app] () {
-		start_download(mut st, mut app, '')
+		if ai.runtime_lib(st.ai_places) == '' {
+			start_download(mut st, mut app, '')
+		} else if st.del_armed == rt_del_id {
+			delete_runtime(mut st)
+		} else {
+			st.del_armed = rt_del_id
+			sync_settings_ui(mut st)
+		}
 	}
 	u.rt_btn = rt_btn
 	mut rt_state := vgui.label('')
@@ -692,8 +701,17 @@ fn sync_settings_ui(mut st State) {
 	mut rs := u.rt_state
 	rs.text = if have_rt { i18n.tr('установлен') } else { i18n.trf('нет · {0}', '${fmt_mb(ai.runtime_file.size)}') }
 	mut rb := u.rt_btn
-	rb.enabled = !have_rt && !busy
-	rb.text = if have_rt { i18n.tr('Готов') } else { i18n.tr('Скачать') }
+	rt_armed := have_rt && st.del_armed == rt_del_id
+	rb.text = if !have_rt {
+		i18n.tr('Скачать')
+	} else if rt_armed {
+		i18n.tr('Точно?')
+	} else {
+		i18n.tr('Удалить')
+	}
+	rb.style = if rt_armed { .danger } else { .normal }
+	// Движок может быть в работе - как у кнопок «Удалить» моделей
+	rb.enabled = !busy && (!have_rt || (isnil(st.ai_prev) && isnil(st.exp)))
 	for r in u.rows {
 		info := ai.find_model_info(r.id) or { continue }
 		ok := info.installed(p)
@@ -761,6 +779,25 @@ fn delete_model(mut st State, info ai.ModelInfo) {
 	if !isnil(st.nm) && !info.installed(st.ai_places) {
 		mut nm := st.nm
 		nm.show_info(i18n.trf('Модель {0} удалена', '${info.title}'))
+	}
+	sync_settings_ui(mut st)
+	sync_ai_ui(mut st)
+}
+
+// delete_runtime - удалить ONNX Runtime (подтверждено вторым нажатием).
+// Загруженная библиотека досчитает до выхода из программы, но новые
+// прогоны AI без движка не начнутся (ai_usable), пока его не скачать.
+fn delete_runtime(mut st State) {
+	st.del_armed = ''
+	ai.remove_runtime(st.ai_places) or {
+		if !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_error(i18n.trf('Не удалось удалить {0}: {1}', 'ONNX Runtime', '${err.msg()}'))
+		}
+	}
+	if !isnil(st.nm) && ai.runtime_lib(st.ai_places) == '' {
+		mut nm := st.nm
+		nm.show_info(i18n.tr('ONNX Runtime удалён'))
 	}
 	sync_settings_ui(mut st)
 	sync_ai_ui(mut st)

@@ -241,6 +241,21 @@ pub fn install_runtime(p Places, progress fn (done i64, total i64) bool) ! {
 	os.mv(tmp, p.runtime)!
 }
 
+// remove_runtime - удалить папку ONNX Runtime (и обрывки установки:
+// временную папку и архив). Уже загруженная библиотека остаётся в памяти
+// до выхода.
+pub fn remove_runtime(p Places) ! {
+	for x in [p.runtime, p.runtime + '.tmp'] {
+		if os.exists(x) {
+			os.rmdir_all(x)!
+		}
+	}
+	arc := p.runtime + os.file_ext(runtime_file.name)
+	if os.exists(arc) {
+		os.rm(arc)!
+	}
+}
+
 // remove_model - удалить файлы модели из папки моделей (и недокачанные
 // .part). Уже загруженная в память модель продолжает работать до выхода.
 pub fn remove_model(p Places, m ModelInfo) ! {
