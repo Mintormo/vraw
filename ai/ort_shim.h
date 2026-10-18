@@ -73,7 +73,7 @@ static void *vr_dlopen(const char *path, char *err, int err_len) {
 		if (code == ERROR_MOD_NOT_FOUND) {
 			// сама библиотека есть (путь проверен в V) - нет её зависимостей
 			snprintf(err, err_len, "не найдены библиотеки, нужные ONNX Runtime: установите "
-				"Microsoft Visual C++ Redistributable (x64) - https://aka.ms/vs/17/release/vc_redist.x64.exe");
+				"Microsoft Visual C++ Redistributable (x64) - https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist");
 		} else {
 			snprintf(err, err_len, "LoadLibrary: ошибка %lu", (unsigned long)code);
 		}
