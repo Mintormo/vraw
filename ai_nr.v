@@ -23,6 +23,7 @@ module main
 //   (raw_gen): превью идёт без AI, блок показывает «Пересчитать AI» и
 //   сброс, один раз - тост. Экспорт с AI считает модель сам.
 // - Экспорт с AI считает модель на полном кадре (~16 мин) в save_worker; его прогресс - в диалоге экспорта (export_ui.v).
+import os
 import time
 import vgui
 import ai
@@ -40,6 +41,7 @@ import i18n
 struct AiCtl {
 mut:
 	cancel bool
+	cached bool // не прогон, а чтение результата с диска (aicache.v)
 	t1     i64 // мс первой готовой плитки, 0 - ещё не было
 	n1     int
 	done   int
@@ -65,6 +67,10 @@ struct AiJob {
 	h        int
 	cache    &ai.Cache = unsafe { nil }
 	ctl      &AiCtl    = unsafe { nil }
+	// Кэш на диске (aicache.v): ключ и файл; from_cache - прочитать, а не считать
+	cache_key  string
+	cache_path string
+	from_cache bool
 }
 
 struct AiResult {
@@ -80,6 +86,10 @@ mut:
 	err       string
 	cancelled bool
 	secs      f64
+	// Кэш (aicache.v): результат прочитан с диска (не записывать снова)
+	cached     bool
+	cache_key  string
+	cache_path string
 }
 
 // AiUi - виджеты блока: четыре состояния в Stack (видно одно) - кнопка,
@@ -211,22 +221,34 @@ fn ai_check(mut st State, mut app vgui.App) {
 		sync_ai_ui(mut st)
 		return
 	}
-	if !st.ai_wanted {
+	// Результат уже есть на диске (aicache.v) - прочитать: и по кнопке, и
+	// у кадра с AI из сайдкара (без кнопки - иначе превью без AI)
+	key := if st.settings.no_ai_cache { '' } else { ai_cache_key(st) }
+	cpath := ai_cache_path(st.raw_path)
+	from_cache := key != '' && (st.ai_wanted || st.edit.ai > 0) && os.is_file(cpath)
+		&& st.ai_cache_bad != cpath
+	if !st.ai_wanted && !from_cache {
 		ai_tell_stale(mut st)
 		sync_ai_ui(mut st)
 		return
 	}
 	id := ai.model.id
-	cache := model_cache(mut st) or {
-		if !isnil(st.nm) {
-			mut nm := st.nm
-			nm.show_error(i18n.trf('AI-шумодав: {0}', '${err.msg()}'))
+	// Модель нужна только для прогона: из кэша читается и без неё
+	mut cache := &ai.Cache(unsafe { nil })
+	if !from_cache {
+		cache = model_cache(mut st) or {
+			if !isnil(st.nm) {
+				mut nm := st.nm
+				nm.show_error(i18n.trf('AI-шумодав: {0}', '${err.msg()}'))
+			}
+			st.ai_wanted = false
+			sync_ai_ui(mut st)
+			return
 		}
-		st.ai_wanted = false
-		sync_ai_ui(mut st)
-		return
 	}
-	ctl := &AiCtl{}
+	ctl := &AiCtl{
+		cached: from_cache
+	}
 	st.ai_prev = ctl
 	st.ai_restart = false
 	job := AiJob{
@@ -242,8 +264,11 @@ fn ai_check(mut st State, mut app vgui.App) {
 		man:      st.edit.lman
 		w:        st.pw
 		h:        st.ph
-		cache:    cache
-		ctl:      ctl
+		cache:      cache
+		ctl:        ctl
+		cache_key:  key
+		cache_path: cpath
+		from_cache: from_cache
 	}
 	st.ai_threads << spawn ai_worker(job, mut app, st.ai_progress, st.ai_done)
 	sync_ai_ui(mut st)
@@ -314,10 +339,21 @@ fn (mut p AiPoster) step(done int, total int) bool {
 fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64), on_done fn (AiResult)) {
 	sw := time.new_stopwatch()
 	mut res := AiResult{
-		ctl:     job.ctl
-		gen:     job.gen
-		raw_gen: job.raw_gen
-		model:   job.model
+		ctl:        job.ctl
+		gen:        job.gen
+		raw_gen:    job.raw_gen
+		model:      job.model
+		cached:     job.from_cache
+		cache_key:  job.cache_key
+		cache_path: job.cache_path
+	}
+	if job.from_cache {
+		ai_cache_load(job, mut res) or { res = AiResult{
+			...res
+			err: err.msg()
+		} }
+		post_result(mut app, on_done, res)
+		return
 	}
 	ai_full_run(job, mut app, on_progress, mut res) or {
 		res = AiResult{
@@ -331,6 +367,15 @@ fn ai_worker(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f64)
 		secs: f64(sw.elapsed().milliseconds()) / 1000
 	}
 	post_result(mut app, on_done, res)
+}
+
+// ai_cache_load - результат с диска: полный кадр и копия под превью
+fn ai_cache_load(job AiJob, mut res AiResult) ! {
+	full, fw, fh := ai_cache_read(job.cache_path, job.cache_key)!
+	res.out = half_of(full, fw, fh, job.w, job.h)
+	res.full = full
+	res.fw = fw
+	res.fh = fh
 }
 
 // ai_full_run - сам прогон: результат - в res (out, full, fw, fh)
@@ -422,6 +467,14 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 		sync_ai_ui(mut st)
 		return
 	}
+	if res.err.len > 0 && res.cached {
+		// Кэш не прочитался (испорчен, от другой версии) - забыть его и, если
+		// просили кнопкой, посчитать заново
+		st.ai_cache_bad = res.cache_path
+		os.rm(res.cache_path) or {}
+		ai_check(mut st, mut app)
+		return
+	}
 	if res.err.len > 0 {
 		st.ai_wanted = false
 		if !isnil(st.nm) {
@@ -442,13 +495,23 @@ fn ai_take(mut st State, mut app vgui.App, res AiResult) {
 	st.ai_full = res.full
 	st.ai_fw = res.fw
 	st.ai_fh = res.fh
+	// Посчитанное - на диск в фоне (aicache.v), чтобы в следующий раз не ждать
+	if !res.cached && res.cache_key != '' && !st.settings.no_ai_cache {
+		st.ai_cache_bad = ''
+		st.ai_threads << spawn ai_cache_save(res.cache_path, res.cache_key, share(st.ai_full),
+			res.fw, res.fh)
+	}
 	st.ai_raw_gen = res.raw_gen
 	st.ai_lin_model = res.model
 	if st.ai_wanted {
 		ai_turn_on(mut st, mut app)
 		if !isnil(st.nm) {
 			mut nm := st.nm
-			nm.show_success(i18n.trf('AI-шумодав готов ({0} с)', '${res.secs:.0f}'))
+			if res.cached {
+				nm.show_success(i18n.tr('AI-шумодав: результат взят из кэша'))
+			} else {
+				nm.show_success(i18n.trf('AI-шумодав готов ({0} с)', '${res.secs:.0f}'))
+			}
 		}
 	} else if prep_stale(st) {
 		request_prep(mut st, mut app, false)
@@ -537,7 +600,11 @@ fn sync_ai_ui(mut st State) {
 	u.stale.visible = stale
 	u.idle.visible = !running && !applied && !stale
 	if running {
-		if ctl.total == 0 {
+		if ctl.cached {
+			u.bar.set_value(0)
+			u.pct.text = ''
+			u.status.text = i18n.tr('Чтение результата из кэша...')
+		} else if ctl.total == 0 {
 			u.bar.set_value(0)
 			u.pct.text = ''
 			u.status.text = i18n.tr('Полный кадр · подготовка...')

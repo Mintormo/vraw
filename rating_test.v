@@ -359,3 +359,33 @@ fn test_key_watch() {
 	k.handle_event(&vgui.GuiEvent{ typ: .window_focus_lost }, app)
 	assert !st.ba_hold
 }
+
+// Удаление отклонённых: какие кадры и куда перейти, если ушёл открытый
+fn test_rejected_and_after_trash() {
+	fr := [Frame{
+		path: 'a'
+	}, Frame{
+		path: 'b'
+		mark: Mark{
+			flag: -1
+		}
+	}, Frame{
+		path: 'c'
+		mark: Mark{
+			flag: -1
+		}
+	}, Frame{
+		path: 'd'
+		mark: Mark{
+			flag: 1
+		}
+	}]
+	gone := rejected_paths(fr)
+	assert gone == ['b', 'c']
+	// Открыт b - следующий оставшийся после него: d
+	assert after_trash(fr, 1, gone) == 'd'
+	// Открыт последний ушедший без оставшихся после - ближайший до него
+	assert after_trash(fr[..3], 2, gone) == 'a'
+	// Ушли все
+	assert after_trash(fr[1..3], 0, gone) == ''
+}

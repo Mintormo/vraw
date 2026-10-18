@@ -23,6 +23,10 @@ mut:
 	scale_sp &vgui.Spinbox     = unsafe { nil } // свой, %
 	cache_ck &vgui.CheckBox    = unsafe { nil }
 	cache_cb &vgui.ComboBox    = unsafe { nil }
+	aicache_ck &vgui.CheckBox = unsafe { nil } // кэш AI на диске (aicache.v)
+	// сколько помнить недавних файлов и папок (recent.v)
+	rfiles_cb &vgui.ComboBox = unsafe { nil }
+	rdirs_cb  &vgui.ComboBox = unsafe { nil }
 	notes    []&vgui.Label // вторичные подписи - цвет по теме
 	// Интерфейс (panel.v): панель, её сторона, лента, разделы панели
 	panel_ck &vgui.CheckBox = unsafe { nil }
@@ -248,12 +252,36 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		}
 	}
 	u.cache_cb = cache_cb
+	// Кэш результата AI рядом со снимками (aicache.v)
+	mut aicache_ck := vgui.checkbox(i18n.tr('Хранить результат AI-шумодава рядом со снимками'))
+	aicache_ck.on_change = fn [mut st] (v bool) {
+		st.settings.no_ai_cache = !v
+		save_settings(st.settings)
+	}
+	u.aicache_ck = aicache_ck
+	// Недавние: сколько помнить (лишнее с конца - сразу)
+	mut rfiles_cb := vgui.combo_box()
+	rfiles_cb.set_items(recent_counts.map('${it}'))
+	rfiles_cb.on_change = fn [mut st] (i int, _ string) {
+		if i >= 0 && i < recent_counts.len {
+			set_recent_limit(mut st, false, recent_counts[i])
+		}
+	}
+	u.rfiles_cb = rfiles_cb
+	mut rdirs_cb := vgui.combo_box()
+	rdirs_cb.set_items(recent_counts.map('${it}'))
+	rdirs_cb.on_change = fn [mut st] (i int, _ string) {
+		if i >= 0 && i < recent_counts.len {
+			set_recent_limit(mut st, true, recent_counts[i])
+		}
+	}
+	u.rdirs_cb = rdirs_cb
 
 	// Колонки - по самым длинным текстам (шрифтом окна)
 	mut dw := &dlg.win
 	btn_col := column_width(mut dw, [i18n.tr('Закрыть')], 0) + 2 * vgui.measure_pad_x
 	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Масштаб интерфейса'),
-		i18n.tr('Не больше')], 8)
+		i18n.tr('Не больше'), i18n.tr('Файлов'), i18n.tr('Папок')], 8)
 	// Списки оформления - одной ширины, по самому длинному пункту обоих
 	// (24 - стрелка ComboBox, как в его measure)
 	mut look_items := i18n.tr_all(theme_names)
@@ -281,6 +309,13 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	general.add(cache_ck)
 	general.add(labeled(i18n.tr('Не больше'), cache_cb, look_col, look_w))
 	general.add(note(mut u, i18n.tr('Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)')))
+	general.add(aicache_ck)
+	general.add(note(mut u, i18n.tr('Папка .vraw-cache рядом с RAW, ~145 МБ на кадр 24 Мп: повторный AI - за секунду вместо ~16 минут')))
+
+	general.add(caption(i18n.tr('Недавние')))
+	general.add(labeled(i18n.tr('Файлов'), rfiles_cb, look_col, look_w))
+	general.add(labeled(i18n.tr('Папок'), rdirs_cb, look_col, look_w))
+	general.add(note(mut u, i18n.tr('Сколько помнить в меню «Файл - Недавние файлы» и «Недавние папки»')))
 
 	// ── Вкладка «Интерфейс» ──
 	iface, secs := build_iface_tab(mut st, mut u, mut dw)
@@ -538,6 +573,12 @@ fn sync_settings_ui(mut st State) {
 	ci := frame_cache_mbs.index(mb)
 	ccb.set_selected(if ci >= 0 { ci } else { frame_cache_mbs.index(frame_cache_mb_default) })
 	ccb.enabled = ck.checked
+	mut ack := u.aicache_ck
+	ack.checked = !st.settings.no_ai_cache
+	mut rf := u.rfiles_cb
+	rf.set_selected(recent_counts.index(recent_limit(st.settings.recent_files_n)))
+	mut rd := u.rdirs_cb
+	rd.set_selected(recent_counts.index(recent_limit(st.settings.recent_dirs_n)))
 	sync_iface(mut u, st.settings)
 	sync_hotkeys_ui(mut u, st)
 	sync_hk_texts(mut u, st)

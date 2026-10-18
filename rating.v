@@ -272,3 +272,47 @@ fn draw_thumb_marks(mut ctx vgui.RenderContext, cv &vgui.Canvas, m Mark) {
 		}
 	}
 }
+
+// rejected_paths - кадры папки с флажком «отклонён» (все, не только
+// прошедшие фильтр ленты)
+fn rejected_paths(frames []Frame) []string {
+	return frames.filter(it.mark.flag < 0).map(it.path)
+}
+
+// after_trash - какой кадр открыть, если открытый уходит в корзину:
+// ближайший оставшийся после него, иначе до него ('' - не осталось)
+fn after_trash(frames []Frame, cur int, gone []string) string {
+	for i in cur + 1 .. frames.len {
+		if frames[i].path !in gone {
+			return frames[i].path
+		}
+	}
+	for i := cur - 1; i >= 0; i-- {
+		if frames[i].path !in gone {
+			return frames[i].path
+		}
+	}
+	return ''
+}
+
+// trash_frames - RAW-файлы и их сайдкары - в корзину (trash_*.c.v);
+// итог - сколько кадров ушло и ошибки по кадрам. Не ушёл RAW - его сайдкар
+// остаётся (правки при нём).
+fn trash_frames(paths []string) (int, []string) {
+	mut n := 0
+	mut errs := []string{}
+	for p in paths {
+		move_to_trash(p) or {
+			errs << '${os.file_name(p)}: ${err.msg()}'
+			continue
+		}
+		n++
+		// Кэш AI кадра (aicache.v) - не данные пользователя: просто удалить
+		os.rm(ai_cache_path(p)) or {}
+		side := sidecar_path(p)
+		if os.exists(side) {
+			move_to_trash(side) or { errs << '${os.file_name(side)}: ${err.msg()}' }
+		}
+	}
+	return n, errs
+}

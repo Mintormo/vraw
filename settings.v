@@ -27,6 +27,18 @@ mut:
 	// frame_cache_mb_default)
 	no_frame_cache bool
 	frame_cache_mb int
+	// Поверх снимка (отрицание - в старом файле поля нет, показ включён):
+	// сведения о съёмке (shotinfo.v) и миникарта при увеличении (navigator)
+	no_info      bool
+	no_navigator bool
+	// Кэш результата AI-шумодава в .vraw-cache папки снимков (aicache.v)
+	no_ai_cache bool
+	// Недавние файлы и папки (recent.v), новые - первыми
+	recent_files []string
+	recent_dirs  []string
+	// сколько их помнить (recent_counts; 0 - recent_default)
+	recent_files_n int
+	recent_dirs_n  int
 	// формат экспорта (ключ imgio.Format.key) - последний выбранный
 	export_format string = 'jpeg'
 	// качество JPEG при экспорте (jpeg_q_min..100)
@@ -200,6 +212,13 @@ fn settings_from(s Settings) Settings {
 		hotkeys:      s.hotkeys.filter(it.contains('='))
 		panel_w:      if s.panel_w >= int(panel_min_w) && s.panel_w <= 10000 { s.panel_w } else { 0 }
 		no_frame_cache: s.no_frame_cache
+		no_info:        s.no_info
+		no_navigator:   s.no_navigator
+		no_ai_cache:    s.no_ai_cache
+		recent_files:   s.recent_files.filter(it != '')#[..recent_limit(s.recent_files_n)].clone()
+		recent_dirs:    s.recent_dirs.filter(it != '')#[..recent_limit(s.recent_dirs_n)].clone()
+		recent_files_n: if s.recent_files_n in recent_counts { s.recent_files_n } else { 0 }
+		recent_dirs_n:  if s.recent_dirs_n in recent_counts { s.recent_dirs_n } else { 0 }
 		frame_cache_mb: if s.frame_cache_mb in frame_cache_mbs { s.frame_cache_mb } else { 0 }
 		// нет в файле (настройки старой версии) или вне диапазона - по умолчанию
 		jpeg_quality: if s.jpeg_quality >= jpeg_q_min && s.jpeg_quality <= 100 {

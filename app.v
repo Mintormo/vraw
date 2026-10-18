@@ -192,6 +192,7 @@ mut:
 	ai_cache    &ai.Cache = unsafe { nil } // модель AI (ai_nr.v), при первой надобности
 	ai_linear   []u16 // результат модели под превью (уменьшенный ai_full)
 	ai_full     []u16 // результат модели по полному кадру ai_fw x ai_fh (1:1, экспорт)
+	ai_cache_bad string // файл кэша AI, который не прочитался (не пробовать снова)
 	ai_fw       int
 	ai_fh       int
 	ai_raw_gen  int
@@ -211,6 +212,11 @@ mut:
 	// нет), его потоки и приёмники в главном потоке
 	sui           &SettingsUi = unsafe { nil }
 	open_settings fn ()       = unsafe { nil }
+	// Открыть файл и папку - для меню недавних (recent.v)
+	open_path        fn (string)     = unsafe { nil }
+	open_dir         fn (string)     = unsafe { nil }
+	m_recent_files   &vgui.MenuItem = unsafe { nil }
+	m_recent_dirs    &vgui.MenuItem = unsafe { nil }
 	// Экспорт (export_ui.v): идущий (nil - нет), его диалог и приёмник
 	// прогресса в главном потоке
 	exp          &ExportCtl = unsafe { nil }
@@ -1620,6 +1626,8 @@ fn main() {
 	// Холсту нужна только мышь: клавиши в фокусе не забирает - иначе после
 	// щелчка по снимку не работали бы меню (J) и ←/→ ленты
 	cv.take_keys = false
+	// Миникарта при увеличении (vgui Canvas.navigator), «Вид - Миникарта»
+	cv.navigator = !st.settings.no_navigator
 	// Рамка кадрирования, ручки и сетка - поверх снимка, без пересчёта
 	cv.on_overlay = fn [mut st] (mut ctx vgui.RenderContext) {
 		crop_overlay(mut st, mut ctx)
@@ -1628,6 +1636,7 @@ fn main() {
 		ba_overlay(mut st, mut ctx) // шторка до/после
 		pair_overlay(st, mut ctx) // подпись открытого при сравнении кадров
 		jpeg_overlay(st, mut ctx) // подпись «JPEG камеры»
+		info_overlay(st, mut ctx) // сведения о съёмке (shotinfo.v)
 		sbs_sync(mut st, false) // бок о бок: зум и прокрутка - холсту «до»
 		detail_watch(mut st) // настоящий 1:1: изменился вид - фрагмент
 	}
@@ -2400,6 +2409,7 @@ fn main() {
 			nm.show_error(i18n.trf('Ошибка: {0}', '${err.msg()}'))
 			return
 		}
+		add_recent(mut st, path, false)
 		// Открывают левый кадр сравнения - левым станет уходящий (pair.v)
 		pair_before_open(mut st, path)
 		// Предзагрузка соседа (prefetch.v): открывают его - её итог и
@@ -2765,11 +2775,72 @@ fn main() {
 	open_folder := fn [mut st, mut app, mut nm, close_file] (dir string) {
 		close_file()
 		load_folder(mut st, os.real_path(dir), '', mut app)
+		add_recent(mut st, os.real_path(dir), true)
 		sync_strip(mut st)
 		mut ph := st.holder
 		set_placeholder_text(mut ph, st.frames.len > 0)
 		if st.frames.len == 0 {
 			nm.show_warning(i18n.tr('В папке нет RAW-файлов'))
+		}
+	}
+	// Удалить отклонённые (rating.v): RAW и сайдкары - в корзину (вернуть
+	// можно файловым менеджером), лента - заново; открытый кадр ушёл -
+	// открывается ближайший оставшийся. Файлы читают воркеры (миниатюры,
+	// предзагрузка, экспорт) - на Windows открытый файл не удалить, поэтому
+	// во время экспорта нельзя, остальное останавливается.
+	delete_rejected := fn [mut st, mut app, mut nm, close_file, open_file, win] () {
+		if st.folder == '' {
+			return
+		}
+		if !isnil(st.exp) {
+			nm.show_warning(i18n.tr('Дождитесь конца экспорта'))
+			return
+		}
+		gone := rejected_paths(st.frames)
+		if gone.len == 0 {
+			nm.show_info(i18n.tr('Отклонённых кадров в папке нет'))
+			return
+		}
+		answer := vgui.message_box(win, mut app, vgui.MessageBoxConfig{
+			title:          i18n.tr('Удалить отклонённые')
+			message:        i18n.trf('Переместить в корзину отклонённые кадры ({0})? RAW-файлы и их правки можно будет вернуть из корзины.',
+				'${gone.len}')
+			kind:           .warning
+			buttons:        [i18n.tr('В корзину'), i18n.tr('Отмена')]
+			default_button: 1
+			cancel_button:  1
+		})
+		if answer != 0 {
+			return
+		}
+		cur := st.raw_path
+		mut next := cur
+		if cur in gone {
+			next = after_trash(st.frames, st.frame_idx, gone)
+			close_file()
+		}
+		prefetch_cancel(mut st)
+		stop_thumbs(mut st)
+		wait_thumbs(mut st)
+		for p in gone {
+			frame_drop(mut st, p)
+		}
+		n, errs := trash_frames(gone)
+		load_folder(mut st, st.folder, next, mut app)
+		if next != '' && next != st.raw_path {
+			open_file(next)
+		} else {
+			show_frame(mut st, next, mut app)
+		}
+		if st.frames.len == 0 {
+			mut ph := st.holder
+			set_placeholder_text(mut ph, false)
+		}
+		if errs.len > 0 {
+			nm.show_error(i18n.trf('Не всё удалось переместить в корзину: {0}', errs.join('; ')))
+		}
+		if n > 0 {
+			nm.show_success(i18n.trf('В корзине: {0}', '${n} ${i18n.pl(n, 'кадр|кадра|кадров')}'))
 		}
 	}
 	open_folder_dialog := fn [mut app, win, open_folder] () {
@@ -2999,8 +3070,16 @@ fn main() {
 	m_quit.on_click = fn [mut app] () {
 		app.quit()
 	}
-	bar.add_menu(i18n.tr('Файл'), [m_open, m_open_dir, vgui.menu_separator(), m_export,
-		vgui.menu_separator(), m_quit])
+	// Недавние (recent.v): пункты подменю собирает rebuild_recent_menus
+	m_recent_files := vgui.menu_submenu(i18n.tr('Недавние файлы'))
+	m_recent_dirs := vgui.menu_submenu(i18n.tr('Недавние папки'))
+	st.m_recent_files = m_recent_files
+	st.m_recent_dirs = m_recent_dirs
+	st.open_path = open_file
+	st.open_dir = open_folder
+	rebuild_recent_menus(mut st)
+	bar.add_menu(i18n.tr('Файл'), [m_open, m_open_dir, m_recent_files, m_recent_dirs,
+		vgui.menu_separator(), m_export, vgui.menu_separator(), m_quit])
 	// Горячие клавиши - настраиваемые (hotkeys.v): ключи постоянные, по
 	// умолчанию - сочетания, заданные пунктам выше
 	hk_add(mut st, 'file.open', 'Файл', mut m_open)
@@ -3195,10 +3274,19 @@ fn main() {
 	}
 	avail_add(mut st, .target, pick_items.filter(it.kind != .separator))
 	pick_items << m_advance
+	pick_items << vgui.menu_separator()
+	// Как в Lightroom: Ctrl+Backspace
+	mut m_del_rej := vgui.menu_action(i18n.tr('Удалить отклонённые...'))
+	m_del_rej.shortcut = 'Ctrl+Backspace'
+	m_del_rej.on_click = fn [delete_rejected] () {
+		delete_rejected()
+	}
+	pick_items << m_del_rej
+	avail_add(mut st, .frames, [m_del_rej])
 	bar.add_menu(i18n.tr('Отбор'), pick_items)
 	pick_ids := ['pick.rate0', 'pick.rate1', 'pick.rate2', 'pick.rate3', 'pick.rate4',
 		'pick.rate5', '', 'pick.flag_pick', 'pick.flag_reject', 'pick.flag_none', '',
-		'pick.advance']
+		'pick.advance', '', 'pick.del_rejected']
 	for i, id in pick_ids {
 		if id.len > 0 {
 			mut it := pick_items[i]
@@ -3310,6 +3398,22 @@ fn main() {
 		set_mask_show(mut st, v)
 	}
 	st.mask_ui.m_show = m_mask
+	// Миникарта при увеличении (vgui): весь снимок и рамка видимого,
+	// щелчок по ней - вид туда
+	mut m_nav := vgui.menu_checkbox(i18n.tr('Миникарта'), !st.settings.no_navigator)
+	m_nav.shortcut = 'N'
+	m_nav.on_toggle = fn [mut st, mut cv] (v bool) {
+		st.settings.no_navigator = !v
+		save_settings(st.settings)
+		cv.navigator = v
+		cv.mark_dirty()
+	}
+	// Сведения о съёмке поверх снимка (shotinfo.v), как I в Lightroom
+	mut m_info := vgui.menu_checkbox(i18n.tr('Сведения о съёмке'), !st.settings.no_info)
+	m_info.shortcut = 'I'
+	m_info.on_toggle = fn [mut st] (v bool) {
+		set_show_info(mut st, v)
+	}
 	// Фон вокруг снимка: пункты-флажки, работают как переключатель
 	// (отмечен ровно один - set_viewer_bg)
 	mut m_bg := vgui.menu_submenu(i18n.tr('Фон вокруг снимка'))
@@ -3332,12 +3436,12 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu(i18n.tr('Вид'), [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, vgui.menu_separator(), m_full, m_strip, m_top, m_panel, m_left, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_top, m_panel, m_left, m_bg, m_themes])
 	view_ids := ['view.fit', 'view.z50', 'view.z100', 'view.z200', 'view.zoom', 'view.split',
-		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.full',
+		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.info', 'view.nav', 'view.full',
 		'view.strip', 'view.top', 'view.panel', 'view.left']
 	view_items := [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_pair, m_swap, m_jpeg,
-		m_clipwarn, m_mask, m_full, m_strip, m_top, m_panel, m_left]
+		m_clipwarn, m_mask, m_info, m_nav, m_full, m_strip, m_top, m_panel, m_left]
 	for i, id in view_ids {
 		mut it := view_items[i]
 		hk_add(mut st, id, 'Вид', mut it)
