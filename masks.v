@@ -1245,6 +1245,10 @@ fn sync_mask_ui(mut st State) {
 	if !isnil(u.del_btn) {
 		u.del_btn.enabled = valid
 	}
+	// Заливка - только у выделенного фильтра: без него флажку нечего прятать
+	if !isnil(u.show_cb) {
+		u.show_cb.enabled = valid
+	}
 	if !isnil(u.done_btn) {
 		u.done_btn.enabled = valid
 	}
