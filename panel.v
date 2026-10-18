@@ -10,8 +10,8 @@ module main
 import vgui
 import i18n
 
-// PanelSection - раздел панели: ключ в настройках, заголовок. Раскрытые
-// разделы запоминаются (настройка panel_open), по умолчанию все свёрнуты.
+// PanelSection - раздел панели: ключ в настройках, заголовок. При запуске
+// все разделы свёрнуты (раскрытость не запоминается).
 struct PanelSection {
 	key   string
 	title string
@@ -135,7 +135,7 @@ fn panel_add(mut st State, key string, w &vgui.Widget) {
 	}
 	if st.sec_w.len == 0 {
 		st.sec_w = []&vgui.Widget{len: panel_sections.len, init: unsafe { nil }}
-		st.sec_open = panel_sections.map(it.key in st.settings.panel_open)
+		st.sec_open = []bool{len: panel_sections.len}
 	}
 	st.sec_w[i] = unsafe { w }
 }
@@ -353,21 +353,6 @@ fn set_strip_visible(mut st State, fs bool, v bool) {
 	save_settings(st.settings)
 	layout_strip(mut st)
 	sync_settings_ui(mut st)
-}
-
-// panel_toggled - раздел idx (по видимым секциям) раскрыт или свёрнут
-// щелчком: запомнить в настройках
-fn panel_toggled(mut st State, idx int, open bool) {
-	if idx < 0 || idx >= st.panel_keys.len {
-		return
-	}
-	k := panel_section_index(st.panel_keys[idx])
-	if k < 0 {
-		return
-	}
-	st.sec_open[k] = open
-	st.settings.panel_open = panel_sections.filter(st.sec_open[panel_section_index(it.key)]).map(it.key)
-	save_settings(st.settings)
 }
 
 // set_panel_sections - новый порядок и скрытые разделы (окно настроек)

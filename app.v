@@ -3592,11 +3592,9 @@ fn main() {
 	panel_add(mut st, 'grade', grade_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'masks', section(mask_rows))
 	panel_add(mut st, 'spots', section(spot_rows))
-	// Раскрытость секций запоминается в настройках; раскрытая «Градиентные
-	// фильтры» показывает метки всех фильтров на снимке (индекс секции -
-	// layout_panel)
+	// Раскрытая секция «Градиентные фильтры» показывает метки всех
+	// фильтров на снимке (индекс секции - layout_panel)
 	acc.on_change = fn [mut st] (idx int, open bool) {
-		panel_toggled(mut st, idx, open)
 		if !isnil(st.mask_ui) && idx == st.mask_ui.acc_idx {
 			mask_redraw(st)
 		}
