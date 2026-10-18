@@ -18,7 +18,7 @@ O arquivo mais recente está em [Releases](../../releases/latest):
   recente (Ubuntu 24.04, Linux Mint 22, Fedora e Arch recentes).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Descompactar e executar
   `vraw.exe`. A redução de ruído com IA precisa do
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   A versão para Windows é experimental: até agora testada no Wine.
 
 As configurações, as predefinições e o modelo de IA ficam ao lado do

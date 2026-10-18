@@ -18,7 +18,7 @@ Get the latest archive from [Releases](../../releases/latest):
   recent Fedora and Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Unpack and run `vraw.exe`.
   The AI denoiser needs the
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   The Windows build is experimental: so far it has been tested under Wine.
 
 Settings, presets and the AI model are kept next to the program, so the

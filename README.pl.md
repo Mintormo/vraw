@@ -18,7 +18,7 @@ Najnowsze archiwum jest w [Releases](../../releases/latest):
   (Ubuntu 24.04, Linux Mint 22, aktualne Fedora i Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Rozpakować i uruchomić
   `vraw.exe`. Odszumianie AI wymaga pakietu
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   Wersja dla Windows jest eksperymentalna: na razie testowana pod Wine.
 
 Ustawienia, presety i model AI leżą obok programu, więc folder może

@@ -18,7 +18,7 @@ La dernière archive se trouve dans [Releases](../../releases/latest) :
   (Ubuntu 24.04, Linux Mint 22, Fedora et Arch récents).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Décompresser et lancer
   `vraw.exe`. Le débruitage IA nécessite le
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   La version Windows est expérimentale : testée pour l'instant sous Wine.
 
 Les réglages, les préréglages et le modèle IA sont rangés à côté du

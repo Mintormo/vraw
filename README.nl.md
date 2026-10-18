@@ -18,7 +18,7 @@ Het nieuwste archief staat bij [Releases](../../releases/latest):
   Linux Mint 22, recente Fedora en Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Uitpakken en `vraw.exe`
   starten. De AI-ruisonderdrukking heeft het
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
   nodig. De Windows-versie is experimenteel: tot nu toe getest onder Wine.
 
 Instellingen, voorinstellingen en het AI-model staan naast het programma,

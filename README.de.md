@@ -18,7 +18,7 @@ Das aktuelle Archiv gibt es unter [Releases](../../releases/latest):
   Linux Mint 22, aktuelle Fedora und Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Entpacken und `vraw.exe`
   starten. Die KI-Rauschentfernung benötigt das
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   Die Windows-Version ist experimentell: bisher nur unter Wine getestet.
 
 Einstellungen, Presets und das KI-Modell liegen neben dem Programm – der

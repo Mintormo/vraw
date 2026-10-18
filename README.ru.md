@@ -18,7 +18,7 @@
   Linux Mint 22, свежие Fedora и Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Распаковать и запустить
   `vraw.exe`. Для AI-шумодава нужен
-  [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   Сборка для Windows экспериментальная: пока проверена под Wine.
 
 Настройки, пресеты и модель AI лежат рядом с программой — папку можно
