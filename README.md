@@ -1,6 +1,6 @@
 # vraw
 
-**English** | [Русский](README.ru.md)
+**English** | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
 
 A free RAW photo developer for Linux and Windows. Opens Canon CR3 and
 every other format LibRaw understands, lets you edit non-destructively

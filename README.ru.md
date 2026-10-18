@@ -1,6 +1,6 @@
 # vraw
 
-[English](README.md) | **Русский**
+[English](README.md) | **Русский** | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
 
 Бесплатный проявщик RAW для Linux и Windows. Открывает Canon CR3 и все
 форматы, которые понимает LibRaw, позволяет править снимок без потерь
