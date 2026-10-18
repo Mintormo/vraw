@@ -532,6 +532,24 @@ fn render_side(st &State, side int, view pipeline.SharpView) []u8 {
 		with_fxmap(with_lmap(st.edit.params, mm), fm), view)
 }
 
+// frag_mask_paint - заливка маски выделенного фильтра поверх фрагмента
+// «после» (RGBA r.w x r.h; mask_paint превью под слоем фрагмента не видна)
+fn frag_mask_paint(st &State, mut pix []u8) {
+	if !st.mask_show || !mask_active(st) {
+		return
+	}
+	fr := st.dt.frag[side_after]
+	if fr.lin.len != fr.r.w * fr.r.h * 3 || pix.len != fr.r.w * fr.r.h * 4 {
+		return
+	}
+	mm := pipeline.mask_map(out_geom(&st.edit), st.pw, st.ph, true, fr.ow, fr.oh).region(fr.r.x,
+		fr.r.y, fr.r.w)
+	hz := pipeline.haze_region(&st.haze, fr.ow, fr.oh, fr.r)
+	wt := pipeline.mask_view(unsafe { &u16(fr.lin.data) }, &hz, fr.r.w, fr.r.h, with_lmap(st.edit.params,
+		mm), st.mask_sel)
+	pipeline.mask_fill(wt, mut pix, 4, fr.r.w, fr.r.h, mask_fill_a)
+}
+
 // with_fxmap - параметры с местом буфера в кадре для эффектов (копия, как
 // with_lmap)
 fn with_fxmap(p pipeline.Params, fm pipeline.FxMap) pipeline.Params {
@@ -609,6 +627,7 @@ fn detail_show(mut st State) {
 	mut pix := render_side(st, side_after, view)
 	if view == .off {
 		mark_clipping(mut pix, st.clip_hi, st.clip_lo)
+		frag_mask_paint(st, mut pix) // заливка маски фильтра, как у превью
 	}
 	if ba && st.ba_split {
 		// Шторка: без «до» на том же месте слоя нет (видно превью со

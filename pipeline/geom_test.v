@@ -52,6 +52,27 @@ fn test_geom_crop_fractions() {
 	assert fw == 10 && fh == 8
 }
 
+// Пропорция без своей рамки: у рамки на весь кадр выход - весь кадр (как
+// у копии is_noop; раньше 4:5 на кадре 3:2 давала выход выше кадра и
+// фрагмент 1:1 читал за сырьём - падение); у рамки - высота по ширине
+fn test_geom_out_size_aspect() {
+	full := Geom{
+		aspect: 0.8
+	}
+	assert full.is_noop(true)
+	ow, oh := full.out_size(6000, 4000, true)
+	assert ow == 6000 && oh == 4000
+	box := Geom{
+		x0:     0.1
+		y0:     0.1
+		x1:     0.4333
+		y1:     0.6
+		aspect: 1
+	}
+	bw, bh := box.out_size(6000, 4000, true)
+	assert bw == 2000 && bh == 2000
+}
+
 // Поворот на 90° против часовой у квадрата = три четверти по часовой
 fn test_geom_angle_direction() {
 	src := plane(4, 4)

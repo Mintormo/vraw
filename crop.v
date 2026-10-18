@@ -70,6 +70,8 @@ mut:
 	aw          &vgui.Spinbox  = unsafe { nil }
 	ah          &vgui.Spinbox  = unsafe { nil }
 	c_row       &vgui.HBox     = unsafe { nil } // «Своя w : h», только при своей пропорции
+	a_row       &vgui.HBox     = unsafe { nil } // пропорция и ориентация - только в режиме
+	g_row       &vgui.HBox     = unsafe { nil } // сетка - только в режиме
 	total       &vgui.Label    = unsafe { nil }
 	grid_cb     &vgui.ComboBox = unsafe { nil }
 	horizon_btn &vgui.Button   = unsafe { nil }
@@ -497,8 +499,11 @@ fn crop_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 	my := f64(ev.fy)
 	match ev.kind {
 		.hover {
+			// Курсор рамки - событие забрано (иначе сброс курсора в
+			// cv.on_input поставит поверх стрелку)
 			vgui.set_cursor(hit_cursor(crop_hit(st, sx, sy), st.horizon || st.persp_tool,
 				ev.ctrl))
+			return true
 		}
 		.leave {
 			vgui.set_cursor(vgui.sdl_system_cursor_default)
@@ -903,7 +908,12 @@ fn sync_crop_ui(mut st State) {
 	mut ah := u.ah
 	aw.set_value(e.crop_aw)
 	ah.set_value(e.crop_ah)
-	set_enabled(u.c_row, e.crop_aspect == 'custom')
+	// Рамка (пропорция, своя, сетка) - только в режиме кадрирования: вне
+	// него её не видно, и смена пропорции молча меняла кадр. Угол,
+	// перспектива и повороты - всегда (как «Трансформация» в Lightroom)
+	set_enabled(u.a_row, st.crop_mode)
+	set_enabled(u.c_row, st.crop_mode && e.crop_aspect == 'custom')
+	set_enabled(u.g_row, st.crop_mode)
 	if !isnil(u.angle_sl) {
 		mut asl := u.angle_sl
 		asl.set_value(e.geom.angle) // под suppress: подпись и снимок, без пересчёта
@@ -1017,6 +1027,7 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	a_row.add(a_lb, min: lbl_w)
 	a_row.add(acb, flex: 1)
 	a_row.add(orient)
+	u.a_row = a_row
 
 	// Своя пропорция W : H
 	mut aw := vgui.spinbox()
@@ -1210,6 +1221,11 @@ fn build_crop_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	g_row.add(g_lb, min: lbl_w)
 	g_row.add(gcb, flex: 1)
 	g_row.add(icon_slot(), min: icon_slot_w)
+	u.g_row = g_row
+	// Вне режима кадрирования рамка не правится (sync_crop_ui)
+	set_enabled(a_row, false)
+	set_enabled(c_row, false)
+	set_enabled(g_row, false)
 
 	// Автоперспектива (как Upright): кнопки режимов
 	mut up_row := vgui.create_hbox_fill()

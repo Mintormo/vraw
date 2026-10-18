@@ -10,35 +10,34 @@ module main
 import vgui
 import i18n
 
-// PanelSection - раздел панели: ключ в настройках, заголовок, открыт ли
-// при старте
+// PanelSection - раздел панели: ключ в настройках, заголовок. Раскрытые
+// разделы запоминаются (настройка panel_open), по умолчанию все свёрнуты.
 struct PanelSection {
 	key   string
 	title string
-	open  bool
 }
 
 // panel_sections - все разделы в порядке по умолчанию. Новый раздел -
 // сюда: в старых настройках его нет, panel_order_from поставит его на
 // место по умолчанию.
 const panel_sections = [
-	PanelSection{'lens', 'Коррекция', true},
-	PanelSection{'crop', 'Кадрирование и поворот', false},
-	PanelSection{'spots', 'Удаление пятен', false},
-	PanelSection{'wb', 'Баланс белого', true},
-	PanelSection{'tone', 'Экспозиция и тон', true},
-	PanelSection{'haze', 'Удаление дымки', false},
-	PanelSection{'shadows', 'Тени/Света', false},
-	PanelSection{'eq', 'Тон-эквалайзер (EV)', false},
-	PanelSection{'curves', 'Кривые', false},
-	PanelSection{'hsl', 'HSL', false},
-	PanelSection{'bw', 'Чёрно-белое', false},
-	PanelSection{'grade', 'Цветокоррекция', false},
-	PanelSection{'masks', 'Градиентные фильтры', false},
-	PanelSection{'nr', 'Шумодав и ореолы', false},
-	PanelSection{'sharp', 'Резкость', false},
-	PanelSection{'fx', 'Эффекты', false},
-	PanelSection{'history', 'История', true},
+	PanelSection{'lens', 'Коррекция'},
+	PanelSection{'crop', 'Кадрирование и поворот'},
+	PanelSection{'spots', 'Удаление пятен'},
+	PanelSection{'wb', 'Баланс белого'},
+	PanelSection{'tone', 'Экспозиция и тон'},
+	PanelSection{'haze', 'Удаление дымки'},
+	PanelSection{'shadows', 'Тени/Света'},
+	PanelSection{'eq', 'Тон-эквалайзер (EV)'},
+	PanelSection{'curves', 'Кривые'},
+	PanelSection{'hsl', 'HSL'},
+	PanelSection{'bw', 'Чёрно-белое'},
+	PanelSection{'grade', 'Цветокоррекция'},
+	PanelSection{'masks', 'Градиентные фильтры'},
+	PanelSection{'nr', 'Шумодав и ореолы'},
+	PanelSection{'sharp', 'Резкость'},
+	PanelSection{'fx', 'Эффекты'},
+	PanelSection{'history', 'История'},
 ]
 
 const panel_side_names = ['Справа', 'Слева']
@@ -97,8 +96,9 @@ fn panel_order_from(saved []string) []string {
 	return out
 }
 
-// panel_hidden_from - скрытые разделы из настроек: только известные
-fn panel_hidden_from(saved []string) []string {
+// panel_keys_from - список разделов из настроек (скрытые, раскрытые):
+// только известные, без повторов
+fn panel_keys_from(saved []string) []string {
 	mut out := []string{}
 	for k in saved {
 		if panel_section_index(k) >= 0 && k !in out {
@@ -135,7 +135,7 @@ fn panel_add(mut st State, key string, w &vgui.Widget) {
 	}
 	if st.sec_w.len == 0 {
 		st.sec_w = []&vgui.Widget{len: panel_sections.len, init: unsafe { nil }}
-		st.sec_open = panel_sections.map(it.open)
+		st.sec_open = panel_sections.map(it.key in st.settings.panel_open)
 	}
 	st.sec_w[i] = unsafe { w }
 }
@@ -355,10 +355,25 @@ fn set_strip_visible(mut st State, fs bool, v bool) {
 	sync_settings_ui(mut st)
 }
 
+// panel_toggled - раздел idx (по видимым секциям) раскрыт или свёрнут
+// щелчком: запомнить в настройках
+fn panel_toggled(mut st State, idx int, open bool) {
+	if idx < 0 || idx >= st.panel_keys.len {
+		return
+	}
+	k := panel_section_index(st.panel_keys[idx])
+	if k < 0 {
+		return
+	}
+	st.sec_open[k] = open
+	st.settings.panel_open = panel_sections.filter(st.sec_open[panel_section_index(it.key)]).map(it.key)
+	save_settings(st.settings)
+}
+
 // set_panel_sections - новый порядок и скрытые разделы (окно настроек)
 fn set_panel_sections(mut st State, order []string, hidden []string) {
 	st.settings.panel_order = panel_order_from(order)
-	st.settings.panel_hidden = panel_hidden_from(hidden)
+	st.settings.panel_hidden = panel_keys_from(hidden)
 	save_settings(st.settings)
 	layout_panel(mut st)
 	sync_settings_ui(mut st)

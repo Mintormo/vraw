@@ -56,7 +56,7 @@ fn need_met(st &State, n Need) bool {
 		.preset { paste_targets(st).len > 0 }
 		.pair { st.pair_on || (frame_ready(st) && pair_candidate(st).len > 0) }
 		.swap { st.pair_on }
-		.mask { st.mask_show || (frame_open(st) && st.edit.params.masks.len > 0) }
+		.mask { frame_open(st) && st.edit.params.masks.len > 0 }
 	}
 }
 

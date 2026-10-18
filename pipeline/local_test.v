@@ -812,3 +812,62 @@ fn test_local_grow() {
 	}
 	assert worst <= 3, 'расхождение ${worst}'
 }
+
+// mask_view без ограничения диапазоном - быстрый путь по форме (потоки
+// полосами строк): тот же вес, что у прохода рендера
+fn test_mask_view_shape_fast() {
+	w, h := 600, 500 // больше порога потоков (bands)
+	src := lt_gray(w, h, 20000)
+	mm := lt_map(w, h)
+	rad := Mask{
+		kind:     .radial
+		ax:       0.6
+		ay:       0.5
+		rx:       0.3
+		ry:       0.2
+		angle:    20
+		feather:  50
+		exposure: 1
+		parts:    [MaskPart{
+			kind: .linear
+			op:   .subtract
+			ax:   0
+			ay:   0.9
+			bx:   0
+			by:   0.6
+		}]
+	}
+	p := Params{
+		lmap:  mm
+		masks: [rad]
+	}
+	fast := mask_view(unsafe { &u16(src.data) }, unsafe { nil }, w, h, p, 0)
+	// Тот же проход, что с диапазоном (render_ex), - вес формы
+	lm := compile_mask(rad, mm, unsafe { nil }) or { panic('форма') }
+	lc := ctx_of(&p, [lm], w)
+	mut slow := []u8{len: w * h}
+	mut none_ := []u8{}
+	render_ex(unsafe { &u16(src.data) }, unsafe { nil }, unsafe { nil }, w * h, p, mut none_,
+		4, unsafe { nil }, &lc, unsafe { &u8(slow.data) }, unsafe { nil })
+	free_ctx(&lc)
+	assert fast == slow
+	assert fast.any(it == 255) && fast.any(it == 0)
+}
+
+// mask_fill - заливка по весу: 0 - пиксель без изменений, 255 - красный
+// с полной непрозрачностью amax; полосами по потокам - как одним
+fn test_mask_fill() {
+	w, h := 600, 500
+	mut wt := []u8{len: w * h}
+	for i in 0 .. wt.len {
+		wt[i] = u8(i % 256)
+	}
+	mut pix := []u8{len: w * h * 4, init: 100}
+	mask_fill(wt, mut pix, 4, w, h, 0.5)
+	assert pix[0..4] == [u8(100), 100, 100, 100] // вес 0
+	i := 255 // вес 255: r + (255 - r) * 0.5, g и b - вдвое
+	assert pix[i * 4..i * 4 + 4] == [u8(177), 50, 50, 100]
+	mut one := []u8{len: w * h * 4, init: 100}
+	mask_fill_rows(unsafe { &u8(wt.data) }, unsafe { &u8(one.data) }, 4, 0, w * h, 0.5)
+	assert one == pix
+}

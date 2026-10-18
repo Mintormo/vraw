@@ -87,7 +87,7 @@ mut:
 	// раскладка окна (panel.v): панель инструментов и лента кадров скрыты
 	// целиком (отрицание - в старом settings.json полей нет, всё видно),
 	// панель слева; разделы панели - порядок (ключи panel_sections) и
-	// скрытые
+	// скрытые, раскрытые (по умолчанию все свёрнуты)
 	no_panel     bool
 	no_strip     bool
 	panel_left   bool
@@ -98,6 +98,7 @@ mut:
 	fs_strip bool
 	panel_order  []string = panel_default_order()
 	panel_hidden []string
+	panel_open   []string
 	// ширина панели инструментов, px (перетащенная; 0 - по умолчанию)
 	panel_w int
 	// свои горячие клавиши (hotkeys.v): «ключ=сочетание», пусто после «=» -
@@ -208,7 +209,8 @@ fn settings_from(s Settings) Settings {
 		fs_panel:     s.fs_panel
 		fs_strip:     s.fs_strip
 		panel_order:  panel_order_from(s.panel_order)
-		panel_hidden: panel_hidden_from(s.panel_hidden)
+		panel_hidden: panel_keys_from(s.panel_hidden)
+		panel_open:   panel_keys_from(s.panel_open)
 		hotkeys:      s.hotkeys.filter(it.contains('='))
 		panel_w:      if s.panel_w >= int(panel_min_w) && s.panel_w <= 10000 { s.panel_w } else { 0 }
 		no_frame_cache: s.no_frame_cache

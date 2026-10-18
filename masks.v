@@ -230,11 +230,20 @@ fn select_mask(mut st State, idx int) {
 	mask_redraw(st)
 }
 
+// mask_redraw - перерисовать оверлей холста (ручки, метки, круг кисти):
+// только область холста в окне, без перезаливки текстуры снимка
+// (mark_dirty - полный буфер превью в видеокарту на каждое движение мыши)
 fn mask_redraw(st &State) {
-	if !isnil(st.cv) {
+	if isnil(st.cv) {
+		return
+	}
+	if isnil(st.win) {
 		mut cv := st.cv
 		cv.mark_dirty()
+		return
 	}
+	mut w := st.win
+	w.invalidate(st.cv.bounds)
 }
 
 // mask_changed - правка фильтров: пересчёт и запись в истории
@@ -495,12 +504,13 @@ fn set_mask_show(mut st State, on bool) {
 	}
 }
 
-// sync_mask_show_ui - флажок секции и пункт меню по st.mask_show
+// sync_mask_show_ui - флажок секции («Скрыть маску») и пункт меню по
+// st.mask_show
 fn sync_mask_show_ui(mut st State) {
 	if !isnil(st.mask_ui) {
 		mut u := st.mask_ui
 		if !isnil(u.show_cb) {
-			u.show_cb.set_checked(st.mask_show)
+			u.show_cb.set_checked(!st.mask_show)
 		}
 		if !isnil(u.m_show) {
 			u.m_show.checked = st.mask_show
@@ -525,16 +535,7 @@ fn mask_paint(st &State, mut pix []u8) {
 	}
 	wt := pipeline.mask_view(unsafe { &u16(st.glin.data) }, haze, st.gw, st.gh, view_params(st,
 		st.edit.params), st.mask_sel)
-	for i, w in wt {
-		if w == 0 {
-			continue
-		}
-		a := f32(w) * (mask_fill_a / 255)
-		r := f32(pix[i * 4])
-		pix[i * 4] = u8(r + (255 - r) * a)
-		pix[i * 4 + 1] = u8(f32(pix[i * 4 + 1]) * (1 - a))
-		pix[i * 4 + 2] = u8(f32(pix[i * 4 + 2]) * (1 - a))
-	}
+	pipeline.mask_fill(wt, mut pix, 4, st.gw, st.gh, mask_fill_a)
 }
 
 // ── Ручки на холсте ──
@@ -669,6 +670,8 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				st.brush_hy = ev.fy
 				mask_redraw(st)
 			}
+			// Курсор фильтра - событие забрано: иначе шторка до/после
+			// (ba_input) поставит поверх свой
 			h := mask_hit(st, mm, sx, sy)
 			if h.kind != .none {
 				vgui.set_cursor(if h.kind == .move {
@@ -676,16 +679,19 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				} else {
 					vgui.sdl_system_cursor_crosshair
 				})
+				return true
 			} else if shape_pin_hit(st, mm, sx, sy) > -2 || pin_hit(st, mm, sx, sy) >= 0 {
 				vgui.set_cursor(vgui.sdl_system_cursor_hand)
+				return true
 			} else if brush {
 				vgui.set_cursor(vgui.sdl_system_cursor_crosshair)
-			} else {
-				vgui.set_cursor(vgui.sdl_system_cursor_default)
+				return true
 			}
 			return false
 		}
 		.leave {
+			// Курсор фильтра за холстом не остаётся
+			vgui.set_cursor(vgui.sdl_system_cursor_default)
 			if st.brush_hover {
 				st.brush_hover = false
 				mask_redraw(st)
@@ -782,11 +788,13 @@ fn pins_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 	sx, sy := cv.buf_to_screen(ev.fx, ev.fy)
 	match ev.kind {
 		.hover {
-			vgui.set_cursor(if pin_hit(st, mm, sx, sy) >= 0 {
-				vgui.sdl_system_cursor_hand
-			} else {
-				vgui.sdl_system_cursor_default
-			})
+			if pin_hit(st, mm, sx, sy) >= 0 {
+				vgui.set_cursor(vgui.sdl_system_cursor_hand)
+				return true
+			}
+		}
+		.leave {
+			vgui.set_cursor(vgui.sdl_system_cursor_default)
 		}
 		.pointer_down {
 			if ev.button == 1 {
@@ -1474,13 +1482,15 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		select_mask(mut st, -1)
 	}
 	u.done_btn = done_b
-	mut show_cb := vgui.checkbox(i18n.tr('Показать маску'))
+	// Маска видна по умолчанию, флажок её прячет
+	mut show_cb := vgui.checkbox(i18n.tr('Скрыть маску'))
+	show_cb.checked = !st.mask_show
 	st.hk_texts << fn [st, mut show_cb] () {
-		show_cb.text = i18n.trf('Показать маску{0}', '${hk_paren(st, 'view.mask')}')
+		show_cb.text = i18n.trf('Скрыть маску{0}', '${hk_paren(st, 'view.mask')}')
 	}
 	show_cb.on_change = fn [mut st] (v bool) {
-		if v != st.mask_show {
-			set_mask_show(mut st, v)
+		if v == st.mask_show {
+			set_mask_show(mut st, !v)
 		}
 	}
 	u.show_cb = show_cb

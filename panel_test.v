@@ -30,7 +30,7 @@ fn test_panel_move_and_shown() {
 	shown := panel_shown(def, ['crop', 'history'])
 	assert shown.len == def.len - 2
 	assert 'crop' !in shown && 'history' !in shown
-	assert panel_hidden_from(['crop', 'bogus', 'crop']) == ['crop']
+	assert panel_keys_from(['crop', 'bogus', 'crop']) == ['crop']
 }
 
 // Раскладка переживает перезапуск; старый settings.json без полей - всё

@@ -892,12 +892,85 @@ pub fn mask_view(src &u16, haze &HazeMap, w int, h int, p Params, idx int) []u8 
 		w:   w
 		h:   h
 	}) or { return out }
+	if !lm.lum && !lm.col {
+		// Без ограничения диапазоном вес - одна форма, снимок не нужен:
+		// без прохода рендера, полосами строк по потокам
+		shape_view(&lm, w, h, mut out)
+		free_mask(&lm)
+		return out
+	}
 	lc := ctx_of(&p, [lm], w)
 	mut none_ := []u8{}
 	render_ex(src, unsafe { nil }, haze, w * h, p, mut none_, 4, unsafe { nil }, &lc,
 		unsafe { &u8(out.data) }, unsafe { nil })
 	free_ctx(&lc) // сетки кисти lm - те же, что в lc
 	return out
+}
+
+// shape_view - вес формы lm (0..255) на каждом пикселе буфера w x h в out
+fn shape_view(lm &LocalMask, w int, h int, mut out []u8) {
+	o := unsafe { &u8(out.data) }
+	nt := bands(w, h)
+	if nt <= 1 {
+		shape_view_rows(lm, w, 0, h, o)
+		return
+	}
+	step := (h + nt - 1) / nt
+	mut ts := []thread{}
+	for y0 := 0; y0 < h; y0 += step {
+		ts << spawn shape_view_rows(lm, w, y0, imin(h, y0 + step), o)
+	}
+	ts.wait()
+}
+
+fn shape_view_rows(lm &LocalMask, w int, y0 int, y1 int, o &u8) {
+	for j in y0 .. y1 {
+		for i in 0 .. w {
+			unsafe {
+				o[j * w + i] = u8(int(mask_weight(lm, f32(i), f32(j)) * 255 + 0.5))
+			}
+		}
+	}
+}
+
+// mask_fill - заливка маски поверх снимка pix (RGBA, stride байт на
+// пиксель): по весу wt (0..255) красный с непрозрачностью до amax,
+// полосами строк по потокам (w x h)
+pub fn mask_fill(wt []u8, mut pix []u8, stride int, w int, h int, amax f32) {
+	if wt.len != w * h || pix.len < w * h * stride {
+		return
+	}
+	wp := unsafe { &u8(wt.data) }
+	pp := unsafe { &u8(pix.data) }
+	nt := bands(w, h)
+	if nt <= 1 {
+		mask_fill_rows(wp, pp, stride, 0, w * h, amax)
+		return
+	}
+	step := (h + nt - 1) / nt
+	mut ts := []thread{}
+	for y0 := 0; y0 < h; y0 += step {
+		ts << spawn mask_fill_rows(wp, pp, stride, y0 * w, imin(h, y0 + step) * w, amax)
+	}
+	ts.wait()
+}
+
+fn mask_fill_rows(wt &u8, pix &u8, stride int, i0 int, i1 int, amax f32) {
+	k := amax / 255
+	for i in i0 .. i1 {
+		unsafe {
+			wv := wt[i]
+			if wv == 0 {
+				continue
+			}
+			a := f32(wv) * k
+			mut d := pix + i * stride
+			r := f32(d[0])
+			d[0] = u8(r + (255 - r) * a)
+			d[1] = u8(f32(d[1]) * (1 - a))
+			d[2] = u8(f32(d[2]) * (1 - a))
+		}
+	}
 }
 
 // sp_enc - сумма резкости фильтров (доля силы, -1..1.55) в байт: (s + 1)

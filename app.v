@@ -282,7 +282,7 @@ mut:
 	// правка), заливка маски, перетаскивание ручки, виджеты секции
 	mask_sel   int = -1
 	mask_part  int = -1 // форма выделенного фильтра: -1 - основа, иначе часть
-	mask_show  bool
+	mask_show  bool = true // заливка маски выделенного фильтра (по умолчанию видна)
 	mask_drag  MaskDrag
 	mask_pick  bool // пипетка цвета фильтра (ограничение диапазоном)
 	// Кисть фильтра (masks.v): размер 1..100 (радиус - до четверти высоты
@@ -1652,6 +1652,11 @@ fn main() {
 		// Ручки выделенного градиентного фильтра (masks.v)
 		if mask_input(mut st, ev) {
 			return
+		}
+		// Наведение, не забранное инструментом, - обычная стрелка (курсор
+		// снятого с выделения фильтра не остаётся); шторка ставит свой ниже
+		if ev.kind == .hover {
+			vgui.set_cursor(vgui.sdl_system_cursor_default)
 		}
 		if st.wb_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
 			wb_pick_at(mut st, ev.x, ev.y)
@@ -3175,124 +3180,6 @@ fn main() {
 	avail_add(mut st, .paste, [m_paste])
 	avail_add(mut st, .frames, [m_all])
 	avail_add(mut st, .pixels, [m_crop, m_spots, m_pick, m_autotone])
-	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
-	st.bar = bar
-	st.import_presets = fn [mut st, mut app, win, mut nm] () {
-		files := vgui.native_open_files_dialog(win, mut app, vgui.NativeFileDialogConfig{
-			filter_names:    [i18n.tr('Пресеты vraw'), i18n.tr('Все файлы')]
-			filter_patterns: ['json', '*']
-		})
-		if files.len == 0 {
-			return
-		}
-		mut names := []string{}
-		mut failed := []string{}
-		for f in files {
-			names << import_preset(f, presets_dir()) or {
-				failed << '${os.file_name(f)}: ${err.msg()}'
-				continue
-			}
-		}
-		rebuild_presets_menu(mut st)
-		if failed.len > 0 {
-			nm.show_error(i18n.trf('Не импортировано {0} из {1}: {2}', '${failed.len}', '${files.len}', '${failed[0]}'))
-		} else if names.len == 1 {
-			nm.show_success(i18n.trf('Пресет «{0}» импортирован', '${names[0]}'))
-		} else {
-			nm.show_success(i18n.trf('Импортировано пресетов: {0}', '${names.len}'))
-		}
-	}
-	st.export_presets = fn [mut app, win, mut nm] (p Preset) {
-		if p.path.len > 0 {
-			dst := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
-				default_name:    '${p.name}.json'
-				filter_names:    [i18n.tr('Пресеты vraw')]
-				filter_patterns: ['json']
-			})
-			if dst.len == 0 {
-				return
-			}
-			path := if dst.to_lower().ends_with('.json') { dst } else { dst + '.json' }
-			export_preset(p, path) or {
-				nm.show_error(i18n.trf('Пресет не экспортирован: {0}', '${err.msg()}'))
-				return
-			}
-			nm.show_success(i18n.trf('Пресет «{0}» сохранён: {1}', '${p.name}', '${os.file_name(path)}'))
-			return
-		}
-		all := list_presets(presets_dir())
-		dir := vgui.native_select_folder_dialog(win, mut app, vgui.NativeFileDialogConfig{})
-		if dir.len == 0 {
-			return
-		}
-		n := export_presets(all, dir) or {
-			nm.show_error(i18n.trf('Пресеты не экспортированы: {0}', '${err.msg()}'))
-			return
-		}
-		nm.show_success(i18n.trf('Экспортировано пресетов: {0} в {1}', '${n}', '${os.file_name(dir)}'))
-	}
-	st.show_presets = fn [mut st, mut app, win] () {
-		show_presets(mut st, mut app, win)
-	}
-	st.presets_menu = bar.entries.len
-	bar.add_menu(i18n.tr('Пресеты'), []&vgui.MenuItem{})
-	rebuild_presets_menu(mut st)
-
-	// «Отбор» (rating.v): звёзды и флажки - клавишами, как в Lightroom;
-	// действуют на выделенные в ленте кадры, без выделения - на открытый
-	mut pick_items := []&vgui.MenuItem{}
-	for r in 0 .. 6 {
-		mut it := vgui.menu_action(if r == 0 {
-			i18n.tr('Без звёзд')
-		} else {
-			'${r} ${i18n.pl(r, 'звезда|звезды|звёзд')}'
-		})
-		it.shortcut = '${r}'
-		it.on_click = fn [mut st, r] () {
-			set_rating(mut st, r)
-		}
-		pick_items << it
-	}
-	pick_items << vgui.menu_separator()
-	flag_names := [i18n.tr('Отобран'), i18n.tr('Отклонён'), i18n.tr('Снять флажок')]
-	flag_keys := ['P', 'X', 'U']
-	flag_vals := [1, -1, 0]
-	for k in 0 .. 3 {
-		mut it := vgui.menu_action(flag_names[k])
-		it.shortcut = flag_keys[k]
-		f := flag_vals[k]
-		it.on_click = fn [mut st, f] () {
-			set_flag(mut st, f)
-		}
-		pick_items << it
-	}
-	pick_items << vgui.menu_separator()
-	mut m_advance := vgui.menu_checkbox(i18n.tr('Переходить к следующему кадру'), st.settings.auto_advance)
-	m_advance.on_toggle = fn [mut st] (v bool) {
-		st.settings.auto_advance = v
-		save_settings(st.settings)
-	}
-	avail_add(mut st, .target, pick_items.filter(it.kind != .separator))
-	pick_items << m_advance
-	pick_items << vgui.menu_separator()
-	// Как в Lightroom: Ctrl+Backspace
-	mut m_del_rej := vgui.menu_action(i18n.tr('Удалить отклонённые...'))
-	m_del_rej.shortcut = 'Ctrl+Backspace'
-	m_del_rej.on_click = fn [delete_rejected] () {
-		delete_rejected()
-	}
-	pick_items << m_del_rej
-	avail_add(mut st, .frames, [m_del_rej])
-	bar.add_menu(i18n.tr('Отбор'), pick_items)
-	pick_ids := ['pick.rate0', 'pick.rate1', 'pick.rate2', 'pick.rate3', 'pick.rate4',
-		'pick.rate5', '', 'pick.flag_pick', 'pick.flag_reject', 'pick.flag_none', '',
-		'pick.advance', '', 'pick.del_rejected']
-	for i, id in pick_ids {
-		if id.len > 0 {
-			mut it := pick_items[i]
-			hk_add(mut st, id, 'Отбор', mut it)
-		}
-	}
 
 	mut m_fit := vgui.menu_action(i18n.tr('Вписать'))
 	m_fit.shortcut = 'Ctrl+0'
@@ -3392,7 +3279,7 @@ fn main() {
 	}
 	st.m_clipwarn = m_clipwarn
 	// Заливка маски выделенного градиентного фильтра (masks.v)
-	mut m_mask := vgui.menu_checkbox(i18n.tr('Маска фильтра'), false)
+	mut m_mask := vgui.menu_checkbox(i18n.tr('Маска фильтра'), st.mask_show)
 	m_mask.shortcut = 'O'
 	m_mask.on_toggle = fn [mut st] (v bool) {
 		set_mask_show(mut st, v)
@@ -3448,6 +3335,125 @@ fn main() {
 	}
 	avail_add(mut st, .frame, [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_jpeg,
 		m_clipwarn])
+
+	// «Отбор» (rating.v): звёзды и флажки - клавишами, как в Lightroom;
+	// действуют на выделенные в ленте кадры, без выделения - на открытый
+	mut pick_items := []&vgui.MenuItem{}
+	for r in 0 .. 6 {
+		mut it := vgui.menu_action(if r == 0 {
+			i18n.tr('Без звёзд')
+		} else {
+			'${r} ${i18n.pl(r, 'звезда|звезды|звёзд')}'
+		})
+		it.shortcut = '${r}'
+		it.on_click = fn [mut st, r] () {
+			set_rating(mut st, r)
+		}
+		pick_items << it
+	}
+	pick_items << vgui.menu_separator()
+	flag_names := [i18n.tr('Отобран'), i18n.tr('Отклонён'), i18n.tr('Снять флажок')]
+	flag_keys := ['P', 'X', 'U']
+	flag_vals := [1, -1, 0]
+	for k in 0 .. 3 {
+		mut it := vgui.menu_action(flag_names[k])
+		it.shortcut = flag_keys[k]
+		f := flag_vals[k]
+		it.on_click = fn [mut st, f] () {
+			set_flag(mut st, f)
+		}
+		pick_items << it
+	}
+	pick_items << vgui.menu_separator()
+	mut m_advance := vgui.menu_checkbox(i18n.tr('Переходить к следующему кадру'), st.settings.auto_advance)
+	m_advance.on_toggle = fn [mut st] (v bool) {
+		st.settings.auto_advance = v
+		save_settings(st.settings)
+	}
+	avail_add(mut st, .target, pick_items.filter(it.kind != .separator))
+	pick_items << m_advance
+	pick_items << vgui.menu_separator()
+	// Как в Lightroom: Ctrl+Backspace
+	mut m_del_rej := vgui.menu_action(i18n.tr('Удалить отклонённые...'))
+	m_del_rej.shortcut = 'Ctrl+Backspace'
+	m_del_rej.on_click = fn [delete_rejected] () {
+		delete_rejected()
+	}
+	pick_items << m_del_rej
+	avail_add(mut st, .frames, [m_del_rej])
+	bar.add_menu(i18n.tr('Отбор'), pick_items)
+	pick_ids := ['pick.rate0', 'pick.rate1', 'pick.rate2', 'pick.rate3', 'pick.rate4',
+		'pick.rate5', '', 'pick.flag_pick', 'pick.flag_reject', 'pick.flag_none', '',
+		'pick.advance', '', 'pick.del_rejected']
+	for i, id in pick_ids {
+		if id.len > 0 {
+			mut it := pick_items[i]
+			hk_add(mut st, id, 'Отбор', mut it)
+		}
+	}
+
+	// «Пресеты» - список пересобирается при сохранении (rebuild_presets_menu)
+	st.bar = bar
+	st.import_presets = fn [mut st, mut app, win, mut nm] () {
+		files := vgui.native_open_files_dialog(win, mut app, vgui.NativeFileDialogConfig{
+			filter_names:    [i18n.tr('Пресеты vraw'), i18n.tr('Все файлы')]
+			filter_patterns: ['json', '*']
+		})
+		if files.len == 0 {
+			return
+		}
+		mut names := []string{}
+		mut failed := []string{}
+		for f in files {
+			names << import_preset(f, presets_dir()) or {
+				failed << '${os.file_name(f)}: ${err.msg()}'
+				continue
+			}
+		}
+		rebuild_presets_menu(mut st)
+		if failed.len > 0 {
+			nm.show_error(i18n.trf('Не импортировано {0} из {1}: {2}', '${failed.len}', '${files.len}', '${failed[0]}'))
+		} else if names.len == 1 {
+			nm.show_success(i18n.trf('Пресет «{0}» импортирован', '${names[0]}'))
+		} else {
+			nm.show_success(i18n.trf('Импортировано пресетов: {0}', '${names.len}'))
+		}
+	}
+	st.export_presets = fn [mut app, win, mut nm] (p Preset) {
+		if p.path.len > 0 {
+			dst := vgui.native_save_file_dialog(win, mut app, vgui.NativeFileDialogConfig{
+				default_name:    '${p.name}.json'
+				filter_names:    [i18n.tr('Пресеты vraw')]
+				filter_patterns: ['json']
+			})
+			if dst.len == 0 {
+				return
+			}
+			path := if dst.to_lower().ends_with('.json') { dst } else { dst + '.json' }
+			export_preset(p, path) or {
+				nm.show_error(i18n.trf('Пресет не экспортирован: {0}', '${err.msg()}'))
+				return
+			}
+			nm.show_success(i18n.trf('Пресет «{0}» сохранён: {1}', '${p.name}', '${os.file_name(path)}'))
+			return
+		}
+		all := list_presets(presets_dir())
+		dir := vgui.native_select_folder_dialog(win, mut app, vgui.NativeFileDialogConfig{})
+		if dir.len == 0 {
+			return
+		}
+		n := export_presets(all, dir) or {
+			nm.show_error(i18n.trf('Пресеты не экспортированы: {0}', '${err.msg()}'))
+			return
+		}
+		nm.show_success(i18n.trf('Экспортировано пресетов: {0} в {1}', '${n}', '${os.file_name(dir)}'))
+	}
+	st.show_presets = fn [mut st, mut app, win] () {
+		show_presets(mut st, mut app, win)
+	}
+	st.presets_menu = bar.entries.len
+	bar.add_menu(i18n.tr('Пресеты'), []&vgui.MenuItem{})
+	rebuild_presets_menu(mut st)
 	avail_add(mut st, .pair, [m_pair])
 	avail_add(mut st, .swap, [m_swap])
 	avail_add(mut st, .mask, [m_mask])
@@ -3586,9 +3592,11 @@ fn main() {
 	panel_add(mut st, 'grade', grade_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'masks', section(mask_rows))
 	panel_add(mut st, 'spots', section(spot_rows))
-	// Раскрытая секция показывает метки всех фильтров на снимке (индекс
-	// секции - layout_panel)
+	// Раскрытость секций запоминается в настройках; раскрытая «Градиентные
+	// фильтры» показывает метки всех фильтров на снимке (индекс секции -
+	// layout_panel)
 	acc.on_change = fn [mut st] (idx int, open bool) {
+		panel_toggled(mut st, idx, open)
 		if !isnil(st.mask_ui) && idx == st.mask_ui.acc_idx {
 			mask_redraw(st)
 		}
@@ -3632,7 +3640,7 @@ fn main() {
 		SectionRow{edit_row(mut st, mut grn_rough, lbl_w, val_w)},
 		SectionRow{fx_hint},
 	]))
-	// История - последней секцией (по умолчанию), открыта: 8 строк списка и подсказка
+	// История - последней секцией (по умолчанию): 8 строк списка и подсказка
 	panel_add(mut st, 'history', section([
 		SectionRow{hist_lb},
 		SectionRow{ba_row},

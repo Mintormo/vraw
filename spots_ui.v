@@ -311,9 +311,10 @@ fn spot_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				.none { vgui.sdl_system_cursor_crosshair }
 			})
 			spot_redraw(st)
-			return false
+			return true // курсор пятен - шторка до/после его не перебивает
 		}
 		.leave {
+			vgui.set_cursor(vgui.sdl_system_cursor_default)
 			if st.spot_hover {
 				st.spot_hover = false
 				spot_redraw(st)
