@@ -1,6 +1,6 @@
 # vraw
 
-[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | **Français** | [Español](README.es.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
+[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | **Français** | [Español](README.es.md) | [Italiano](README.it.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
 
 Un développeur RAW gratuit pour Linux et Windows. Ouvre le Canon CR3 et
 tous les autres formats reconnus par LibRaw, permet une retouche non
@@ -17,16 +17,12 @@ La dernière archive se trouve dans [Releases](../../releases/latest) :
   où et lancer `vraw/vraw`. Nécessite glibc 2.39 ou plus récent
   (Ubuntu 24.04, Linux Mint 22, Fedora et Arch récents).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Décompresser et lancer
-  `vraw.exe`. Le débruitage IA nécessite le
-  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
-  La version Windows est expérimentale : testée pour l'instant sous Wine.
+  `vraw.exe`. La version Windows est expérimentale : testée pour l'instant sous Wine.
 
-Les réglages, les préréglages et le modèle IA sont rangés à côté du
-programme : le dossier peut donc vivre sur une clé USB.
+Les réglages et les préréglages sont rangés à côté du programme : le
+dossier peut donc vivre sur une clé USB.
 
 Rien d'autre à installer : toutes les bibliothèques sont dans l'archive.
-Seule exception : le Visual C++ Redistributable sous Windows, et
-uniquement pour le débruitage IA ; sans lui, tout le reste fonctionne.
 
 ## Configuration requise
 
@@ -35,14 +31,11 @@ uniquement pour le débruitage IA ; sans lui, tout le reste fonctionne.
 | Système | Linux x86_64 avec glibc 2.39+ (X11 ou Wayland) ; Windows 10 64 bits | idem |
 | Processeur | tout x86 64 bits | 4 cœurs ou plus (le pipeline et l'export utilisent tous les cœurs) |
 | Mémoire | 4 Go | 8 Go ou plus |
-| Disque | 300 Mo pour le programme | plus la place pour les photos |
+| Disque | 100 Mo pour le programme | plus la place pour les photos |
 | Écran | 1280×720 | 1920×1080 |
 
-Aucune carte graphique n'est nécessaire. Le débruitage IA tourne sur le
-processeur et il est lent : sur un Intel Core i5-1235U (10 cœurs) avec
-16 Go de RAM, l'aperçu prend environ 4 minutes et une image complète de
-24 Mpx environ 16 minutes. Tous les autres outils réagissent
-instantanément.
+Aucune carte graphique n'est nécessaire : tout tourne sur le processeur,
+et tous les outils réagissent instantanément.
 
 ## Fonctionnalités
 
@@ -63,9 +56,6 @@ instantanément.
 - Recadrage et redressement, correction de perspective, suppression des
   taches, masques.
 - Réduction du bruit, netteté, vignetage et grain argentique.
-- **Débruitage IA** avec le réseau de neurones SCUNet (fourni, fonctionne
-  hors ligne) : supprime le bruit en préservant les détails. Tourne en
-  arrière-plan avec progression et annulation.
 
 **Visualisation et tri**
 - Bande de vignettes avec tous les RAW du dossier ; les images voisines
@@ -110,6 +100,6 @@ propre pipeline de tons ; LibRaw se charge uniquement du dématriçage.
 ## Licence
 
 MIT, voir [LICENSE](LICENSE). Le code source n'est pas publié. Les
-composants tiers inclus dans les archives (LibRaw, lensfun, SDL3,
-ONNX Runtime, SCUNet et d'autres) relèvent de leurs propres licences :
+composants tiers inclus dans les archives (LibRaw, lensfun, SDL3
+et d'autres) relèvent de leurs propres licences :
 voir `THIRD_PARTY.md` et le dossier `licenses/` dans l'archive.

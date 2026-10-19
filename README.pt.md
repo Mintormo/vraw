@@ -1,6 +1,6 @@
 # vraw
 
-[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Nederlands](README.nl.md) | **Português** | [Polski](README.pl.md)
+[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Nederlands](README.nl.md) | **Português** | [Polski](README.pl.md)
 
 Um revelador RAW gratuito para Linux e Windows. Abre Canon CR3 e todos os
 outros formatos que o LibRaw entende, permite editar de forma não
@@ -17,16 +17,13 @@ O arquivo mais recente está em [Releases](../../releases/latest):
   qualquer lugar e executar `vraw/vraw`. Requer glibc 2.39 ou mais
   recente (Ubuntu 24.04, Linux Mint 22, Fedora e Arch recentes).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Descompactar e executar
-  `vraw.exe`. A redução de ruído com IA precisa do
-  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
-  A versão para Windows é experimental: até agora testada no Wine.
+  `vraw.exe`. A versão para Windows é experimental: até agora testada no Wine.
 
-As configurações, as predefinições e o modelo de IA ficam ao lado do
-programa, por isso a pasta pode ficar num pen drive.
+As configurações e as predefinições ficam ao lado do programa, por isso a
+pasta pode ficar num pen drive.
 
 Não é preciso instalar mais nada: todas as bibliotecas estão dentro do
-arquivo. A única exceção é o Visual C++ Redistributable no Windows, e só
-para a redução de ruído com IA; sem ele, todo o resto funciona.
+arquivo.
 
 ## Requisitos do sistema
 
@@ -35,14 +32,11 @@ para a redução de ruído com IA; sem ele, todo o resto funciona.
 | Sistema | Linux x86_64 com glibc 2.39+ (X11 ou Wayland); Windows 10 de 64 bits | o mesmo |
 | Processador | qualquer x86 de 64 bits | 4 núcleos ou mais (o processamento e a exportação usam todos os núcleos) |
 | Memória | 4 GB | 8 GB ou mais |
-| Disco | 300 MB para o programa | mais espaço para as fotos |
+| Disco | 100 MB para o programa | mais espaço para as fotos |
 | Ecrã/tela | 1280×720 | 1920×1080 |
 
-Não é preciso placa de vídeo. A redução de ruído com IA corre no
-processador e é lenta: num Intel Core i5-1235U (10 núcleos) com 16 GB de
-RAM, a pré-visualização leva cerca de 4 minutos e uma foto completa de
-24 MP cerca de 16 minutos. Todas as outras ferramentas respondem de
-imediato.
+Não é preciso placa de vídeo: tudo corre no processador e todas as
+ferramentas respondem de imediato.
 
 ## Funcionalidades
 
@@ -63,9 +57,6 @@ imediato.
 - Recorte e endireitamento, correção de perspetiva, remoção de manchas,
   máscaras.
 - Redução de ruído, nitidez, vinheta e grão de filme.
-- **Redução de ruído com IA** pela rede neural SCUNet (incluída, funciona
-  offline): remove o ruído preservando o detalhe. Corre em segundo plano
-  com progresso e cancelamento.
 
 **Visualização e seleção**
 - Faixa de miniaturas com todos os RAW da pasta; as fotos vizinhas são
@@ -110,6 +101,6 @@ processamento de tons próprio; o LibRaw faz apenas o demosaico.
 ## Licença
 
 MIT, ver [LICENSE](LICENSE). O código-fonte não é publicado. Os
-componentes de terceiros incluídos nos arquivos (LibRaw, lensfun, SDL3,
-ONNX Runtime, SCUNet e outros) estão sob as suas próprias licenças: ver
+componentes de terceiros incluídos nos arquivos (LibRaw, lensfun, SDL3
+e outros) estão sob as suas próprias licenças: ver
 `THIRD_PARTY.md` e a pasta `licenses/` dentro do arquivo.

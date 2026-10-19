@@ -1,6 +1,6 @@
 # vraw
 
-[English](README.md) | [Русский](README.ru.md) | **Deutsch** | [Français](README.fr.md) | [Español](README.es.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
+[English](README.md) | [Русский](README.ru.md) | **Deutsch** | [Français](README.fr.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
 
 Ein kostenloser RAW-Entwickler für Linux und Windows. Öffnet Canon CR3
 und alle anderen Formate, die LibRaw versteht, bearbeitet
@@ -17,16 +17,12 @@ Das aktuelle Archiv gibt es unter [Releases](../../releases/latest):
   `vraw/vraw` starten. Benötigt glibc 2.39 oder neuer (Ubuntu 24.04,
   Linux Mint 22, aktuelle Fedora und Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Entpacken und `vraw.exe`
-  starten. Die KI-Rauschentfernung benötigt das
-  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
-  Die Windows-Version ist experimentell: bisher nur unter Wine getestet.
+  starten. Die Windows-Version ist experimentell: bisher nur unter Wine getestet.
 
-Einstellungen, Presets und das KI-Modell liegen neben dem Programm – der
-Ordner kann also auf einem USB-Stick leben.
+Einstellungen und Presets liegen neben dem Programm – der Ordner kann also
+auf einem USB-Stick leben.
 
 Sonst muss nichts installiert werden: Alle Bibliotheken sind im Archiv.
-Die einzige Ausnahme ist das Visual C++ Redistributable unter Windows, und
-auch nur für die KI-Rauschentfernung; ohne es funktioniert alles andere.
 
 ## Systemanforderungen
 
@@ -35,13 +31,11 @@ auch nur für die KI-Rauschentfernung; ohne es funktioniert alles andere.
 | System | Linux x86_64 mit glibc 2.39+ (X11 oder Wayland); Windows 10 64 Bit | dasselbe |
 | Prozessor | beliebiger 64-Bit-x86 | 4+ Kerne (Pipeline und Export nutzen alle Kerne) |
 | Arbeitsspeicher | 4 GB | 8 GB oder mehr |
-| Festplatte | 300 MB für das Programm | plus Platz für die Fotos |
+| Festplatte | 100 MB für das Programm | plus Platz für die Fotos |
 | Bildschirm | 1280×720 | 1920×1080 |
 
-Eine Grafikkarte ist nicht nötig. Die KI-Rauschentfernung läuft auf dem
-Prozessor und ist langsam: Auf einem Intel Core i5-1235U (10 Kerne) mit
-16 GB RAM dauert die Vorschau etwa 4 Minuten, ein volles 24-MP-Bild etwa
-16 Minuten. Alle anderen Werkzeuge reagieren sofort.
+Eine Grafikkarte ist nicht nötig: Alles läuft auf dem Prozessor, alle
+Werkzeuge reagieren sofort.
 
 ## Funktionen
 
@@ -62,9 +56,6 @@ Prozessor und ist langsam: Auf einem Intel Core i5-1235U (10 Kerne) mit
 - Zuschneiden und Ausrichten, Perspektivkorrektur, Flecken entfernen,
   Masken.
 - Rauschreduzierung, Schärfen, Vignette und Filmkorn.
-- **KI-Rauschentfernung** mit dem neuronalen Netz SCUNet (mitgeliefert,
-  funktioniert offline): entfernt Rauschen und erhält Details. Läuft im
-  Hintergrund mit Fortschrittsanzeige und Abbruch.
 
 **Ansicht und Auswahl**
 - Filmstreifen mit allen RAW-Dateien des Ordners; benachbarte Bilder
@@ -110,6 +101,6 @@ LibRaw übernimmt nur das Demosaicing.
 ## Lizenz
 
 MIT, siehe [LICENSE](LICENSE). Der Quellcode wird nicht veröffentlicht.
-Die in den Archiven enthaltenen Fremdkomponenten (LibRaw, lensfun, SDL3,
-ONNX Runtime, SCUNet und andere) stehen unter ihren eigenen Lizenzen:
+Die in den Archiven enthaltenen Fremdkomponenten (LibRaw, lensfun, SDL3
+und andere) stehen unter ihren eigenen Lizenzen:
 siehe `THIRD_PARTY.md` und den Ordner `licenses/` im Archiv.

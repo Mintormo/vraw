@@ -1,6 +1,6 @@
 # vraw
 
-[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | **Nederlands** | [Português](README.pt.md) | [Polski](README.pl.md)
+[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Italiano](README.it.md) | **Nederlands** | [Português](README.pt.md) | [Polski](README.pl.md)
 
 Een gratis RAW-ontwikkelaar voor Linux en Windows. Opent Canon CR3 en
 alle andere formaten die LibRaw begrijpt, bewerkt niet-destructief en
@@ -17,17 +17,13 @@ Het nieuwste archief staat bij [Releases](../../releases/latest):
   en `vraw/vraw` starten. Vereist glibc 2.39 of nieuwer (Ubuntu 24.04,
   Linux Mint 22, recente Fedora en Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Uitpakken en `vraw.exe`
-  starten. De AI-ruisonderdrukking heeft het
-  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
-  nodig. De Windows-versie is experimenteel: tot nu toe getest onder Wine.
+  starten. De Windows-versie is experimenteel: tot nu toe getest onder Wine.
 
-Instellingen, voorinstellingen en het AI-model staan naast het programma,
-dus de map kan op een USB-stick staan.
+Instellingen en voorinstellingen staan naast het programma, dus de map
+kan op een USB-stick staan.
 
 Verder hoeft er niets geïnstalleerd te worden: alle bibliotheken zitten
-in het archief. De enige uitzondering is het Visual C++ Redistributable
-op Windows, en alleen voor de AI-ruisonderdrukking; zonder werkt al het
-andere.
+in het archief.
 
 ## Systeemvereisten
 
@@ -36,13 +32,11 @@ andere.
 | Systeem | Linux x86_64 met glibc 2.39+ (X11 of Wayland); Windows 10 64-bit | hetzelfde |
 | Processor | elke 64-bit x86 | 4+ kernen (de verwerking en export gebruiken alle kernen) |
 | Geheugen | 4 GB | 8 GB of meer |
-| Schijf | 300 MB voor het programma | plus ruimte voor de foto's |
+| Schijf | 100 MB voor het programma | plus ruimte voor de foto's |
 | Scherm | 1280×720 | 1920×1080 |
 
-Een videokaart is niet nodig. De AI-ruisonderdrukking draait op de
-processor en is traag: op een Intel Core i5-1235U (10 kernen) met 16 GB
-RAM duurt het voorbeeld ongeveer 4 minuten en een volledige foto van
-24 MP ongeveer 16 minuten. Alle andere gereedschappen reageren meteen.
+Een videokaart is niet nodig: alles draait op de processor en alle
+gereedschappen reageren meteen.
 
 ## Mogelijkheden
 
@@ -63,9 +57,6 @@ RAM duurt het voorbeeld ongeveer 4 minuten en een volledige foto van
 - Bijsnijden en rechtzetten, perspectiefcorrectie, vlekken verwijderen,
   maskers.
 - Ruisonderdrukking, verscherping, vignet en filmkorrel.
-- **AI-ruisonderdrukking** met het neurale netwerk SCUNet (meegeleverd,
-  werkt offline): verwijdert ruis en behoudt details. Draait op de
-  achtergrond met voortgang en annuleren.
 
 **Bekijken en selecteren**
 - Filmstrip met alle RAW-bestanden uit de map; naburige foto's worden
@@ -111,6 +102,6 @@ doet alleen de demosaicing.
 ## Licentie
 
 MIT, zie [LICENSE](LICENSE). De broncode wordt niet gepubliceerd. De
-componenten van derden in de archieven (LibRaw, lensfun, SDL3,
-ONNX Runtime, SCUNet en andere) vallen onder hun eigen licenties: zie
+componenten van derden in de archieven (LibRaw, lensfun, SDL3
+en andere) vallen onder hun eigen licenties: zie
 `THIRD_PARTY.md` en de map `licenses/` in het archief.

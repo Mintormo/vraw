@@ -1,6 +1,6 @@
 # vraw
 
-[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | **Polski**
+[English](README.md) | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | **Polski**
 
 Darmowy wywoływacz RAW dla Linuksa i Windows. Otwiera Canon CR3 i
 wszystkie inne formaty obsługiwane przez LibRaw, pozwala na edycję
@@ -17,16 +17,12 @@ Najnowsze archiwum jest w [Releases](../../releases/latest):
   miejscu i uruchomić `vraw/vraw`. Wymaga glibc 2.39 lub nowszego
   (Ubuntu 24.04, Linux Mint 22, aktualne Fedora i Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Rozpakować i uruchomić
-  `vraw.exe`. Odszumianie AI wymaga pakietu
-  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
-  Wersja dla Windows jest eksperymentalna: na razie testowana pod Wine.
+  `vraw.exe`. Wersja dla Windows jest eksperymentalna: na razie testowana pod Wine.
 
-Ustawienia, presety i model AI leżą obok programu, więc folder może
-działać z pendrive'a.
+Ustawienia i presety leżą obok programu, więc folder może działać
+z pendrive'a.
 
 Nic więcej nie trzeba instalować: wszystkie biblioteki są w archiwum.
-Jedynym wyjątkiem jest Visual C++ Redistributable w Windows i to tylko
-dla odszumiania AI; bez niego cała reszta działa.
 
 ## Wymagania systemowe
 
@@ -35,13 +31,11 @@ dla odszumiania AI; bez niego cała reszta działa.
 | System | Linux x86_64 z glibc 2.39+ (X11 lub Wayland); Windows 10 64-bit | to samo |
 | Procesor | dowolny 64-bitowy x86 | 4+ rdzenie (przetwarzanie i eksport używają wszystkich rdzeni) |
 | Pamięć | 4 GB | 8 GB lub więcej |
-| Dysk | 300 MB na program | plus miejsce na zdjęcia |
+| Dysk | 100 MB na program | plus miejsce na zdjęcia |
 | Ekran | 1280×720 | 1920×1080 |
 
-Karta graficzna nie jest potrzebna. Odszumianie AI działa na procesorze i
-jest powolne: na Intel Core i5-1235U (10 rdzeni) z 16 GB RAM podgląd
-trwa około 4 minut, a pełne zdjęcie 24 Mpx około 16 minut. Wszystkie
-pozostałe narzędzia reagują natychmiast.
+Karta graficzna nie jest potrzebna: wszystko działa na procesorze,
+a wszystkie narzędzia reagują natychmiast.
 
 ## Możliwości
 
@@ -60,9 +54,6 @@ pozostałe narzędzia reagują natychmiast.
   chromatyczna.
 - Kadrowanie i prostowanie, korekcja perspektywy, usuwanie plam, maski.
 - Redukcja szumu, wyostrzanie, winieta i ziarno filmowe.
-- **Odszumianie AI** siecią neuronową SCUNet (w zestawie, działa offline):
-  usuwa szum, zachowując szczegóły. Działa w tle z postępem i możliwością
-  anulowania.
 
 **Przeglądanie i selekcja**
 - Taśma miniatur ze wszystkimi plikami RAW z folderu; sąsiednie zdjęcia
@@ -108,6 +99,6 @@ wykonuje tylko demozaikowanie.
 ## Licencja
 
 MIT, zobacz [LICENSE](LICENSE). Kod źródłowy nie jest publikowany.
-Komponenty zewnętrzne zawarte w archiwach (LibRaw, lensfun, SDL3,
-ONNX Runtime, SCUNet i inne) podlegają własnym licencjom: zobacz
+Komponenty zewnętrzne zawarte w archiwach (LibRaw, lensfun, SDL3
+i inne) podlegają własnym licencjom: zobacz
 `THIRD_PARTY.md` i folder `licenses/` w archiwum.

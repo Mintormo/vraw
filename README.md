@@ -1,6 +1,6 @@
 # vraw
 
-**English** | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
+**English** | [Русский](README.ru.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Nederlands](README.nl.md) | [Português](README.pt.md) | [Polski](README.pl.md)
 
 A free RAW photo developer for Linux and Windows. Opens Canon CR3 and
 every other format LibRaw understands, lets you edit non-destructively
@@ -17,16 +17,12 @@ Get the latest archive from [Releases](../../releases/latest):
   `vraw/vraw`. Needs glibc 2.39 or newer (Ubuntu 24.04, Linux Mint 22,
   recent Fedora and Arch).
 - **Windows x64** — `vraw-windows-x86_64.zip`. Unpack and run `vraw.exe`.
-  The AI denoiser needs the
-  [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
   The Windows build is experimental: so far it has been tested under Wine.
 
-Settings, presets and the AI model are kept next to the program, so the
-folder can live on a USB stick.
+Settings and presets are kept next to the program, so the folder can live
+on a USB stick.
 
 Nothing else needs to be installed: all libraries are inside the archive.
-The only exception is the Visual C++ Redistributable on Windows, and only
-for AI denoise; without it everything else works.
 
 ## System requirements
 
@@ -35,12 +31,11 @@ for AI denoise; without it everything else works.
 | OS | Linux x86_64 with glibc 2.39+ (X11 or Wayland); Windows 10 64-bit | the same |
 | CPU | any 64-bit x86 | 4+ cores (the pipeline and export use all cores) |
 | RAM | 4 GB | 8 GB or more |
-| Disk | 300 MB for the program | plus space for the photos |
+| Disk | 100 MB for the program | plus space for the photos |
 | Screen | 1280×720 | 1920×1080 |
 
-No GPU is needed. AI denoise runs on the CPU and is slow: on an Intel Core
-i5-1235U (10 cores) with 16 GB RAM the preview takes about 4 minutes and a
-full 24 MP frame about 16 minutes. All other tools react instantly.
+No GPU is needed: everything runs on the CPU, and all tools react
+instantly.
 
 ## Features
 
@@ -58,9 +53,6 @@ full 24 MP frame about 16 minutes. All other tools react instantly.
   chromatic aberration.
 - Crop and straighten, upright correction, spot removal, masks.
 - Noise reduction, sharpening, vignette and film grain.
-- **AI denoise** with the SCUNet neural network (bundled, works offline):
-  removes noise while keeping detail. Runs in the background with
-  progress and cancel.
 
 **Viewing and culling**
 - Film strip with all RAW files of the folder; neighbouring shots are
@@ -105,5 +97,5 @@ demosaicing.
 
 MIT, see [LICENSE](LICENSE). The source code is not published.
 Third-party components included in the archives (LibRaw, lensfun,
-SDL3, ONNX Runtime, SCUNet and others) are covered by their own licenses:
+SDL3 and others) are covered by their own licenses:
 see `THIRD_PARTY.md` and the `licenses/` folder inside the archive.
