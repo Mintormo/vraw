@@ -2,9 +2,9 @@ module main
 
 // Настройки программы между запусками: settings.json рядом с программой
 // (не путать с сайдкаром - там правки кадра): тема, цвет области вокруг
-// снимка, видимость ленты кадров, модель AI-шумодава, формат экспорта,
-// качество JPEG и AI при экспорте. Пишутся при изменении. vraw переносим: настройки, модели (models/) и ONNX Runtime
-// (onnxruntime/) - всё в папке программы (app_dir).
+// снимка, видимость ленты кадров, формат экспорта, качество JPEG и
+// остальное окна «Экспорт». Пишутся при изменении. vraw переносим:
+// настройки - в папке программы (app_dir).
 import os
 import json2
 import vgui
@@ -31,9 +31,7 @@ mut:
 	// сведения о съёмке (shotinfo.v) и миникарта при увеличении (navigator)
 	no_info      bool
 	no_navigator bool
-	// Кэш результата AI-шумодава в .vraw-cache папки снимков (aicache.v)
-	no_ai_cache bool
-	// демозаика полного кадра (ключ из demosaic_keys): 1:1, экспорт, AI
+	// демозаика полного кадра (ключ из demosaic_keys): 1:1, экспорт
 	demosaic string = 'ahd'
 	// Недавние файлы и папки (recent.v), новые - первыми
 	recent_files []string
@@ -45,12 +43,8 @@ mut:
 	export_format string = 'jpeg'
 	// качество JPEG при экспорте (jpeg_q_min..100)
 	jpeg_quality int = jpeg_q_default
-	// true - экспорт без AI-шумодава, даже если он включён у кадра.
-	// Отрицание нарочно: в settings.json старой версии поля нет, json2
-	// даст false - AI при экспорте остаётся включённым
-	export_no_ai bool
-	// EXIF в готовом файле (imgio/exif.v): отрицание по той же причине -
-	// в старом settings.json поля нет, EXIF по умолчанию пишется;
+	// EXIF в готовом файле (imgio/exif.v): отрицание нарочно - в старом
+	// settings.json поля нет, json2 даст false - EXIF по умолчанию пишется;
 	// копирайт - в каждый файл (пусто - тега нет)
 	export_no_exif bool
 	exif_copyright string
@@ -180,7 +174,6 @@ fn settings_from(s Settings) Settings {
 		ui_scale:   ui_scale_pct(s.ui_scale)
 		lang:       if i18n.known(s.lang) { s.lang } else { '' }
 		export_format: s.export_fmt().key()
-		export_no_ai:  s.export_no_ai
 		export_no_exif: s.export_no_exif
 		export_8bit:    s.export_8bit
 		exif_copyright: s.exif_copyright.trim_space()
@@ -216,7 +209,6 @@ fn settings_from(s Settings) Settings {
 		no_frame_cache: s.no_frame_cache
 		no_info:        s.no_info
 		no_navigator:   s.no_navigator
-		no_ai_cache:    s.no_ai_cache
 		demosaic:       if s.demosaic in demosaic_keys { s.demosaic } else { 'ahd' }
 		recent_files:   s.recent_files.filter(it != '')#[..recent_limit(s.recent_files_n)].clone()
 		recent_dirs:    s.recent_dirs.filter(it != '')#[..recent_limit(s.recent_dirs_n)].clone()

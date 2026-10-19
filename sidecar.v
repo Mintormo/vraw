@@ -45,8 +45,6 @@ struct SideState {
 	use_curve     bool
 	profile       string // стиль проявки (в старых файлах нет - без стиля)
 	nr            []f32 // импульсный, яркостный, цветовой, ореолы
-	ai            f32   // AI-шумодав 0..100 (в старых файлах нет - 0)
-	ai_model      string // модель AI (id ai.model; в старых сайдкарах - и другие)
 	// Баланс белого и резкость (в старых файлах нет: '' - «как снято»,
 	// нули - резкость выключена, радиус 0 читается как 1)
 	wb_mode       string
@@ -482,8 +480,6 @@ fn side_state(e EditState) SideState {
 		use_curve:     e.use_curve
 		profile:       e.profile
 		nr:            e.nr[..].clone()
-		ai:            e.ai
-		ai_model:      e.ai_model
 		wb_mode:       e.wb_mode
 		wb_temp:       e.wb_temp
 		wb_tint:       e.wb_tint
@@ -623,8 +619,6 @@ fn edit_state(s SideState) !EditState {
 		lens_corr: s.lens_corr
 		use_curve: s.use_curve
 		profile:   if s.profile in pipeline.style_keys { s.profile } else { '' }
-		ai:        s.ai
-		ai_model:  s.ai_model
 		wb_mode:   s.wb_mode
 		wb_temp:   s.wb_temp
 		wb_tint:   s.wb_tint

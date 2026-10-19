@@ -62,16 +62,10 @@ mut:
 	// JPEG камеры для показа («Вид - JPEG камеры»): RGBA w x h в
 	// ориентации кадра, как превью до геометрии; пусто - JPEG нет
 	cam_view []u8
-	// Из кэша кадров (framecache.v): что уже сделано с linear и результат
-	// модели AI; у обычной загрузки - нули и пусто
+	// Из кэша кадров (framecache.v): что уже сделано с linear; у обычной
+	// загрузки - нули
 	nr_applied [4]f32
 	dc_applied [3]f32
-	ai_applied f32
-	ai_linear  []u16
-	ai_full    []u16 // из кэша кадров: результат модели по полному кадру
-	ai_fw      int
-	ai_fh      int
-	ai_model   string
 }
 
 // load_worker выполняется в spawn; результат - через app.post
@@ -568,8 +562,6 @@ fn free_load(res LoadResult) {
 	drop(mut r.linear)
 	drop(mut r.mask)
 	drop(mut r.cam_view)
-	drop(mut r.ai_linear)
-	drop(mut r.ai_full)
 }
 
 fn wait_loads(mut st State) {

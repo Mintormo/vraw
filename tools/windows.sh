@@ -11,9 +11,8 @@
 #
 # Нужно: MinGW-w64 (apt: gcc-mingw-w64-x86-64) и библиотеки из MSYS2 -
 # python3 tools/win_deps.py (кладёт в ~/soft/mingw64-vraw, путь меняет
-# переменная VRAW_MINGW). Настройки, models/ и onnxruntime/ программа
-# держит рядом с exe, как и на Linux; модель и ONNX Runtime для Windows
-# кладёт tools/fetch_ai.sh.
+# переменная VRAW_MINGW). Настройки программа держит рядом с exe, как и
+# на Linux.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -60,10 +59,6 @@ lf="$HOME/.local/share/lensfun/updates/version_1"
 [[ -d "$lf" ]] || lf="$pfx/share/lensfun/version_1"
 mkdir -p "$out/lensfun"
 cp "$lf"/*.xml "$out/lensfun/"
-
-# AI-шумодав: модель и ONNX Runtime для Windows
-"$root/tools/fetch_ai.sh" "$out" windows
-rm -f "$out/onnxruntime/.version"
 
 
 # --- Лицензии -------------------------------------------------------------
@@ -116,7 +111,7 @@ for dll in $(printf '%s\n' "${!have[@]}" | sort -f); do
 	fi
 done
 
-for f in V libgc stb Roboto-OFL Lucide-ISC SCUNet; do
+for f in V libgc stb Roboto-OFL Lucide-ISC; do
 	cp "$own/$f.txt" "$lic/$f.txt"
 done
 cat >>"$tp" <<'END'
@@ -140,26 +135,7 @@ cat >>"$tp" <<'END'
 
 The database is the work of the lensfun project (https://lensfun.github.io),
 distributed unmodified.
-
-## AI denoise
-
-| Component | License | Text |
-|---|---|---|
-| ONNX Runtime (onnxruntime/ folder) | MIT | onnxruntime/LICENSE, onnxruntime/ThirdPartyNotices.txt |
-| SCUNet model, real PSNR weights (models/ folder) | Apache-2.0 | licenses/SCUNet.txt, licenses/Apache-2.0.txt |
-
-SCUNet is the work of Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao,
-Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte and Luc Van Gool
-(https://github.com/cszn/SCUNet). The weights are distributed in ONNX
-format, converted from the original PyTorch weights by Heliosoph
-(https://huggingface.co/Heliosoph/scunet-onnx), otherwise unmodified.
-
-ONNX Runtime for Windows needs the Microsoft Visual C++ Redistributable
-(x64). Most computers already have it; if not, vraw says where to get it
-when AI denoise is turned on.
 END
-# Apache-2.0 (SCUNet) - общий текст
-cp /usr/share/common-licenses/Apache-2.0 "$lic/Apache-2.0.txt"
 
 (cd "$dist" && zip -qr "$zipf" vraw-windows)
 echo "Готово: $out ($(du -sh "$out" | cut -f1), DLL: ${#have[@]}), архив $(du -sh "$zipf" | cut -f1)"

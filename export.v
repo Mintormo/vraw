@@ -6,7 +6,7 @@ module main
 //
 // Порядок - как в превью: LibRaw (демозаика, камерный ББ, клип
 // пересветов) -> коррекция объектива (виньетирование, затем дисторсия +
-// TCA) -> AI-шумодав -> импульсы -> шумодав -> ореолы -> Capture-резкость
+// TCA) -> импульсы -> шумодав -> ореолы -> Capture-резкость
 // -> маска -> кадрирование и поворот (сырьё и маска) -> pipeline -> размер
 // «Тени/Света» -> pipeline.apply (тон, кривые, HSL) -> 8 бит (TIFF и PNG
 // - по умолчанию 16, ExportOpts.bits16).
@@ -14,7 +14,6 @@ import time
 import raw
 import lens
 import pipeline
-import ai
 import bigbuf
 import imgio
 import i18n
@@ -119,7 +118,6 @@ fn write_image(path string, f imgio.Format, img Image, quality int, s &Settings)
 enum ExportStage {
 	decode
 	lens
-	ai
 	impulse
 	denoise
 	defringe
@@ -132,7 +130,6 @@ fn stage_title(s ExportStage) string {
 	return match s {
 		.decode { i18n.tr('Демозаика (LibRaw)') }
 		.lens { i18n.tr('Коррекция объектива') }
-		.ai { i18n.tr('AI-шумодав') }
 		.impulse { i18n.tr('Импульсный шум') }
 		.denoise { i18n.tr('Шумодав') }
 		.defringe { i18n.tr('Ореолы') }
@@ -164,18 +161,13 @@ fn write_secs(f imgio.Format) f64 {
 }
 
 // export_plan - какие этапы пройдёт develop_full с настройками e (условия -
-// те же, что в нём) и запись файла формата f; ai_secs - оценка AI по
-// полному кадру
-fn export_plan(e EditState, ai_secs f64, f imgio.Format) StagePlan {
+// те же, что в нём) и запись файла формата f
+fn export_plan(e EditState, f imgio.Format) StagePlan {
 	mut st := [ExportStage.decode]
 	mut w := [0.6]
 	if e.lens_corr || e.lman.active() {
 		st << .lens
 		w << 2.8
-	}
-	if e.ai > 0 {
-		st << .ai
-		w << ai_secs
 	}
 	if e.nr[0] > 0 {
 		st << .impulse
@@ -213,7 +205,8 @@ fn (e ExportCancelled) msg() string {
 }
 
 // StageProgress - прогресс экспорта: stage(этап, done, total) зовётся в
-// начале каждого этапа (0, 0) и после каждой плитки AI; false - отмена.
+// в начале каждого этапа (done, total - доля этапа, сейчас всегда 0, 0);
+// false - отмена.
 // Интерфейс, а не замыкание (post.v: замыкания V держат чужие буферы).
 interface StageProgress {
 mut:
@@ -227,28 +220,10 @@ fn (mut n NoStage) stage(_ ExportStage, _ int, _ int) bool {
 	return true
 }
 
-// AiStage - прогресс AI-шумодава как этап .ai прогресса экспорта
-struct AiStage {
-mut:
-	p StageProgress
-}
-
-fn (mut a AiStage) step(done int, total int) bool {
-	return a.p.stage(.ai, done, total)
-}
-
-// ExportOpts - модель AI-шумодава (общая, грузится один раз) и прогресс
-// (StageProgress; none - без прогресса); false из него - отмена,
-// develop_full вернёт ExportCancelled. Без модели кадр с включённым AI не
-// проявляется - ошибка, а не молча другой результат.
+// ExportOpts - прогресс (StageProgress; none - без прогресса; false из
+// него - отмена, develop_full вернёт ExportCancelled) и настройки вывода
 @[params]
 struct ExportOpts {
-	ai_cache &ai.Cache = unsafe { nil }
-	// Готовый результат модели по этому кадру (открытый кадр, кнопка AI,
-	// ai_nr.v) - вместо прогона модели; только чтение, держит вызывающий
-	ai_full []u16
-	ai_fw   int
-	ai_fh   int
 	progress ?StageProgress
 	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
 	half     bool       // половинный размер, как превью (левый кадр сравнения, pair.v)
@@ -260,9 +235,7 @@ struct ExportOpts {
 // o.bits16 - 16-битный) RGB полного размера. e - с производными полями (камерная кривая и таблицы
 // кривых в params, как у живого st.edit); db - база lensfun (nil - без
 // коррекции объектива). Свой LibRaw (открывает и закрывает файл сам) -
-// годится для фонового потока. AI-шумодав (e.ai > 0) - готовый результат
-// (o.ai_full) или модель по всему кадру, ~16 мин на 24 Мп. Отмена проверяется между этапами и между
-// плитками AI.
+// годится для фонового потока. Отмена проверяется между этапами.
 fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Image {
 	mut progress := o.progress or { StageProgress(NoStage{}) }
 	// Масштаб радиусов (Capture-резкость, резкость, чёткость) - как у превью
@@ -283,7 +256,6 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	// Промежуточные результаты - вне сборщика (bigbuf) и освобождаются, как
 	// только не нужны (пик памяти); defer - страховка ранних выходов
 	// (отмена, ошибка): повторный free безвреден
-	mut den := []u16{}
 	mut mask0 := []u16{}
 	mut dc := []u16{}
 	mut glin := []u16{}
@@ -291,7 +263,6 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 	mut haze := pipeline.HazeMap{}
 	defer {
 		img.free()
-		bigbuf.free(mut den)
 		bigbuf.free(mut mask0)
 		bigbuf.free(mut dc)
 		bigbuf.free(mut glin)
@@ -306,32 +277,6 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 			return ExportCancelled{}
 		}
 		correct_lens(buf, w, h, meta, db, e.lens_corr, e.vign, e.lens_zoom, e.lman)
-	}
-	// AI - как в превью: по сырью после объектива, до импульсов и вейвлета.
-	// Результат модели уже есть (открытый кадр) - только смешение
-	if e.ai > 0 && o.ai_full.len > 0 && o.ai_fw == w && o.ai_fh == h {
-		ai.blend(buf, o.ai_full, e.ai / 100)
-	} else if e.ai > 0 {
-		if isnil(o.ai_cache) {
-			return error(i18n.tr('AI-шумодав недоступен'))
-		}
-		if !progress.stage(.ai, 0, 0) {
-			return ExportCancelled{}
-		}
-		mut cache := unsafe { o.ai_cache }
-		model := cache.get()!
-		mut ap := AiStage{
-			p: progress
-		}
-		den = bigbuf.new_u16(w * h * 3)
-		ai.denoise_into(model, buf, w, h, mut den, mut ap) or {
-			if err is ai.Cancelled {
-				return ExportCancelled{}
-			}
-			return err
-		}
-		ai.blend(buf, den, e.ai / 100)
-		bigbuf.free(mut den)
 	}
 	if e.nr[0] > 0 {
 		if !progress.stage(.impulse, 0, 0) {

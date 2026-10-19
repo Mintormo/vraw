@@ -14,25 +14,18 @@ import imgio
 import i18n
 
 // ExportCtl - один экспорт. cancel пишет главный поток, читает воркер
-// между этапами и плитками AI (опоздание на плитку безвредно, как у
-// AiCtl). t1/n1 - время и номер первой готовой плитки AI (пишет только
-// воркер) - для оценки оставшегося времени. Остальное - главный поток.
+// между этапами (опоздание на этап безвредно). Остальное - главный поток.
 @[heap]
 struct ExportCtl {
 mut:
 	cancel  bool
-	t1      i64
-	n1      int
 	src     string
 	dst     string
 	fmt     imgio.Format
-	// AI у кадра включён, но при экспорте отключён в настройках
-	ai_skipped bool
 	plan    StagePlan
 	stage   ExportStage
-	done    int // плитки AI
+	done    int // доля этапа: сделано из total (0 из 0 - без доли)
 	total   int
-	eta     f64 = -1 // AI: секунд до конца, < 0 - неизвестно
 	started i64 // unix мс
 	// Пакет (batch.v): кадров всего (у одиночного экспорта 1), готовых,
 	// кадры в работе (по номеру) и нагрузка - всё пишет главный поток
@@ -230,8 +223,7 @@ fn sync_export_files(mut st State) {
 	if c.n > 1 {
 		f.text = i18n.trf('Готово {0} из {1} {2}  ·  нагрузка: {3}', '${c.finished}', '${c.n}', i18n.pl(c.n, 'кадра|кадров|кадров'), load_title(c.load))
 	} else {
-		no_ai := if c.ai_skipped { i18n.tr('  ·  без AI-шумодава') } else { '' }
-		f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}${no_ai}'
+		f.text = '${os.file_name(c.src)}  ->  ${os.file_name(c.dst)}'
 	}
 	if c.dst != '' {
 		u.folder.set(i18n.tr('Папка: '), os.dir(c.dst))
@@ -271,13 +263,10 @@ fn batch_event(mut st State, ctl &ExportCtl, ev BatchEvent) {
 	}
 }
 
-// stage_text - этап словами («AI-шумодав - плитка 3 из 40», «Запись PNG»)
-fn stage_text(stage ExportStage, done int, total int, f imgio.Format) string {
+// stage_text - этап словами («Шумодав», «Запись PNG»)
+fn stage_text(stage ExportStage, f imgio.Format) string {
 	name := stage_title(stage)
 	return match stage {
-		.ai {
-			if total == 0 { i18n.trf('{0} - загрузка модели...', '${name}') } else { i18n.trf('{0} - плитка {1} из {2}', '${name}', '${done}', '${total}') }
-		}
 		.write {
 			if f == .gif { i18n.tr('Палитра и запись GIF') } else { i18n.trf('Запись {0}', '${f.name()}') }
 		}
@@ -297,7 +286,7 @@ fn batch_stage_text(c &ExportCtl) string {
 	}
 	if idx.len == 1 {
 		p := c.frames[idx[0]] or { return '' }
-		return '${p.name}: ${stage_text(p.stage, p.done, p.total, c.fmt)}'
+		return '${p.name}: ${stage_text(p.stage, c.fmt)}'
 	}
 	names := idx.map(c.frames[it] or { FrameProg{} }.name)
 	return i18n.trf('В работе {0} {1}: {2}', '${idx.len}', i18n.pl(idx.len, 'кадр|кадра|кадров'), names.join(', '))
@@ -317,7 +306,7 @@ fn sync_export_ui(mut st State) {
 	s.text = if c.n > 1 {
 		batch_stage_text(c)
 	} else {
-		i18n.trf('Этап {0} из {1}: {2}', '${c.stage_no()}', '${c.plan.stages.len}', '${stage_text(c.stage, c.done, c.total, c.fmt)}')
+		i18n.trf('Этап {0} из {1}: {2}', '${c.stage_no()}', '${c.plan.stages.len}', '${stage_text(c.stage, c.fmt)}')
 	}
 	frac := c.fraction()
 	mut bar := u.bar
@@ -326,15 +315,23 @@ fn sync_export_ui(mut st State) {
 	p.text = '${int(frac * 100)}%'
 	elapsed := f64(time.now().unix_milli() - c.started) / 1000
 	mut t := i18n.trf('прошло {0}', '${fmt_secs(elapsed)}')
-	// Оставшееся: на AI - по плиткам (это почти всё время), иначе - по
-	// весам этапов, когда накопилось на что опереться
-	if c.n <= 1 && c.stage == .ai && c.eta >= 0 {
-		t += ' · ${fmt_eta(c.eta)}'
-	} else if frac > 0.15 && elapsed > 2 {
+	// Оставшееся - по весам этапов, когда накопилось на что опереться
+	if frac > 0.15 && elapsed > 2 {
 		t += ' · ${fmt_eta(elapsed / frac - elapsed)}'
 	}
 	mut tl := u.timing
 	tl.text = t
+}
+
+// fmt_eta - «осталось ~25 с» / «~3 мин»
+fn fmt_eta(sec f64) string {
+	if sec < 0 {
+		return i18n.tr('оценка времени...')
+	}
+	if sec < 60 {
+		return i18n.trf('осталось ~{0} с', '${int(sec + 0.5)}')
+	}
+	return i18n.trf('осталось ~{0} мин', '${int(sec / 60 + 0.5)}')
 }
 
 // export_finished - итог экспорта: в открытом диалоге - текстом, в
@@ -394,41 +391,30 @@ fn paint_export(mut st State) {
 	}
 }
 
-// ExportPoster - прогресс develop_full (в потоке воркера): этап и плитки
-// AI - в главный поток (post_result, без замыканий - post.v)
+// ExportPoster - прогресс develop_full (в потоке воркера): этап - в
+// главный поток (post_result, без замыканий - post.v)
 struct ExportPoster {
 mut:
 	app         &vgui.App = unsafe { nil }
 	ctl         &ExportCtl = unsafe { nil }
-	on_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
+	on_progress fn (&ExportCtl, ExportStage, int, int) = unsafe { nil }
 }
 
 // ExportTick - одно сообщение о прогрессе экспорта
 struct ExportTick {
-	on_progress fn (&ExportCtl, ExportStage, int, int, f64) = unsafe { nil }
+	on_progress fn (&ExportCtl, ExportStage, int, int) = unsafe { nil }
 	ctl         &ExportCtl = unsafe { nil }
 	stage       ExportStage
 	done        int
 	total       int
-	eta         f64
 }
 
 fn deliver_export_tick(t ExportTick) {
-	t.on_progress(t.ctl, t.stage, t.done, t.total, t.eta)
+	t.on_progress(t.ctl, t.stage, t.done, t.total)
 }
 
 fn (mut p ExportPoster) stage(stage ExportStage, done int, total int) bool {
-	mut c := p.ctl
-	mut eta := f64(-1)
-	if stage == .ai && done > 0 {
-		now := time.now().unix_milli()
-		if c.t1 == 0 {
-			c.t1 = now
-			c.n1 = done
-		} else if done > c.n1 {
-			eta = f64(now - c.t1) / 1000 / f64(done - c.n1) * f64(total - done)
-		}
-	}
+	c := p.ctl
 	mut app := p.app
 	post_result(mut app, deliver_export_tick, ExportTick{
 		on_progress: p.on_progress
@@ -436,7 +422,6 @@ fn (mut p ExportPoster) stage(stage ExportStage, done int, total int) bool {
 		stage:       stage
 		done:        done
 		total:       total
-		eta:         eta
 	})
 	return !c.cancel
 }

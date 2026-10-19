@@ -13,7 +13,7 @@ module main
 // готового превью, без пересчёта).
 //
 // Левый кадр проявляется в фоне путём экспорта (develop_full) в размере
-// превью (half) и без AI-шумодава: модель по кадру - минуты. На 100% он -
+// превью (half). На 100% он -
 // увеличенное превью, а не пиксели полного кадра, как у открытого.
 // С «до/после» (шторка, бок о бок) сравнение взаимоисключающее.
 import os
@@ -54,16 +54,15 @@ fn pair_worker(job PairJob, mut app vgui.App, on_done fn (PairResult)) {
 	post_result(mut app, on_done, pair_render(job))
 }
 
-// pair_render - кадр по настройкам сайдкара в размере превью, без AI
+// pair_render - кадр по настройкам сайдкара в размере превью
 fn pair_render(job PairJob) PairResult {
-	mut e := batch_derive(job.path, job.edit, job.db) or {
+	e := batch_derive(job.path, job.edit, job.db) or {
 		return PairResult{
 			gen:  job.gen
 			path: job.path
 			err:  err.msg()
 		}
 	}
-	e.ai = 0
 	mut img := develop_full(job.path, e, job.db,
 		half:     true
 		progress: StageProgress(PairStop{

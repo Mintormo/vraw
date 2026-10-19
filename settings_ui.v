@@ -5,8 +5,7 @@ module main
 // масштаб интерфейса), память
 // (кэш кадров, framecache.v); «Интерфейс» - панель инструментов и лента
 // кадров (panel.v); «Разделы панели» - какие и в каком порядке; «Горячие
-// клавиши». AI-шумодаву настраивать нечего: модель и ONNX Runtime идут
-// вместе с vraw. Настройки экспорта - в окне «Экспорт» (export_setup.v).
+// клавиши». Настройки экспорта - в окне «Экспорт» (export_setup.v).
 // Диалог создаётся при первом открытии и живёт до выхода: закрытие только
 // прячет.
 import vgui
@@ -23,7 +22,6 @@ mut:
 	scale_sp &vgui.Spinbox     = unsafe { nil } // свой, %
 	cache_ck &vgui.CheckBox    = unsafe { nil }
 	cache_cb &vgui.ComboBox    = unsafe { nil }
-	aicache_ck &vgui.CheckBox = unsafe { nil } // кэш AI на диске (aicache.v)
 	demosaic_cb &vgui.ComboBox = unsafe { nil } // демозаика полного кадра
 	// сколько помнить недавних файлов и папок (recent.v)
 	rfiles_cb &vgui.ComboBox = unsafe { nil }
@@ -253,13 +251,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		}
 	}
 	u.cache_cb = cache_cb
-	// Кэш результата AI рядом со снимками (aicache.v)
-	mut aicache_ck := vgui.checkbox(i18n.tr('Хранить результат AI-шумодава рядом со снимками'))
-	aicache_ck.on_change = fn [mut st] (v bool) {
-		st.settings.no_ai_cache = !v
-		save_settings(st.settings)
-	}
-	u.aicache_ck = aicache_ck
 	// Демозаика полного кадра (Settings.demosaic): 1:1 пересчитывается
 	// сразу, экспорт - со следующего
 	mut demosaic_cb := vgui.combo_box()
@@ -323,8 +314,6 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	general.add(cache_ck)
 	general.add(labeled(i18n.tr('Не больше'), cache_cb, look_col, look_w))
 	general.add(note(mut u, i18n.tr('Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)')))
-	general.add(aicache_ck)
-	general.add(note(mut u, i18n.tr('Папка .vraw-cache рядом с RAW, ~145 МБ на кадр 24 Мп: повторный AI - за секунду вместо ~16 минут')))
 
 	general.add(caption(i18n.tr('Проявка')))
 	general.add(labeled(i18n.tr('Демозаика'), demosaic_cb, look_col, look_w))
@@ -592,8 +581,6 @@ fn sync_settings_ui(mut st State) {
 	ci := frame_cache_mbs.index(mb)
 	ccb.set_selected(if ci >= 0 { ci } else { frame_cache_mbs.index(frame_cache_mb_default) })
 	ccb.enabled = ck.checked
-	mut ack := u.aicache_ck
-	ack.checked = !st.settings.no_ai_cache
 	mut dcb := u.demosaic_cb
 	dcb.set_selected(demosaic_keys.index(st.settings.demosaic))
 	mut rf := u.rfiles_cb

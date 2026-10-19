@@ -21,16 +21,16 @@ fn test_tone_lut() {
 fn test_export_plan() {
 	mut e := neutral_edit()
 	e.lens_corr = false
-	p := export_plan(e, 0, .jpeg)
+	p := export_plan(e, .jpeg)
 	assert p.stages == [ExportStage.decode, .tone, .write]
 	e.lens_corr = true
 	e.nr[1] = 10
-	p2 := export_plan(e, 0, .jpeg)
+	p2 := export_plan(e, .jpeg)
 	assert p2.stages == [ExportStage.decode, .lens, .denoise, .tone, .write]
 	// Capture-резкость - после шумодава, перед тоном
 	mut e3 := e
 	e3.params.sharp.dc_amount = 50
-	assert export_plan(e3, 0, .jpeg).stages == [ExportStage.decode, .lens, .denoise, .capture,
+	assert export_plan(e3, .jpeg).stages == [ExportStage.decode, .lens, .denoise, .capture,
 		.tone, .write]
 	mut c := ExportCtl{
 		plan:  p2
@@ -43,16 +43,15 @@ fn test_export_plan() {
 	// всё, кроме записи JPEG: 9 из 9.7 весовых секунд
 	assert c.fraction() > 0.92 && c.fraction() < 0.94
 	// запись PNG - дольше, её доля больше
-	c.plan = export_plan(e, 0, .png)
+	c.plan = export_plan(e, .png)
 	assert c.fraction() < 0.7
 }
 
-// Настройки старой версии (без поля) - AI при экспорте включён
-fn test_settings_export_ai_default() {
-	old := json2.decode[Settings]('{"theme": "dark", "jpeg_quality": 90}')!
-	assert !old.export_no_ai
-	off := json2.decode[Settings]('{"export_no_ai": true}')!
-	assert off.export_no_ai
+// Настройки версии с AI-шумодавом (поля export_no_ai, no_ai_cache)
+// читаются: лишние поля пропускаются
+fn test_settings_old_ai_fields() {
+	old := json2.decode[Settings]('{"export_no_ai": true, "no_ai_cache": true, "jpeg_quality": 90}')!
+	assert old.jpeg_quality == 90
 }
 
 // Длинный путь: многоточие в начале, в подсказке - строки по «/»

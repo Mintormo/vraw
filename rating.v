@@ -307,8 +307,6 @@ fn trash_frames(paths []string) (int, []string) {
 			continue
 		}
 		n++
-		// Кэш AI кадра (aicache.v) - не данные пользователя: просто удалить
-		os.rm(ai_cache_path(p)) or {}
 		side := sidecar_path(p)
 		if os.exists(side) {
 			move_to_trash(side) or { errs << '${os.file_name(side)}: ${err.msg()}' }

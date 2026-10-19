@@ -12,10 +12,8 @@ module main
 // Здесь - только расчёт, без State и vgui: выполняется в фоне.
 import raw
 import lens
-import ai
 import bigbuf
 import pipeline { Region }
-import i18n
 
 // Запас вокруг фрагмента для фильтров с окрестностью (вейвлет шумодава
 // ~30 px, ореолы ~7, Capture-резкость - итерационная, затухает): внутри
@@ -115,16 +113,6 @@ struct DetailJob {
 	margin int = detail_margin
 }
 
-// DetailAi - AI-шумодав фрагмента: готовый результат модели по полному
-// кадру после объектива fw x fh (тот же, что берёт экспорт; считает его
-// кнопка AI, ai_nr.v), сила 1..100. Пусто или strength 0 - без AI.
-struct DetailAi {
-	full     []u16
-	fw       int
-	fh       int
-	strength f32
-}
-
 // lens_piece - прямоугольник p кадра после коррекции объектива: профиль
 // (ln nil - без него) и ручная man; побитово равен той же области полной
 // коррекции (lens_full: виньетирование профиля и ручное, ремап профиля,
@@ -179,21 +167,12 @@ fn detail_region(src &DetailSrc, job DetailJob) Region {
 
 // detail_prep - линейное сырьё фрагмента r.w x r.h RGB: то же, что та же
 // область полного кадра после подготовки и геометрии (develop_full до
-// pipeline.apply). ln - nil или пустой: без коррекции объектива. AI -
-// кусок готового результата модели (DetailAi), смешение по силе.
-fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob, dai DetailAi) ![]u16 {
+// pipeline.apply). ln - nil или пустой: без коррекции объектива.
+fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob) []u16 {
 	w := src.w
 	h := src.h
 	p := detail_region(src, job)
 	mut buf := lens_piece(src, ln, job.man, p)
-	// AI - как в экспорте: по сырью после объектива, до импульсов
-	if dai.strength > 0 && dai.full.len > 0 {
-		if dai.fw != w || dai.fh != h {
-			return error(i18n.tr('результат AI - другого размера'))
-		}
-		den := pipeline.crop_region(unsafe { &u16(dai.full.data) }, w, 3, p)
-		ai.blend(unsafe { &u16(buf.data) }, den, dai.strength / 100)
-	}
 	pb := unsafe { &u16(buf.data) }
 	if job.nr[0] > 0 {
 		pipeline.impulse(pb, p.w, p.h, job.nr[0])

@@ -6,8 +6,7 @@ module main
 //
 // Координатор (batch_worker) раздаёт кадры потокам: одновременно не
 // больше, чем позволяет нагрузка (load_level: 1-3 кадра; полный кадр
-// 24 Мп в u16 ~145 МБ плюс копии - упор в память), кадр с AI-шумодавом -
-// всегда один (модель и так занимает все ядра и много памяти). Замер
+// 24 Мп в u16 ~145 МБ плюс копии - упор в память). Замер
 // (-prod, 3 кадра, шумодав): по одному 9.4 с, по два 6.7 с, по три
 // 4.7 с - большая часть этапов однопоточна. Потоки экспорта - с
 // пониженным приоритетом (nice), у «фоновой» нагрузки ещё и OpenMP
@@ -27,7 +26,6 @@ import runtime
 import vgui
 import raw
 import lens
-import ai
 import imgio
 import i18n
 
@@ -45,15 +43,6 @@ struct BatchJob {
 	settings Settings // снимок: папка, имя, «файл есть», размер, качество
 	format   imgio.Format
 	db       &lens.Database = unsafe { nil }
-	// AI-шумодав: модель (общая, только чтение; nil - AI ни у кого) и
-	// оценка секунд на кадр
-	ai_cache &ai.Cache = unsafe { nil }
-	ai_secs  f64
-	// Готовый результат модели открытого кадра (BatchItem.derived; своя
-	// ссылка - batch_worker отпускает в конце)
-	cur_ai []u16
-	cur_fw int
-	cur_fh int
 	ctl       &ExportCtl                  = unsafe { nil }
 	on_event  fn (&ExportCtl, BatchEvent) = unsafe { nil }
 }
@@ -209,7 +198,7 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 }
 
 // batch_items - кадры пакета по путям: открытый - текущие настройки окна,
-// остальные - из сайдкара; AI выключен при экспорте - ai = 0. Второй
+// остальные - из сайдкара. Второй
 // результат - кадры, чей сайдкар не прочитался (они проявятся
 // нейтрально - лучше, чем молча пропустить).
 fn batch_items(st &State, paths []string) ([]BatchItem, []string) {
@@ -266,14 +255,9 @@ fn (mut t BatchTally) add(r BatchDone) {
 
 // batch_worker выполняется в spawn: координатор - кадры потокам
 // (batch_frame_job), не больше level.par одновременно (и не больше, чем
-// помещается в свободную память - mem_par), AI - по одному;
-// итог - report
+// помещается в свободную память - mem_par); итог - report
 fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	sw := time.new_stopwatch()
-	mut cur_ai := unsafe { job.cur_ai }
-	defer {
-		drop(mut cur_ai)
-	}
 	mut level := load_level(job.settings.export_load)
 	apply_load(level)
 	// Кадров одновременно - не больше, чем помещается в свободную память
@@ -293,8 +277,7 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 	// именем (IMG.CR3 и IMG.DNG) иначе получили бы один файл
 	mut taken := map[string]bool{}
 	for i, it in job.items {
-		alone := it.edit.ai > 0
-		for running > 0 && (running >= level.par || alone) {
+		for running > 0 && running >= level.par {
 			tally.add(<-ch)
 			running--
 		}
@@ -306,26 +289,15 @@ fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)
 			count: n
 		})
 		taken[dst] = true
-		e0 := it.edit
-		ai_secs := if e0.ai > 0 && !(it.derived && job.cur_ai.len > 0) { job.ai_secs } else { 0 }
 		post_batch(mut app, job, BatchEvent{
 			kind: .start
 			idx:  i
 			src:  it.src
 			dst:  dst
-			plan: export_plan(e0, ai_secs, job.format)
+			plan: export_plan(it.edit, job.format)
 		})
-		cache := if e0.ai > 0 {
-			job.ai_cache
-		} else {
-			unsafe { nil }
-		}
-		threads << spawn batch_frame_job(job, i, dst, cache, level, mut app, ch)
+		threads << spawn batch_frame_job(job, i, dst, level, mut app, ch)
 		running++
-		if alone {
-			tally.add(<-ch)
-			running--
-		}
 	}
 	for running > 0 {
 		tally.add(<-ch)
@@ -383,7 +355,7 @@ fn (mut p BatchPoster) stage(stage ExportStage, done int, total int) bool {
 // batch_frame_job выполняется в spawn: один кадр пакета - производные
 // поля, проявка, запись; итог - в канал координатору (и событие «кадр
 // закончен» в главный поток)
-fn batch_frame_job(job BatchJob, i int, dst string, cache &ai.Cache, level LoadLevel, mut app vgui.App, ch chan BatchDone) {
+fn batch_frame_job(job BatchJob, i int, dst string, level LoadLevel, mut app vgui.App, ch chan BatchDone) {
 	apply_load(level)
 	it := job.items[i]
 	name := os.file_name(it.src)
@@ -392,7 +364,7 @@ fn batch_frame_job(job BatchJob, i int, dst string, cache &ai.Cache, level LoadL
 		job: job
 		i:   i
 	}
-	r := batch_frame_run(it, dst, job, cache, mut progress) or {
+	r := batch_frame_run(it, dst, job, mut progress) or {
 		if err is ExportCancelled {
 			BatchDone{
 				idx:       i
@@ -413,17 +385,12 @@ fn batch_frame_job(job BatchJob, i int, dst string, cache &ai.Cache, level LoadL
 }
 
 // batch_frame_run - проявка и запись кадра; ExportCancelled - отмена
-fn batch_frame_run(it BatchItem, dst string, job BatchJob, cache &ai.Cache, mut progress BatchPoster) !BatchDone {
+fn batch_frame_run(it BatchItem, dst string, job BatchJob, mut progress BatchPoster) !BatchDone {
 	if !progress.stage(.decode, 0, 0) {
 		return ExportCancelled{}
 	}
 	e := if it.derived { it.edit } else { batch_derive(it.src, it.edit, job.db)! }
-	reuse := it.derived && job.cur_ai.len > 0
 	mut img := develop_full(it.src, e, job.db,
-		ai_cache: cache
-		ai_full:  if reuse { job.cur_ai } else { []u16{} }
-		ai_fw:    job.cur_fw
-		ai_fh:    job.cur_fh
 		progress: StageProgress(progress)
 		size:     job.settings.export_size_opts()
 		bits16:   job.settings.export_bits16(job.format)

@@ -14,8 +14,8 @@ module main
 //   недостающего (один за раз; запрос во время работы - ещё проход после).
 // - Фрагментов два (сторона DetailSide): «после» - нынешние настройки,
 //   «до» - запись «до» сравнения (compare.v: удержание «\», шторка, бок о
-//   бок). У «до» своя подготовка сырья (объектив, шумодав, Capture,
-//   AI) и свой тон; геометрия - нынешняя. В шторке слой - оба
+//   бок). У «до» своя подготовка сырья (объектив, шумодав, Capture)
+//   и свой тон; геометрия - нынешняя. В шторке слой - оба
 //   фрагмента, сшитые по линии; бок о бок - «до» на своём холсте.
 // - Полный кадр LibRaw (~0.6 с) и объектив кадра грузятся ЛЕНИВО - при
 //   первом увеличении - и живут до смены кадра (~150 МБ вне сборщика:
@@ -27,9 +27,6 @@ module main
 //   прежний.
 // Запрос - в долях видимой части превью: размер полного кадра воркер узнаёт
 // сам (у превью half-size нечётный край обрезан).
-// - AI-шумодав (если он есть в превью): кнопка AI считает модель сразу по
-//   ПОЛНОМУ кадру после объектива (ai_nr.v, st.ai_full) - фрагмент берёт
-//   из него свой кусок, ничего не досчитывая, и совпадает с экспортом.
 import math
 import vgui
 import lens
@@ -98,12 +95,11 @@ struct DetailPrep {
 	man       lens.Manual // ручная коррекция объектива
 	nr        [4]f32
 	dc        pipeline.Sharpen
-	ai_s      f32 // 0 - без AI
 	spots     []pipeline.Spot // удаление пятен (после подготовки, до геометрии)
 }
 
-// detail_prep_of - подготовка стороны: «после» - нынешние настройки (AI -
-// как в превью: сила, если результат модели готов), «до» - запись «до»
+// detail_prep_of - подготовка стороны: «после» - нынешние настройки, «до» -
+// запись «до»
 fn detail_prep_of(st &State, side int) DetailPrep {
 	if side == side_before && st.history.len > 0 {
 		b := ba_state(st)
@@ -112,7 +108,6 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 			man:       b.lman
 			nr:        b.nr
 			dc:        b.params.sharp
-			ai_s:      ba_ai(st, b)
 			spots:     b.spots
 		}
 	}
@@ -121,7 +116,6 @@ fn detail_prep_of(st &State, side int) DetailPrep {
 		man:       st.edit.lman
 		nr:        st.edit.nr
 		dc:        st.edit.params.sharp
-		ai_s:      ai_effective(st)
 		spots:     st.edit.spots
 	}
 }
@@ -144,11 +138,6 @@ struct DetailReq {
 	region    Region // задан (w > 0) - считать ровно его, а не frac с запасом
 	geom      pipeline.Geom
 	key       string
-	// AI: результат модели по полному кадру (своя ссылка, bufown.v -
-	// воркер отпускает; пусто - без AI)
-	ai_full []u16
-	ai_fw   int
-	ai_fh   int
 }
 
 struct DetailRes {
@@ -167,11 +156,7 @@ mut:
 fn detail_prep_key(st &State, side int) string {
 	g := out_geom(&st.edit)
 	p := detail_prep_of(st, side)
-	return '${st.file_gen}|${st.settings.demosaic}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
-		st.ai_raw_gen
-	} else {
-		0
-	}}|${pipeline.spot_key(p.spots)}'
+	return '${st.file_gen}|${st.settings.demosaic}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${pipeline.spot_key(p.spots)}'
 }
 
 // detail_wanted - нужен ли слой детализации сейчас
@@ -341,7 +326,6 @@ fn detail_start(mut st State, side int) {
 	p := detail_prep_of(st, side)
 	src_key := detail_src_key(st.raw_path, st.settings.demosaic_qual())
 	lens_key := '${st.raw_path}|${st.look.vign}|${st.look.zoom}'
-	use_ai := p.ai_s > 0 && st.ai_full.len > 0
 	// Шторка: «до» - ровно на месте готового «после» (сшиваются по линии)
 	fa := dt.frag[side_after]
 	region := if side == side_before && st.ba_split && !st.ba_hold && fa.lin.len > 0
@@ -357,10 +341,7 @@ fn detail_start(mut st State, side int) {
 		src_key:   src_key
 		demosaic:  st.settings.demosaic_qual()
 		lens_key:  lens_key
-		prep:      DetailPrep{
-			...p
-			ai_s: if use_ai { p.ai_s } else { f32(0) }
-		}
+		prep:      p
 		corr:      st.corr
 		vign:      st.look.vign
 		zoom:      st.look.zoom
@@ -370,9 +351,6 @@ fn detail_start(mut st State, side int) {
 		region:    region
 		geom:      out_geom(&st.edit)
 		key:       key
-		ai_full:   if use_ai { share(st.ai_full) } else { []u16{} }
-		ai_fw:     st.ai_fw
-		ai_fh:     st.ai_fh
 	}
 	dt.running = true
 	dt.run_key = run_key
@@ -382,11 +360,6 @@ fn detail_start(mut st State, side int) {
 }
 
 fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
-	// Своя ссылка на результат AI - отпустить в конце (res.req её не читают)
-	mut ai_full := unsafe { req.ai_full }
-	defer {
-		drop(mut ai_full)
-	}
 	mut res := DetailRes{
 		req:  req
 		src:  req.src
@@ -409,12 +382,6 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 	} else {
 		frac_region(req.frac, ow, oh, detail_pad)
 	}
-	dai := DetailAi{
-		full:     req.ai_full
-		fw:       req.ai_fw
-		fh:       req.ai_fh
-		strength: req.prep.ai_s
-	}
 	if !r.is_empty() {
 		ln := if req.prep.use_lens { res.lens } else { unsafe { &DetailLens(nil) } }
 		res.lin = detail_prep(res.src, ln, DetailJob{
@@ -424,10 +391,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 			dc:    req.prep.dc
 			spots: req.prep.spots
 			man:   req.prep.man
-		}, dai) or {
-			res.err = err.msg()
-			[]u16{}
-		}
+		})
 	}
 	res.r = r
 	res.ow = ow

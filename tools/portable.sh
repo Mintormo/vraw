@@ -6,17 +6,12 @@
 #   vraw/vraw          бинарник (-prod), ищет библиотеки в vraw/lib
 #   vraw/lib/          копии .so (SDL3, LibRaw, lensfun, ...)
 #   vraw/lensfun/      база профилей объективов
-#   vraw/models/       модель AI-шумодава (SCUNet)
-#   vraw/onnxruntime/  ONNX Runtime (движок нейросети)
 #   vraw/licenses/     тексты лицензий, сводка - vraw/THIRD_PARTY.md
 #
 # Не копируются glibc и библиотеки компилятора (libstdc++, libgcc_s):
 # они есть в любой системе, а своя копия ломала бы системные драйверы
 # видео и звука, которые SDL подгружает сам. Поэтому папка работает на
 # системах с glibc не старее той, где собрана (здесь - 2.39, Ubuntu 24.04).
-#
-# Модель и ONNX Runtime качает tools/fetch_ai.sh (с проверкой sha256,
-# кэш - ~/.cache/vraw-ai): программа сама ничего не скачивает.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,10 +46,6 @@ lf="$HOME/.local/share/lensfun/updates/version_1"
 [[ -d "$lf" ]] || lf=/usr/share/lensfun/version_1
 mkdir -p "$out/lensfun"
 cp "$lf"/*.xml "$out/lensfun/"
-
-# AI-шумодав: модель и ONNX Runtime для Linux
-"$root/tools/fetch_ai.sh" "$out" linux
-rm -f "$out/onnxruntime/.version"
 
 
 # --- Лицензии -------------------------------------------------------------
@@ -104,7 +95,7 @@ cat >"$tp" <<'END'
 
 vraw and vgui are MIT-licensed (LICENSE and licenses/vgui.txt). Below is
 everything else included in this build. Full license texts are in the
-licenses/ folder, common ones (GPL, LGPL, Apache...) in licenses/common/.
+licenses/ folder, common ones (GPL, LGPL...) in licenses/common/.
 
 ## Libraries (lib/ folder)
 
@@ -143,11 +134,10 @@ while read -r name path; do
 done <"$libs"
 rm "$libs"
 
-# Вшитое в бинарник и скачиваемое программой
-for f in V libgc stb Roboto-OFL Lucide-ISC SCUNet; do
+# Вшитое в бинарник
+for f in V libgc stb Roboto-OFL Lucide-ISC; do
 	cp "$own/$f.txt" "$lic/$f.txt"
 done
-cp /usr/share/common-licenses/Apache-2.0 "$lic/common/"
 cat >>"$tp" <<'END'
 
 ## Built into the vraw binary
@@ -169,19 +159,6 @@ cat >>"$tp" <<'END'
 
 The database is the work of the lensfun project (https://lensfun.github.io),
 distributed unmodified.
-
-## AI denoise
-
-| Component | License | Text |
-|---|---|---|
-| ONNX Runtime (onnxruntime/ folder) | MIT | onnxruntime/LICENSE, onnxruntime/ThirdPartyNotices.txt |
-| SCUNet model, real PSNR weights (models/ folder) | Apache-2.0 | licenses/SCUNet.txt, licenses/common/Apache-2.0 |
-
-SCUNet is the work of Kai Zhang, Yawei Li, Jingyun Liang, Jiezhang Cao,
-Yulun Zhang, Hao Tang, Deng-Ping Fan, Radu Timofte and Luc Van Gool
-(https://github.com/cszn/SCUNet). The weights are distributed in ONNX
-format, converted from the original PyTorch weights by Heliosoph
-(https://huggingface.co/Heliosoph/scunet-onnx), otherwise unmodified.
 END
 
 # Проверка: все библиотеки находятся (в lib/ или в системе)

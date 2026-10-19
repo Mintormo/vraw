@@ -24,7 +24,7 @@ import i18n
 const copy_groups = ['tone', 'color', 'curves', 'hsl', 'bw', 'grade', 'nr', 'sharp', 'haze', 'fx', 'lens',
 	'crop', 'masks', 'spots']
 const copy_group_names = ['Экспозиция и тон', 'Баланс белого и цвет',
-	'Кривые', 'HSL', 'Чёрно-белое', 'Цветокоррекция', 'Шумодав и ореолы (и AI)', 'Резкость',
+	'Кривые', 'HSL', 'Чёрно-белое', 'Цветокоррекция', 'Шумодав и ореолы', 'Резкость',
 	'Удаление дымки', 'Эффекты (виньетка, зерно)', 'Коррекция объектива', 'Кадрирование и поворот',
 	'Градиентные фильтры', 'Удаление пятен']
 
@@ -45,7 +45,7 @@ const default_copy_groups = copy_groups.filter(it !in ['crop', 'masks', 'spots']
 //   hsl    - HSL-эквалайзер
 //   bw     - чёрно-белое и микшер
 //   grade  - цветокоррекция (тонирование теней, средних, светов)
-//   nr     - классический шумодав и ореолы, AI-шумодав (сила и модель)
+//   nr     - шумодав и ореолы
 //   sharp, haze, lens - резкость, удаление дымки, коррекция объектива
 //   fx     - эффекты: виньетка и зерно
 //   crop   - кадрирование и поворот (геометрия, пропорция)
@@ -95,8 +95,6 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 			}
 			'nr' {
 				e.nr = s.nr
-				e.ai = s.ai
-				e.ai_model = s.ai_model
 			}
 			'sharp' {
 				e.params.sharp = s.params.sharp

@@ -45,7 +45,6 @@ fn test_pair_render() {
 	}
 	mut e := neutral_edit()
 	e.lens_corr = false
-	e.ai = 50 // AI у левого кадра не считается
 	r := pair_render(PairJob{
 		gen:  3
 		path: path

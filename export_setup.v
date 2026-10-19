@@ -3,7 +3,7 @@ module main
 // Окно «Экспорт» (Ctrl+E, «Файл - Экспорт...»): что экспортировать
 // (открытый кадр, выделенные в ленте, вся папка - пакет, batch.v), куда и
 // как - папка, имя по шаблону, формат и качество, размер на
-// выход, что делать с существующим файлом, AI-шумодав. Выбор запоминается
+// выход, что делать с существующим файлом, EXIF. Выбор запоминается
 // в настройках программы (settings.v) - его же возьмёт пакетная обработка.
 // Размер на выход - настройка экспорта, а не кадра (как в Lightroom):
 // у кадра только рамка (crop.v).
@@ -219,7 +219,6 @@ mut:
 	ex_cb   &vgui.ComboBox  = unsafe { nil }
 	load_cb &vgui.ComboBox  = unsafe { nil }
 	load_nt &vgui.Label     = unsafe { nil }
-	ai_cb   &vgui.CheckBox  = unsafe { nil }
 	exif_cb &vgui.CheckBox  = unsafe { nil }
 	copy_in &vgui.TextInput = unsafe { nil }
 	result  &vgui.Label     = unsafe { nil }
@@ -420,8 +419,6 @@ fn sync_export_setup(mut st State) {
 	set_enabled(u.sharp_row, s.export_size != '')
 	mut ecb := u.ex_cb
 	ecb.set_selected(math.max(0, export_exists_keys.index(s.export_exists)))
-	mut acb := u.ai_cb
-	acb.checked = !s.export_no_ai
 	// EXIF: копирайт - только при включённом EXIF; поле в фокусе не
 	// перезаписывается (набор не сбивается)
 	mut xcb := u.exif_cb
@@ -751,18 +748,6 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	}
 	u.ex_cb = ex_cb
 
-	// AI-шумодав на полном кадре - минуты (SCUNet ~16 мин): можно
-	// отключить для быстрых проб; кадр своей настройки AI не теряет
-	mut ai_cb := vgui.checkbox(i18n.tr('AI-шумодав, если включён у кадра (минуты, кадры с ним - по одному)'))
-	ai_cb.on_change = fn [mut st] (v bool) {
-		if st.suppress {
-			return
-		}
-		st.settings.export_no_ai = !v
-		export_setup_changed(mut st)
-	}
-	u.ai_cb = ai_cb
-
 	// EXIF: дата съёмки, камера, объектив, параметры съёмки и копирайт
 	mut exif_cb := vgui.checkbox(i18n.tr('Сохранять EXIF'))
 	exif_cb.on_change = fn [mut st] (v bool) {
@@ -845,7 +830,6 @@ fn build_export_setup(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	body.add(indented(sharp_note, lbl_col + 8))
 	body.add(exif_row)
 	body.add(indented(exif_note, lbl_col + 8))
-	body.add(ai_cb)
 	body.add(row(i18n.tr('Нагрузка'), load_cb))
 	body.add(indented(load_note, lbl_col + 8))
 	body.add(vgui.create_spacer(), flex: 1)

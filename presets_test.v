@@ -28,8 +28,6 @@ fn sample_edit() EditState {
 		vgui.CurvePoint{1, 1}]
 	e.params.hsl_sat[3] = -40
 	e.nr[1] = 25
-	e.ai = 80
-	e.ai_model = 'scunet'
 	e.params.sharp.amount = 60
 	e.params.haze = 20
 	e.lens_corr = false

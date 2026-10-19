@@ -9,7 +9,6 @@ import os
 import time
 import raw
 import lens
-import ai
 import pipeline { Region }
 
 fn detail_case() ?(&DetailSrc, &lens.Database) {
@@ -109,8 +108,7 @@ fn test_detail_matches_full() ! {
 	for r in [Region{ow / 3, oh / 3, 500, 400}, Region{0, 0, 300, 200},
 		Region{ow - 400, oh - 300, 400, 300}] {
 		sw.restart()
-		mut np := ai.NoProgress{}
-		got := detail_prep(src, ln, DetailJob{ ...job0, r: r }, DetailAi{})!
+		got := detail_prep(src, ln, DetailJob{ ...job0, r: r })
 		t_frag := sw.elapsed().milliseconds()
 		d := detail_diff(got, full, ow, r)
 		eprintln('фрагмент ${r.w}x${r.h} в (${r.x}, ${r.y}): расхождение ${d}, ${t_frag} мс (полный кадр ${ow}x${oh} - ${t_full} мс)')
@@ -152,8 +150,7 @@ fn test_detail_manual_lens() ! {
 		full, ow, oh := detail_full(src, cc, 0.5, job0)
 		for r in [Region{ow / 3, oh / 3, 400, 300}, Region{0, 0, 250, 200},
 			Region{ow - 300, oh - 260, 300, 260}] {
-			mut np := ai.NoProgress{}
-			got := detail_prep(src, ln, DetailJob{ ...job0, r: r }, DetailAi{})!
+			got := detail_prep(src, ln, DetailJob{ ...job0, r: r })
 			d := detail_diff(got, full, ow, r)
 			assert d <= 1, 'профиль ${use_prof}, r=${r}: расхождение ${d}'
 		}
@@ -173,8 +170,7 @@ fn test_detail_no_lens() ! {
 		r:    Region{100, 200, 300, 250}
 	}
 	full, ow, _ := detail_full(src, unsafe { nil }, 0, job)
-	mut np := ai.NoProgress{}
-	got := detail_prep(src, unsafe { nil }, job, DetailAi{})!
+	got := detail_prep(src, unsafe { nil }, job)
 	assert detail_diff(got, full, ow, job.r) <= 1
 }
 
@@ -215,11 +211,10 @@ fn test_detail_spots() ! {
 	cy := int(0.5 * w)
 	r := Region{cx - 150, cy - 120, 300, 240}
 	assert r.x >= 0 && r.y >= 0 && r.x + r.w <= ow && r.y + r.h <= oh
-	mut np := ai.NoProgress{}
-	got := detail_prep(src, unsafe { nil }, DetailJob{ ...job, r: r }, DetailAi{})!
+	got := detail_prep(src, unsafe { nil }, DetailJob{ ...job, r: r })
 	assert detail_diff(got, full, ow, r) <= 1
 	// Без пятен фрагмент другой - пятна действуют
-	plain := detail_prep(src, unsafe { nil }, DetailJob{ ...job, r: r, spots: [] }, DetailAi{})!
+	plain := detail_prep(src, unsafe { nil }, DetailJob{ ...job, r: r, spots: [] })
 	assert detail_diff(plain, full, ow, r) > 100
 }
 
@@ -285,71 +280,4 @@ fn test_detail_render_close_to_full() {
 	eprintln('финальный проход фрагмента против полного: наибольшее ${maxd}, среднее ${mean:.3f} (8 бит)')
 	assert maxd <= 4
 	assert mean < 0.5
-}
-
-// Поддельная модель: выход зависит от всей плитки и места в ней
-struct DtFakeModel {}
-
-fn (f DtFakeModel) run(input []f32, mut output []f32, h int, w int) ! {
-	n := h * w
-	mut mean := f32(0)
-	for v in input {
-		mean += v
-	}
-	mean /= f32(input.len)
-	for c in 0 .. 3 {
-		for i in 0 .. n {
-			output[c * n + i] = input[c * n + i] * (0.7 + 0.3 * mean) + f32(i % w % 5) * 0.002
-		}
-	}
-}
-
-// AI на фрагменте = экспорт: объектив по всему кадру, модель по всему
-// кадру, смешение по силе, дальше как всегда. Фрагмент берёт кусок готового
-// результата модели (как его считает кнопка AI) - и совпадает с полным
-// проходом.
-fn test_detail_ai_matches_full() ! {
-	src, db := detail_case() or { return }
-	c := db.find(src.meta.cam_make, src.meta.cam_model, src.meta.lens) or { return }
-	vign := f32(0.5)
-	mut ln := make_detail_lens(c, src, vign, 1)
-	defer {
-		ln.free()
-	}
-	job0 := DetailJob{
-		geom: pipeline.Geom{
-			angle: -1.5
-		}
-		nr:   [f32(0), 30, 30, 20]!
-	}
-	// Полный проход: объектив, модель, сила 60, шумодав, геометрия
-	mut buf := src.dev.clone()
-	pb := unsafe { &u16(buf.data) }
-	c.vignetting(pb, src.w, src.h, src.meta.focal, src.meta.aperture, vign)
-	c.geometry(pb, src.w, src.h, src.meta.focal)
-	mut den := []u16{len: buf.len}
-	mut np := ai.NoProgress{}
-	ai.denoise_with(DtFakeModel{}, pb, src.w, src.h, mut den, mut np)!
-	ai.blend(pb, den, 0.6)
-	pipeline.denoise(pb, src.w, src.h, 30, 30)
-	pipeline.defringe(pb, src.w, src.h, 20)
-	full, ow, _ := pipeline.geom_apply(pb, src.w, src.h, 3, job0.geom, true)
-	dai := DetailAi{
-		full:     den
-		fw:       src.w
-		fh:       src.h
-		strength: 60
-	}
-	for r in [Region{700, 400, 400, 300}, Region{0, 0, 300, 200}] {
-		got := detail_prep(src, ln, DetailJob{ ...job0, r: r }, dai)!
-		assert detail_diff(got, full, ow, r) == 0, '${r}'
-	}
-	// Результат другого размера - ошибка, а не мусор
-	if _ := detail_prep(src, ln, DetailJob{ ...job0, r: Region{0, 0, 100, 100} }, DetailAi{
-		...dai
-		fw: src.w - 2
-	})
-	{
-		assert false, 'чужой размер принят'
-	}
 }

@@ -32,8 +32,6 @@ mut:
 	// производное (with_derived)
 	profile string
 	nr        [4]f32 // импульсный, яркостный, цветовой шумодав, ореолы (0..100)
-	ai        f32    // AI-шумодав: сила 1..100, 0 - выключен (ai_nr.v)
-	ai_model  string // id модели, которой посчитан AI (ai.model), при ai > 0
 	// Баланс белого (wb_ui.v): режим - ключ из wb_modes ('' - «как снято»,
 	// тогда температура и оттенок не используются и равны 0), температура
 	// K и оттенок источника. Матрица в params.wb - производная (with_derived).
@@ -253,8 +251,6 @@ fn restore_edit(mut st State, e EditState, mut cv vgui.Canvas, mut hist vgui.Can
 	}
 	// Тон - сразу по текущему сырью; готовая подготовка применит ещё раз
 	apply_pipeline(mut st, mut cv, mut hist)
-	// Откат к снимку с AI: результат модели в памяти - мгновенно, иначе прогон
-	ai_check(mut st, mut app)
 }
 
 // goto_history - переход к записи idx (двойной щелчок или Enter в списке,

@@ -5,11 +5,9 @@ module main
 //
 // «До» - выбранная запись истории (st.ba_ref; по умолчанию первая -
 // «Открыт файл»), посчитанная честно, целиком: если её подготовка сырья
-// (коррекция объектива, шумодав, Capture-резкость, AI)
+// (коррекция объектива, шумодав, Capture-резкость)
 // отличается от нынешней, у «до» своё сырьё (st.ba_lin) - его готовит
-// фоновый prep_compute из dev_linear. Пока оно считается, «до» - по нынешнему сырью. AI у «до»
-// - только если результат модели годится для его сырья (тот же объектив,
-// та же модель). Кадрирование и поворот у «до» - нынешние (иначе
+// фоновый prep_compute из dev_linear. Пока оно считается, «до» - по нынешнему сырью. Кадрирование и поворот у «до» - нынешние (иначе
 // шторка не совпала бы). Тон и цвет - второй прогон pipeline.apply в свой
 // буфер (st.ba_before), пересчёт - только когда меняются сырьё, геометрия
 // или сама запись.
@@ -64,31 +62,20 @@ fn ba_state(st &State) EditState {
 	return st.history[ba_index(st)].state
 }
 
-// ba_ai - сила AI у «до»: результат модели посчитан по нынешнему сырью
-// после объектива - годится, только если у «до» тот же объектив и модель
-fn ba_ai(st &State, b EditState) f32 {
-	return if b.ai > 0 && ai_ready(st) && b.lens_corr == st.edit.lens_corr && b.lman == st.edit.lman && b.ai_model == st.ai_lin_model {
-		b.ai
-	} else {
-		0
-	}
-}
-
 // prep_key_of - подготовка сырья снимка (то, что не входит в тон)
-fn prep_key_of(lens_on bool, man lens.Manual, nr [4]f32, dc [3]f32, ai_s f32) string {
-	return '${lens_on}|${man.key()}|${nr}|${dc}|${ai_s}'
+fn prep_key_of(lens_on bool, man lens.Manual, nr [4]f32, dc [3]f32) string {
+	return '${lens_on}|${man.key()}|${nr}|${dc}'
 }
 
 // ba_prep_key - подготовка сырья «до»
 fn ba_prep_key(st &State, b EditState) string {
-	return prep_key_of(b.lens_corr && !isnil(st.corr), b.lman, b.nr, dc_key(b.params.sharp),
-		ba_ai(st, b))
+	return prep_key_of(b.lens_corr && !isnil(st.corr), b.lman, b.nr, dc_key(b.params.sharp))
 }
 
 // cur_prep_key - подготовка нынешнего сырья (linear)
 fn cur_prep_key(st &State) string {
 	return prep_key_of(st.edit.lens_corr && !isnil(st.corr), st.edit.lman, st.nr_applied,
-		st.dc_applied, st.ai_applied)
+		st.dc_applied)
 }
 
 // ba_own - у «до» своё сырьё и оно готово (иначе - нынешнее): другая
@@ -167,7 +154,6 @@ fn ba_prep_start(mut st State, b EditState, key string) {
 	if st.dev_linear.len == 0 || st.loading || isnil(st.app) {
 		return
 	}
-	ai_s := ba_ai(st, b)
 	job := PrepJob{
 		gen:       st.file_gen
 		src:       share(st.dev_linear)
@@ -181,8 +167,6 @@ fn ba_prep_start(mut st State, b EditState, key string) {
 		zoom:      st.look.zoom
 		man:       b.lman
 		nr:        b.nr
-		ai_src:    if ai_s > 0 { share(st.ai_linear) } else { []u16{} }
-		ai_s:      ai_s
 		dc:        b.params.sharp
 	}
 	st.ba_running = true

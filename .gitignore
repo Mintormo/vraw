@@ -15,13 +15,9 @@
 *.vraw.json
 *.vraw.json.tmp
 
-# Рядом с программой (не в git): настройки, пресеты, скачанные модели и ONNX Runtime
+# Рядом с программой (не в git): настройки, пресеты
 /settings.json
 /presets/
-/models/
-/onnxruntime/
-/onnxruntime.tmp/
-*.part
 
 # Портабельные сборки (tools/portable.sh, tools/windows.sh)
 /dist/

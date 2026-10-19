@@ -404,19 +404,18 @@ fn test_sidecar_legacy_highlight() {
 	assert loaded.history[1].state.params.exposure == f32(0.4)
 }
 
-// AI-шумодав в сайдкаре: сила и модель пишутся и читаются
-fn test_sidecar_ai_field() {
+// Сайдкар версии с AI-шумодавом (поля ai и ai_model, убран 19.10.2026)
+// читается: лишние поля пропускаются, остальные правки на месте
+fn test_sidecar_old_ai_field() {
 	mut st, mut exp, _ := new_state()
 	st.side_path = side_tmp('ai')
-	st.edit.ai = 70
-	st.edit.ai_model = 'scunet_real_gan'
 	drag(mut exp, 0.3)
 	text := os.read_file(st.side_path)!
-	assert text.contains('"ai": 70')
-	assert text.contains('"ai_model": "scunet_real_gan"')
-	loaded := decode_sidecar(text)!
-	assert loaded.history[1].state.ai == 70
-	assert loaded.history[1].state.ai_model == 'scunet_real_gan'
+	assert !text.contains('"ai"')
+	old := text.replace('"lens_corr":', '"ai": 70,\n      "ai_model": "scunet_real_psnr",\n      "lens_corr":')
+	assert old.contains('"ai_model"')
+	loaded := decode_sidecar(old)!
+	assert loaded.history.len == 2
 	assert loaded.history[1].state.params.exposure == f32(0.3)
 }
 

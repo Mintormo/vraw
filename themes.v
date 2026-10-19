@@ -176,7 +176,6 @@ fn paint_ui(mut st State, th vgui.Theme) {
 	for i in 0 .. st.hint_labels.len {
 		st.hint_labels[i].color = p.hint
 	}
-	paint_ai(mut st, th)
 	for i in 0 .. st.secondary_labels.len {
 		st.secondary_labels[i].color = p.secondary
 	}
