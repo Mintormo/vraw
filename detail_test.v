@@ -31,7 +31,7 @@ fn detail_case() ?(&DetailSrc, &lens.Database) {
 	unsafe { vmemcpy(dev.data, img.data_u16(), n * 2) }
 	db := lens.load_db() or { return none }
 	return &DetailSrc{
-		path: path
+		key:  path
 		w:    img.width
 		h:    img.height
 		dev:  dev

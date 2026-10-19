@@ -63,6 +63,7 @@ struct AiJob {
 	vign     f32
 	zoom     f32 = 1
 	man      lens.Manual
+	demosaic int = -1 // алгоритм демозаики полного кадра (Settings.demosaic_qual)
 	w        int
 	h        int
 	cache    &ai.Cache = unsafe { nil }
@@ -262,6 +263,7 @@ fn ai_check(mut st State, mut app vgui.App) {
 		vign:     st.look.vign
 		zoom:     st.look.zoom
 		man:      st.edit.lman
+		demosaic: st.settings.demosaic_qual()
 		w:        st.pw
 		h:        st.ph
 		cache:      cache
@@ -383,7 +385,7 @@ fn ai_full_run(job AiJob, mut app vgui.App, on_progress fn (&AiCtl, int, int, f6
 	mut cache := unsafe { job.cache }
 	model := cache.get()!
 	mut d := raw.open(job.path)!
-	mut img := d.develop() or {
+	mut img := d.develop(demosaic: job.demosaic) or {
 		d.close()
 		return err
 	}

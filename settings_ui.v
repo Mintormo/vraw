@@ -24,6 +24,7 @@ mut:
 	cache_ck &vgui.CheckBox    = unsafe { nil }
 	cache_cb &vgui.ComboBox    = unsafe { nil }
 	aicache_ck &vgui.CheckBox = unsafe { nil } // кэш AI на диске (aicache.v)
+	demosaic_cb &vgui.ComboBox = unsafe { nil } // демозаика полного кадра
 	// сколько помнить недавних файлов и папок (recent.v)
 	rfiles_cb &vgui.ComboBox = unsafe { nil }
 	rdirs_cb  &vgui.ComboBox = unsafe { nil }
@@ -259,6 +260,19 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 		save_settings(st.settings)
 	}
 	u.aicache_ck = aicache_ck
+	// Демозаика полного кадра (Settings.demosaic): 1:1 пересчитывается
+	// сразу, экспорт - со следующего
+	mut demosaic_cb := vgui.combo_box()
+	demosaic_cb.set_items(demosaic_names)
+	demosaic_cb.on_change = fn [mut st] (i int, _ string) {
+		if i < 0 || i >= demosaic_keys.len || demosaic_keys[i] == st.settings.demosaic {
+			return
+		}
+		st.settings.demosaic = demosaic_keys[i]
+		save_settings(st.settings)
+		detail_check(mut st)
+	}
+	u.demosaic_cb = demosaic_cb
 	// Недавние: сколько помнить (лишнее с конца - сразу)
 	mut rfiles_cb := vgui.combo_box()
 	rfiles_cb.set_items(recent_counts.map('${it}'))
@@ -281,7 +295,7 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	mut dw := &dlg.win
 	btn_col := column_width(mut dw, [i18n.tr('Закрыть')], 0) + 2 * vgui.measure_pad_x
 	look_col := column_width(mut dw, [i18n.tr('Тема'), i18n.tr('Фон вокруг снимка'), i18n.tr('Масштаб интерфейса'),
-		i18n.tr('Не больше'), i18n.tr('Файлов'), i18n.tr('Папок')], 8)
+		i18n.tr('Не больше'), i18n.tr('Файлов'), i18n.tr('Папок'), i18n.tr('Демозаика')], 8)
 	// Списки оформления - одной ширины, по самому длинному пункту обоих
 	// (24 - стрелка ComboBox, как в его measure)
 	mut look_items := i18n.tr_all(theme_names)
@@ -311,6 +325,11 @@ fn build_settings(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	general.add(note(mut u, i18n.tr('Возврат к недавнему кадру - мгновенно, без повторной проявки (~110-150 МБ на кадр 24 Мп)')))
 	general.add(aicache_ck)
 	general.add(note(mut u, i18n.tr('Папка .vraw-cache рядом с RAW, ~145 МБ на кадр 24 Мп: повторный AI - за секунду вместо ~16 минут')))
+
+	general.add(caption(i18n.tr('Проявка')))
+	general.add(labeled(i18n.tr('Демозаика'), demosaic_cb, look_col, look_w))
+	general.add(note(mut u, i18n.tr('Разница - в мелких деталях: муар, «лабиринт», ступеньки на тонких линиях')))
+	general.add(note(mut u, i18n.tr('Видна при 100% и в экспорте: превью - половинного размера, без демозаики')))
 
 	general.add(caption(i18n.tr('Недавние')))
 	general.add(labeled(i18n.tr('Файлов'), rfiles_cb, look_col, look_w))
@@ -575,6 +594,8 @@ fn sync_settings_ui(mut st State) {
 	ccb.enabled = ck.checked
 	mut ack := u.aicache_ck
 	ack.checked = !st.settings.no_ai_cache
+	mut dcb := u.demosaic_cb
+	dcb.set_selected(demosaic_keys.index(st.settings.demosaic))
 	mut rf := u.rfiles_cb
 	rf.set_selected(recent_counts.index(recent_limit(st.settings.recent_files_n)))
 	mut rd := u.rdirs_cb

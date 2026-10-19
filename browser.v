@@ -501,6 +501,49 @@ fn show_frame(mut st State, path string, mut app vgui.App) {
 	sync_strip(mut st)
 }
 
+// refresh_folder - лента заново из папки (F5, кнопка на полосе): кадры,
+// добавленные в папку или убранные из неё за время работы. Открытый кадр
+// остаётся открытым (пропал с диска - просто без строки в ленте),
+// выделенные кадры - выделенными, фильтр - прежний.
+fn refresh_folder(mut st State) {
+	if st.folder == '' || isnil(st.strip) || isnil(st.app) {
+		return
+	}
+	sel := strip_selection(st).map(st.frames[it].path)
+	mut app := st.app
+	load_folder(mut st, st.folder, st.raw_path, mut app)
+	st.frame_idx = -1
+	for i, f in st.frames {
+		if st.raw_path != '' && f.path == st.raw_path {
+			st.frame_idx = i
+			break
+		}
+	}
+	sync_strip(mut st)
+	if sel.len < 2 {
+		return
+	}
+	// Несколько выделенных - снова те же (что остались и проходят
+	// фильтр); открытый кадр - последним, чтобы остался текущим
+	mut rows := []int{}
+	for i, f in st.frames {
+		r := row_of(st, i)
+		if r >= 0 && f.path in sel && i != st.frame_idx {
+			rows << r
+		}
+	}
+	cur := row_of(st, st.frame_idx)
+	if cur >= 0 && st.raw_path in sel {
+		rows << cur
+	}
+	if rows.len > 1 {
+		mut strip := st.strip
+		strip.set_selection(rows)
+		strip_info_text(mut st)
+		sync_avail(mut st)
+	}
+}
+
 // sync_strip - выделение ленты на текущем кадре, жирная подпись у него,
 // прокрутка - текущий по центру, подпись над лентой.
 fn sync_strip(mut st State) {
@@ -689,8 +732,11 @@ fn layout_strip(mut st State) {
 		v.add(sb)
 	}
 	if !isnil(st.strip_toggle) {
+		// Значок - панель со стрелкой к краю окна (свернуть) или от него
 		mut b := st.strip_toggle
-		b.text = if st.strip_open { i18n.tr('Свернуть ленту') } else { i18n.tr('Развернуть ленту') }
+		side := if top { 'top' } else { 'bottom' }
+		b.icon_name = 'panel-${side}-' + if st.strip_open { 'close' } else { 'open' }
+		b.tooltip = if st.strip_open { i18n.tr('Свернуть ленту') } else { i18n.tr('Развернуть ленту') }
 	}
 }
 

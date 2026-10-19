@@ -20,6 +20,7 @@ mut:
 	output_bps     int    // бит на канал (vraw всегда берёт 16)
 	gamm           [6]f64 // гамма-кривая; [0]=1,[1]=1 - линейный выход
 	highlight      int    // пересветы: 0 клип, 1 без клипа, 2 смешение, 3..9 реконструкция
+	user_qual      int    // демозаика (DevParams.demosaic)
 }
 
 @[typedef]
@@ -126,6 +127,10 @@ pub mut:
 	// 0 - клип (дефолт), 1 - без клипа, 2 - смешение (blend),
 	// 3..9 - реконструкция (меньше - белее, больше - цветнее).
 	highlight int
+	// demosaic: алгоритм демозаики LibRaw (user_qual): -1 - по умолчанию
+	// (AHD), 0 линейный, 1 VNG, 2 PPG, 3 AHD, 4 DCB, 11 DHT, 12 AAHD.
+	// В half-size демозаики нет (пиксель - ячейка 2×2), там не действует.
+	demosaic int = -1
 }
 
 // Developer держит открытый RAW-файл и позволяет проявлять его
@@ -186,6 +191,7 @@ pub fn (mut d Developer) develop(p DevParams) !DevImage {
 		d.lr.params.use_camera_wb = if p.use_camera_wb { 1 } else { 0 }
 		d.lr.params.half_size = if p.half { 1 } else { 0 }
 		d.lr.params.highlight = p.highlight
+		d.lr.params.user_qual = p.demosaic
 		d.lr.params.output_bps = 16
 		d.lr.params.gamm[0] = 1.0
 		d.lr.params.gamm[1] = 1.0

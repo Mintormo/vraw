@@ -253,6 +253,7 @@ struct ExportOpts {
 	size     ExportSize // размер на выход (окно «Экспорт»); пусто - как есть
 	half     bool       // половинный размер, как превью (левый кадр сравнения, pair.v)
 	bits16   bool       // 16 бит на канал (Settings.export_bits16)
+	demosaic int = -1   // алгоритм демозаики LibRaw (Settings.demosaic_qual)
 }
 
 // develop_full - проявка RAW-файла по настройкам кадра e в 8-битный (с
@@ -270,7 +271,7 @@ fn develop_full(path string, e EditState, db &lens.Database, o ExportOpts) !Imag
 		return ExportCancelled{}
 	}
 	mut d := raw.open(path)!
-	mut img := d.develop(half: o.half) or {
+	mut img := d.develop(half: o.half, demosaic: o.demosaic) or {
 		d.close()
 		return err
 	}

@@ -132,6 +132,7 @@ struct DetailReq {
 	side      int
 	path      string
 	src_key   string
+	demosaic  int // алгоритм демозаики (raw.DevParams.demosaic)
 	lens_key  string
 	prep      DetailPrep
 	corr      &lens.Corrector = unsafe { nil }
@@ -166,7 +167,7 @@ mut:
 fn detail_prep_key(st &State, side int) string {
 	g := out_geom(&st.edit)
 	p := detail_prep_of(st, side)
-	return '${st.file_gen}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
+	return '${st.file_gen}|${st.settings.demosaic}|${p.use_lens}|${p.man.key()}|${st.look.vign}|${st.look.zoom}|${p.nr}|${dc_key(p.dc)}|${g}|${p.ai_s}|${if p.ai_s > 0 {
 		st.ai_raw_gen
 	} else {
 		0
@@ -315,7 +316,7 @@ fn detail_check(mut st State) {
 // find_src - готовый полный кадр по ключу или nil
 fn find_src(dt &DetailCtl, key string) &DetailSrc {
 	for s in dt.srcs {
-		if s.path == key {
+		if s.key == key {
 			return s
 		}
 	}
@@ -338,7 +339,7 @@ fn detail_start(mut st State, side int) {
 		return
 	}
 	p := detail_prep_of(st, side)
-	src_key := st.raw_path
+	src_key := detail_src_key(st.raw_path, st.settings.demosaic_qual())
 	lens_key := '${st.raw_path}|${st.look.vign}|${st.look.zoom}'
 	use_ai := p.ai_s > 0 && st.ai_full.len > 0
 	// Шторка: «до» - ровно на месте готового «после» (сшиваются по линии)
@@ -354,6 +355,7 @@ fn detail_start(mut st State, side int) {
 		side:      side
 		path:      st.raw_path
 		src_key:   src_key
+		demosaic:  st.settings.demosaic_qual()
 		lens_key:  lens_key
 		prep:      DetailPrep{
 			...p
@@ -391,7 +393,7 @@ fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 		lens: req.lens
 	}
 	if isnil(res.src) {
-		res.src = load_detail_src(req.path) or {
+		res.src = load_detail_src(req.path, req.demosaic) or {
 			res.err = err.msg()
 			post_result(mut app, on_done, res)
 			return

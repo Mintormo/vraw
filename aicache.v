@@ -7,8 +7,8 @@ module main
 // Игоря) - съёмку переносят папкой, кэш едет с ней. Один файл на кадр:
 // пересчёт (другой объектив) его перезаписывает. Подходит ли файл -
 // по ключу ai_cache_key: RAW (размер, время изменения - путь не входит,
-// папку можно переносить), коррекция объектива, от которой зависит сырьё
-// модели, и модель. Выключается в «Настройки - Общие» (no_ai_cache).
+// папку можно переносить), коррекция объектива и демозаика, от которых
+// зависит сырьё модели, и модель. Выключается в «Настройки - Общие» (no_ai_cache).
 //
 // Формат: строка ai_cache_magic, строка ключа (сверяется при чтении),
 // «ширина высота» по 8 цифр, затем данные u16 подряд (порядок байтов
@@ -30,7 +30,10 @@ fn ai_cache_path(raw_path string) string {
 fn ai_cache_key(st &State) string {
 	fst := os.stat(st.raw_path) or { return '' }
 	use_prof := st.edit.lens_corr && !isnil(st.corr)
-	return '${fst.size}|${fst.mtime}|${use_prof}|${st.look.vign}|${st.look.zoom}|${st.edit.lman.key()}|${ai.model.id}'
+	// Демозаика по умолчанию (AHD) в ключ не входит: кэш, записанный до
+	// выбора демозаики, остаётся годным
+	dm := if st.settings.demosaic == 'ahd' { '' } else { '|${st.settings.demosaic}' }
+	return '${fst.size}|${fst.mtime}|${use_prof}|${st.look.vign}|${st.look.zoom}|${st.edit.lman.key()}|${ai.model.id}${dm}'
 }
 
 fn ai_cache_head(key string, fw int, fh int) string {

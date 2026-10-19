@@ -33,6 +33,8 @@ mut:
 	no_navigator bool
 	// Кэш результата AI-шумодава в .vraw-cache папки снимков (aicache.v)
 	no_ai_cache bool
+	// демозаика полного кадра (ключ из demosaic_keys): 1:1, экспорт, AI
+	demosaic string = 'ahd'
 	// Недавние файлы и папки (recent.v), новые - первыми
 	recent_files []string
 	recent_dirs  []string
@@ -215,6 +217,7 @@ fn settings_from(s Settings) Settings {
 		no_info:        s.no_info
 		no_navigator:   s.no_navigator
 		no_ai_cache:    s.no_ai_cache
+		demosaic:       if s.demosaic in demosaic_keys { s.demosaic } else { 'ahd' }
 		recent_files:   s.recent_files.filter(it != '')#[..recent_limit(s.recent_files_n)].clone()
 		recent_dirs:    s.recent_dirs.filter(it != '')#[..recent_limit(s.recent_dirs_n)].clone()
 		recent_files_n: if s.recent_files_n in recent_counts { s.recent_files_n } else { 0 }
@@ -227,6 +230,18 @@ fn settings_from(s Settings) Settings {
 			jpeg_q_default
 		}
 	}
+}
+
+// Демозаика полного кадра (raw.DevParams.demosaic): алгоритмы LibRaw.
+// Превью - half-size, без демозаики: выбор виден в 1:1 и в экспорте.
+const demosaic_keys = ['ahd', 'dcb', 'dht', 'aahd']
+const demosaic_names = ['AHD', 'DCB', 'DHT', 'AAHD']
+const demosaic_quals = [3, 4, 11, 12]
+
+// demosaic_qual - код LibRaw (user_qual) выбранной демозаики
+fn (s &Settings) demosaic_qual() int {
+	i := demosaic_keys.index(s.demosaic)
+	return if i >= 0 { demosaic_quals[i] } else { -1 }
 }
 
 // save_settings - ошибка записи не критична (молча: настройки просто не

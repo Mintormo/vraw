@@ -28,7 +28,7 @@ const detail_margin = 96
 // воркер, пока результат в пути), отпускает free().
 @[heap]
 struct DetailSrc {
-	path string
+	key  string // путь и демозаика (load_detail_src)
 	w    int
 	h    int
 	meta raw.Meta
@@ -40,14 +40,14 @@ fn (mut s DetailSrc) free() {
 	bigbuf.free(mut s.dev)
 }
 
-// load_detail_src - полный кадр из файла (~0.6 с): свой LibRaw, годится для
-// фонового потока
-fn load_detail_src(path string) !&DetailSrc {
+// load_detail_src - полный кадр из файла (~0.6 с) с демозаикой qual
+// (raw.DevParams.demosaic): свой LibRaw, годится для фонового потока
+fn load_detail_src(path string, qual int) !&DetailSrc {
 	mut d := raw.open(path)!
 	defer {
 		d.close()
 	}
-	mut img := d.develop()!
+	mut img := d.develop(demosaic: qual)!
 	defer {
 		img.free()
 	}
@@ -55,12 +55,18 @@ fn load_detail_src(path string) !&DetailSrc {
 	mut dev := bigbuf.new_u16(n)
 	unsafe { vmemcpy(dev.data, img.data_u16(), n * 2) }
 	return &DetailSrc{
-		path: path
+		key:  detail_src_key(path, qual)
 		w:    img.width
 		h:    img.height
 		dev:  dev
 		meta: d.meta()
 	}
+}
+
+// detail_src_key - ключ полного кадра: другой алгоритм демозаики - другое
+// сырьё
+fn detail_src_key(path string, qual int) string {
+	return '${path}|${qual}'
 }
 
 // DetailLens - объектив полного кадра: профиль виньетирования (сила vign)

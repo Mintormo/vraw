@@ -853,6 +853,7 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 		progress: StageProgress(progress)
 		size:     job.size
 		bits16:   job.settings.export_bits16(job.format)
+		demosaic: job.settings.demosaic_qual()
 	) or {
 		if err is ExportCancelled {
 			report(mut app, on_done, .cancelled, i18n.tr('Экспорт отменён'))
@@ -2629,8 +2630,13 @@ fn main() {
 	mut strip_info := vgui.label('')
 	st.secondary_labels << strip_info
 	st.strip_info = strip_info
-	mut strip_toggle := vgui.button(i18n.tr('Свернуть ленту'))
-	strip_toggle.style = .outline
+	// Кнопки полосы - значки; значок и подсказку свернуть/развернуть
+	// ставит layout_strip
+	mut strip_refresh := icon_button('refresh-cw', i18n.tr('Обновить ленту'))
+	strip_refresh.on_click = fn [mut st] () {
+		refresh_folder(mut st)
+	}
+	mut strip_toggle := icon_button('panel-bottom-close', i18n.tr('Свернуть ленту'))
 	strip_toggle.on_click = fn [mut st] () {
 		set_strip_open(mut st, !st.strip_open)
 	}
@@ -2649,6 +2655,7 @@ fn main() {
 	strip_bar.set_spacing(8)
 	strip_bar.add(strip_info, flex: 1)
 	strip_bar.add(filter_cb)
+	strip_bar.add(strip_refresh)
 	strip_bar.add(strip_toggle)
 	st.strip_bar = strip_bar
 	// ←/→, Home/End - соседний, первый, последний кадр (если фокус не у
@@ -3248,6 +3255,12 @@ fn main() {
 		set_strip_visible(mut st, st.fullscreen, v)
 	}
 	st.m_strip = m_strip
+	// Обновить ленту: файлы, скопированные в папку во время работы
+	mut m_refresh := vgui.menu_action(i18n.tr('Обновить ленту'))
+	m_refresh.shortcut = 'F5'
+	m_refresh.on_click = fn [mut st] () {
+		refresh_folder(mut st)
+	}
 	mut m_panel := vgui.menu_checkbox(i18n.tr('Панель инструментов'), !st.settings.no_panel)
 	m_panel.shortcut = 'F8'
 	m_panel.on_toggle = fn [mut st] (v bool) {
@@ -3323,12 +3336,12 @@ fn main() {
 		m_themes.add(it)
 	}
 	bar.add_menu(i18n.tr('Вид'), [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_top, m_panel, m_left, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_refresh, m_top, m_panel, m_left, m_bg, m_themes])
 	view_ids := ['view.fit', 'view.z50', 'view.z100', 'view.z200', 'view.zoom', 'view.split',
 		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.info', 'view.nav', 'view.full',
-		'view.strip', 'view.top', 'view.panel', 'view.left']
+		'view.strip', 'view.refresh', 'view.top', 'view.panel', 'view.left']
 	view_items := [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_pair, m_swap, m_jpeg,
-		m_clipwarn, m_mask, m_info, m_nav, m_full, m_strip, m_top, m_panel, m_left]
+		m_clipwarn, m_mask, m_info, m_nav, m_full, m_strip, m_refresh, m_top, m_panel, m_left]
 	for i, id in view_ids {
 		mut it := view_items[i]
 		hk_add(mut st, id, 'Вид', mut it)
