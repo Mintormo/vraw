@@ -74,6 +74,8 @@ mut:
 	// группы настроек в окне «Копировать настройки» и «Сохранить пресет»
 	// (presets.v) - последний выбор; нет в файле - все
 	copy_groups []string = default_copy_groups.clone()
+	// Флажок «Баланс белого сдвигом» окна сохранения пресета - последний выбор
+	preset_wb_shift bool
 	// кадрирование (crop.v): последняя выбранная пропорция - по умолчанию
 	// для кадра без рамки; сетка поверх рамки
 	crop_aspect string
@@ -193,6 +195,7 @@ fn settings_from(s Settings) Settings {
 		} else {
 			default_copy_groups.clone()
 		}
+		preset_wb_shift: s.preset_wb_shift
 		crop_aspect: if s.crop_aspect in crop_aspects { s.crop_aspect } else { '' }
 		crop_grid:   if s.crop_grid in crop_grids { s.crop_grid } else { 'thirds' }
 		auto_advance: s.auto_advance

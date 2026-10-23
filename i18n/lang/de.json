@@ -662,5 +662,7 @@
  "Удалить отклонённые": "Abgelehnte löschen",
  "Удалить отклонённые...": "Abgelehnte löschen...",
  "Файлов": "Dateien",
- "не удалось переместить в корзину (код {0})": "konnte nicht in den Papierkorb verschoben werden (Code {0})"
+ "не удалось переместить в корзину (код {0})": "konnte nicht in den Papierkorb verschoben werden (Code {0})",
+ "Баланс белого сдвигом от «как снято»": "Weißabgleich als Verschiebung von «wie aufgenommen»",
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Die Vorgabe verschiebt den Weißabgleich jedes Fotos von seinem «wie aufgenommen» um so viel, wie er hier verschoben ist. Ohne Häkchen - setzt dieselbe Temperatur und denselben Farbton. Erfordert die Gruppe «Weißabgleich und Farbe»."
 }

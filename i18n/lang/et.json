@@ -662,5 +662,7 @@
  "Удалить отклонённые": "Kustuta tagasilükatud",
  "Удалить отклонённые...": "Kustuta tagasilükatud...",
  "Файлов": "Faile",
- "не удалось переместить в корзину (код {0})": "prügikasti viimine ebaõnnestus (kood {0})"
+ "не удалось переместить в корзину (код {0})": "prügikasti viimine ebaõnnestus (kood {0})",
+ "Баланс белого сдвигом от «как снято»": "Valge tasakaal nihkena «nagu pildistatud» suhtes",
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Eelseadistus nihutab iga kaadri valge tasakaalu tema «nagu pildistatud» suhtes sama palju, kui see on siin nihutatud. Ilma märkeruuduta - seab sama temperatuuri ja tooni. Vajab gruppi «Valge tasakaal ja värv»."
 }

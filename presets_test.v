@@ -3,7 +3,9 @@ module main
 // Копирование настроек и пресеты (presets.v): слияние групп, вставка в
 // сайдкар неоткрытого кадра и в открытый кадр, файлы пресетов.
 import os
+import math
 import vgui
+import pipeline
 
 fn preset_tmp_dir(name string) string {
 	dir := os.join_path(os.temp_dir(), 'vraw_presets_test', name)
@@ -235,4 +237,137 @@ fn test_rename_preset() {
 		assert false
 	}
 	assert os.exists(bad)
+}
+
+// ББ сдвигом: майреды от «как снято», «как снято» - нулевой сдвиг,
+// пределы ползунков
+fn test_wb_shift_math() {
+	mut e := neutral_edit()
+	e.wb_mode = 'custom'
+	e.wb_temp = 6250 // 160 майред при «как снято» 5000 K (200): сдвиг -40
+	e.wb_tint = 8
+	sh := wb_shift_of(e, 5000, 3)
+	assert sh.on && math.abs(sh.mired + 40) < 0.01 && sh.tint == 5
+	assert wb_shift_of(neutral_edit(), 5000, 3) == WbShift{
+		on: true
+	}
+	mut src := neutral_edit()
+	src.wb_shift = sh
+	// Лампа 2800 K (357 майред): 317,1 майред - 3153 K
+	r := wb_apply_shift(src, 2800, -2)
+	assert r.wb_mode == 'custom' && r.wb_temp == 3153 && r.wb_tint == 3
+	assert !r.wb_shift.on
+	// Нулевой сдвиг - «как снято»
+	src.wb_shift = WbShift{
+		on: true
+	}
+	z := wb_apply_shift(src, 4000, 7)
+	assert z.wb_mode == '' && z.wb_temp == 0 && z.wb_tint == 0
+	// За пределами ползунков - край
+	src.wb_shift = WbShift{
+		on:    true
+		mired: -400
+		tint:  500
+	}
+	c := wb_apply_shift(src, 9000, 0)
+	assert c.wb_temp == pipeline.wb_temp_max && c.wb_tint == pipeline.wb_tint_max
+	// Без сдвига - как есть
+	assert wb_apply_shift(sample_edit(), 3000, 0).wb_temp == 6500
+}
+
+// Файл пресета: сдвиг - версия 2 и поля wb_*; без группы цвета или без
+// сдвига - версия 1, как раньше; импорт сдвиг сохраняет
+fn test_preset_wb_shift_file() {
+	dir := preset_tmp_dir('wbshift')
+	mut e := sample_edit()
+	e.wb_shift = wb_shift_of(e, 5000, 4)
+	path := save_preset(dir, 'Тепло', e, ['color', 'hsl'])!
+	text := os.read_file(path)!
+	assert text.contains('"version": 2') && text.contains('"wb_shift": true')
+	l, groups := load_preset(path)!
+	assert groups == ['color', 'hsl']
+	assert l.wb_shift.on && math.abs(l.wb_shift.mired - e.wb_shift.mired) < 0.01
+	assert l.wb_shift.tint == 6
+	assert l.wb_temp == 6500 // ББ исходного кадра - для справки
+	no_color := save_preset(dir, 'Без цвета', e, ['hsl'])!
+	t2 := os.read_file(no_color)!
+	assert t2.contains('"version": 1') && t2.contains('"wb_shift": false')
+	l2, _ := load_preset(no_color)!
+	assert !l2.wb_shift.on
+	plain := save_preset(dir, 'Числом', sample_edit(), ['color'])!
+	assert os.read_file(plain)!.contains('"version": 1')
+	other := preset_tmp_dir('wbshift_import')
+	name := import_preset(path, other)!
+	l3, _ := load_preset(os.join_path(other, name + '.json'))!
+	assert l3.wb_shift == l.wb_shift
+	// Версия новее программы - ошибка
+	bad := os.join_path(dir, 'new.json')
+	os.write_file(bad, text.replace('"version": 2', '"version": 3'))!
+	load_preset(bad) or {
+		assert err.msg().contains('новее')
+		return
+	}
+	assert false
+}
+
+// Вставка пресета со сдвигом: открытый кадр - от его «как снято», ББ
+// числом в истории и сайдкаре; неоткрытый кадр без RAW - ошибка
+fn test_paste_wb_shift() {
+	dir := preset_tmp_dir('wbshift_paste')
+	mut st := &State{}
+	st.edit = neutral_edit()
+	st.side_path = sidecar_path(os.join_path(dir, 'IMG_5.CR3'))
+	st.shot_temp = 2800
+	st.shot_tint = -2
+	start_history(mut st)
+	mut cv := vgui.canvas(4, 3)
+	mut hist := vgui.canvas(4, 3)
+	mut nm := vgui.notification_manager_at(.top_left)
+	mut app := &vgui.App{}
+	mut src := neutral_edit()
+	src.params.vibrance = 10
+	src.wb_shift = WbShift{
+		on:    true
+		mired: -40
+		tint:  5
+	}
+	paste_settings(mut st, src, ['color'], 'Пресет: Тепло', mut cv, mut hist, mut nm, mut
+		app)
+	assert st.edit.wb_mode == 'custom' && st.edit.wb_temp == 3153 && st.edit.wb_tint == 3
+	assert !st.edit.wb_shift.on && st.edit.params.vibrance == 10
+	side := load_sidecar(st.side_path)!
+	assert side.history[side.current].state.wb_temp == 3153
+	// Без группы цвета сдвиг не трогает ББ
+	paste_settings(mut st, src, ['tone'], 'Пресет: Тон', mut cv, mut hist, mut nm, mut
+		app)
+	assert st.edit.wb_temp == 3153
+	// Неоткрытый кадр: «как снято» из заголовка RAW, нет файла - ошибка
+	src_for_frame(st, os.join_path(dir, 'IMG_6.CR3'), src, ['color']) or {
+		assert err.msg().len > 0
+		return
+	}
+	assert false
+}
+
+// Сдвиг на настоящем RAW: «как снято» читается из заголовка
+fn test_file_as_shot() {
+	path := os.getenv_opt('VRAW_TEST_CR3') or { os.join_path(@VMODROOT, 'IMG_0991.CR3') }
+	if !os.exists(path) {
+		eprintln('нет тестового CR3, пропуск')
+		return
+	}
+	t, k := file_as_shot(path)!
+	assert t >= pipeline.wb_temp_min && t <= pipeline.wb_temp_max
+	assert math.abs(k) <= pipeline.wb_tint_max
+	mut src := neutral_edit()
+	src.wb_shift = WbShift{
+		on:    true
+		mired: -20
+	}
+	st := &State{}
+	r := src_for_frame(st, path, src, ['color'])!
+	assert r.wb_mode == 'custom' && math.abs(r.wb_tint - k) < 0.001
+	assert r.wb_temp > t
+	file_as_shot('/нет/такого.CR3') or { return }
+	assert false
 }

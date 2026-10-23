@@ -9,8 +9,10 @@ fn test_settings_roundtrip() {
 	s.no_frame_cache = true
 	s.frame_cache_mb = 3072
 	s.lang = 'de'
+	s.preset_wb_shift = true
 	back := settings_from(json2.decode[Settings](json2.encode(s))!)
 	assert back.no_frame_cache
+	assert back.preset_wb_shift
 	assert back.frame_cache_mb == 3072
 	assert back.lang == 'de'
 	// незнакомый язык - как в системе

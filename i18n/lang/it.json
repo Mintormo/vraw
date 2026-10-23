@@ -662,5 +662,7 @@
  "Удалить отклонённые": "Elimina scartate",
  "Удалить отклонённые...": "Elimina scartate...",
  "Файлов": "File",
- "не удалось переместить в корзину (код {0})": "impossibile spostare nel cestino (codice {0})"
+ "не удалось переместить в корзину (код {0})": "impossibile spostare nel cestino (codice {0})",
+ "Баланс белого сдвигом от «как снято»": "Bilanciamento del bianco come spostamento da «come scattato»",
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Il preset sposta il bilanciamento del bianco di ogni foto dal suo «come scattato» di quanto è spostato qui. Senza spunta - imposta la stessa temperatura e tonalità. Richiede il gruppo «Bilanciamento del bianco e colore»."
 }

@@ -15,9 +15,16 @@ module main
 // presets/<имя>.json рядом с программой (vraw переносим, как settings.json
 // и models/). Меню «Пресеты»: применить (так же, как вставка), сохранить
 // текущие настройки кадра пресетом (то же окно групп с полем имени).
+//
+// Баланс белого в пресете - числом (температура и оттенок как есть) или
+// сдвигом от «как снято» (флажок окна сохранения, WbShift): сдвиг при
+// вставке считается от «как снято» каждого кадра (wb_apply_shift).
 import os
+import math
 import json2
 import vgui
+import raw
+import pipeline
 import i18n
 
 // Группы настроек: ключи (settings.json, файлы пресетов) и названия в окне
@@ -139,6 +146,81 @@ fn groups_text(n int) string {
 	return i18n.trf('{0} {1} из {2}', '${n}', i18n.pl(n, 'группа|группы|групп'), '${copy_groups.len}')
 }
 
+// ── Баланс белого сдвигом ──
+
+// WbShift - баланс белого сдвигом от «как снято»: температура в майредах
+// (1e6 / K; одинаковый на глаз сдвиг при любом свете, минус - теплее) и
+// оттенок в единицах ползунка. on = false - сдвига нет, ББ числом.
+struct WbShift {
+	on    bool
+	mired f32
+	tint  f32
+}
+
+// wb_shift_of - ББ настроек e как сдвиг от «как снято» кадра (shot_temp,
+// shot_tint); «как снято» - нулевой сдвиг
+fn wb_shift_of(e EditState, shot_temp f32, shot_tint f32) WbShift {
+	if e.wb_mode == '' || e.wb_temp <= 0 || shot_temp <= 0 {
+		return WbShift{
+			on: true
+		}
+	}
+	return WbShift{
+		on:    true
+		mired: f32(1e6 / f64(e.wb_temp) - 1e6 / f64(shot_temp))
+		tint:  e.wb_tint - shot_tint
+	}
+}
+
+// wb_apply_shift - настройки e со сдвигом ББ, разрешённым под кадр с «как
+// снято» shot_temp, shot_tint: режим «Свой» с температурой и оттенком
+// в пределах ползунков; нулевой сдвиг - «как снято». Без сдвига - e как есть.
+fn wb_apply_shift(e EditState, shot_temp f32, shot_tint f32) EditState {
+	if !e.wb_shift.on {
+		return e
+	}
+	mut r := e
+	r.wb_shift = WbShift{}
+	sh := e.wb_shift
+	if math.abs(sh.mired) < 0.05 && math.abs(sh.tint) < 0.05 {
+		r.wb_mode = ''
+		r.wb_temp = 0
+		r.wb_tint = 0
+		return r
+	}
+	m := math.max(1e6 / f64(pipeline.wb_temp_max), 1e6 / f64(shot_temp) + f64(sh.mired))
+	r.wb_mode = 'custom'
+	r.wb_temp = f32(math.round(math.max(f64(pipeline.wb_temp_min), math.min(f64(pipeline.wb_temp_max),
+		1e6 / m))))
+	r.wb_tint = clampf(shot_tint + sh.tint, -pipeline.wb_tint_max, pipeline.wb_tint_max)
+	return r
+}
+
+// file_as_shot - «как снято» RAW-файла (температура, оттенок): только
+// заголовок, без проявки
+fn file_as_shot(path string) !(f32, f32) {
+	mut d := raw.open(path)!
+	defer {
+		d.close()
+	}
+	t, k := cam_color(d.color()).as_shot()
+	return t, k
+}
+
+// src_for_frame - вставляемые настройки под кадр p: сдвиг ББ пресета
+// (с группой цвета) - от «как снято» кадра: открытого - st.shot_temp/tint,
+// прочих - из заголовка RAW (нет файла - ошибка)
+fn src_for_frame(st &State, p string, src EditState, groups []string) !EditState {
+	if !src.wb_shift.on || 'color' !in groups {
+		return src
+	}
+	if st.history.len > 0 && sidecar_path(p) == st.side_path {
+		return wb_apply_shift(src, st.shot_temp, st.shot_tint)
+	}
+	t, k := file_as_shot(p)!
+	return wb_apply_shift(src, t, k)
+}
+
 // ── Вставка в кадры ──
 
 // paste_targets - RAW-файлы для вставки: выделенные в ленте, если их
@@ -202,9 +284,13 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 	mut done := 0
 	mut failed := []string{}
 	for p in targets {
+		s := src_for_frame(st, p, src, groups) or {
+			failed << '${os.file_name(p)}: ${err.msg()}'
+			continue
+		}
 		if st.history.len > 0 && sidecar_path(p) == st.side_path {
 			// Открытый кадр - как обычная правка: виджеты, пересчёт, история
-			e := merge_groups(st.edit, src, groups)
+			e := merge_groups(st.edit, s, groups)
 			restore_edit(mut st, e, mut cv, mut hist, mut app)
 			n := st.history.len
 			pos := st.hist_pos
@@ -214,7 +300,7 @@ fn paste_settings(mut st State, src EditState, groups []string, name string, mut
 			}
 			continue
 		}
-		changed := paste_to_file(p, src, groups, name) or {
+		changed := paste_to_file(p, s, groups, name) or {
 			failed << '${os.file_name(p)}: ${err.msg()}'
 			continue
 		}
@@ -276,17 +362,47 @@ fn copy_settings(mut st State, groups []string) {
 // ── Пресеты ──
 
 const preset_app = 'vraw-preset'
-const preset_version = 1
+// Версия 2 - ББ сдвигом (wb_shift); пресет без сдвига пишется версией 1,
+// его читают и старые vraw. Старый vraw пресет со сдвигом не применит
+// («версия новее»), а не применит температуру из state числом.
+const preset_version = 2
 
 // PresetFile - файл пресета: группы и настройки (формат сайдкара,
-// SideState; значения вне групп в файле есть, но не применяются)
+// SideState; значения вне групп в файле есть, но не применяются).
+// wb_shift - ББ сдвигом от «как снято» (WbShift: wb_mired, wb_dtint);
+// в state тогда ББ кадра, с которого сохранён, - для справки.
 struct PresetFile {
 mut:
-	app     string = preset_app
-	version int    = preset_version
-	name    string
-	groups  []string
-	state   SideState
+	app      string = preset_app
+	version  int    = 1
+	name     string
+	groups   []string
+	state    SideState
+	wb_shift bool
+	wb_mired f32
+	wb_dtint f32
+}
+
+// preset_file - файл пресета из настроек e и групп; сдвиг ББ (e.wb_shift)
+// пишется, только если в пресете есть группа «Баланс белого и цвет»
+fn preset_file(name string, e EditState, groups []string) PresetFile {
+	gs := known_groups(groups)
+	if !e.wb_shift.on || 'color' !in gs {
+		return PresetFile{
+			name:   name
+			groups: gs
+			state:  side_state(e)
+		}
+	}
+	return PresetFile{
+		version:  2
+		name:     name
+		groups:   gs
+		state:    side_state(e)
+		wb_shift: true
+		wb_mired: e.wb_shift.mired
+		wb_dtint: e.wb_shift.tint
+	}
 }
 
 // Preset - пресет в меню: имя (= имя файла без .json) и путь
@@ -334,12 +450,7 @@ fn save_preset(dir string, name string, e EditState, groups []string) !string {
 	}
 	os.mkdir_all(dir)!
 	path := os.join_path(dir, file)
-	f := PresetFile{
-		name:   name.trim_space()
-		groups: known_groups(groups)
-		state:  side_state(e)
-	}
-	write_atomic(path, preset_json(f))!
+	write_atomic(path, preset_json(preset_file(name.trim_space(), e, groups)))!
 	return path
 }
 
@@ -354,7 +465,19 @@ fn load_preset(path string) !(EditState, []string) {
 	if f.version > preset_version {
 		return error(i18n.trf('версия {0} новее программы', '${f.version}'))
 	}
-	return edit_state(f.state)!, known_groups(f.groups)
+	mut e := edit_state(f.state)!
+	if f.wb_shift {
+		e.wb_shift = WbShift{
+			on:    true
+			mired: if math.is_nan(f.wb_mired) { 0 } else { clampf(f.wb_mired, -500, 500) }
+			tint:  if math.is_nan(f.wb_dtint) {
+				0
+			} else {
+				clampf(f.wb_dtint, -2 * pipeline.wb_tint_max, 2 * pipeline.wb_tint_max)
+			}
+		}
+	}
+	return e, known_groups(f.groups)
 }
 
 // preset_display_name - имя пресета из файла: поле name, без него -
@@ -391,11 +514,7 @@ fn import_preset(src string, dir string) !string {
 	e, groups := load_preset(src)!
 	base := preset_file_name(preset_display_name(src))
 	stem := if base.len > 0 { base.all_before_last('.json') } else { i18n.tr('Пресет') }
-	f := PresetFile{
-		name:   stem
-		groups: groups
-		state:  side_state(e)
-	}
+	f := preset_file(stem, e, groups)
 	os.mkdir_all(dir)!
 	path := free_path(dir, stem, preset_json(f))
 	name := os.file_name(path).all_before_last('.json')
@@ -530,7 +649,8 @@ mut:
 	name     &vgui.TextInput = unsafe { nil }
 	ok       &vgui.Button    = unsafe { nil }
 	cbs      []&vgui.CheckBox
-	body     &vgui.VBox = unsafe { nil }
+	wb_shift &vgui.CheckBox = unsafe { nil } // ББ сдвигом (только пресет)
+	body     &vgui.VBox     = unsafe { nil }
 	name_row &vgui.HBox = unsafe { nil }
 	btn_row  &vgui.HBox = unsafe { nil }
 	preset   bool // true - сохранение пресета (поле имени), false - копирование
@@ -579,6 +699,8 @@ fn show_groups(mut st State, mut app vgui.App, parent &vgui.Window, preset bool)
 		mut cb := u.cbs[i]
 		cb.set_checked(g in st.settings.copy_groups)
 	}
+	mut ws := u.wb_shift
+	ws.set_checked(st.settings.preset_wb_shift)
 	if !d.is_open() {
 		d.show()
 	}
@@ -613,11 +735,16 @@ fn groups_confirm(mut st State) {
 		return
 	}
 	existed := os.exists(os.join_path(presets_dir(), preset_file_name(name)))
-	save_preset(presets_dir(), name, st.edit, groups) or {
+	mut e := st.edit.clone()
+	if u.wb_shift.is_checked() {
+		e.wb_shift = wb_shift_of(e, st.shot_temp, st.shot_tint)
+	}
+	save_preset(presets_dir(), name, e, groups) or {
 		nm.show_error(i18n.trf('Пресет не сохранён: {0}', '${err.msg()}'))
 		return
 	}
 	st.settings.copy_groups = groups.clone()
+	st.settings.preset_wb_shift = u.wb_shift.is_checked()
 	save_settings(st.settings)
 	rebuild_presets_menu(mut st)
 	verb := if existed { i18n.tr('обновлён') } else { i18n.tr('сохранён') }
@@ -637,6 +764,9 @@ fn layout_groups(mut u GroupsUi) {
 	body.add(u.title)
 	for cb in u.cbs {
 		body.add(cb)
+	}
+	if u.preset {
+		body.add(u.wb_shift)
 	}
 	body.add(vgui.create_spacer(), flex: 1)
 	body.add(u.btn_row)
@@ -675,6 +805,9 @@ fn build_groups_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	for g in copy_group_names {
 		u.cbs << vgui.checkbox(i18n.tr(g))
 	}
+	mut ws := vgui.checkbox(i18n.tr('Баланс белого сдвигом от «как снято»'))
+	ws.tooltip = i18n.tr('Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».')
+	u.wb_shift = ws
 
 	// «Все» / «Ничего» - слева, «Отмена» и главная кнопка - справа
 	mut b_all := vgui.button(i18n.tr('Все'))

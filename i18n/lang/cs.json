@@ -662,5 +662,7 @@
  "Удалить отклонённые": "Smazat zamítnuté",
  "Удалить отклонённые...": "Smazat zamítnuté...",
  "Файлов": "Souborů",
- "не удалось переместить в корзину (код {0})": "nelze přesunout do koše (kód {0})"
+ "не удалось переместить в корзину (код {0})": "nelze přesunout do koše (kód {0})",
+ "Баланс белого сдвигом от «как снято»": "Vyvážení bílé jako posun od «jak bylo vyfoceno»",
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Předvolba posune vyvážení bílé každého snímku od jeho «jak bylo vyfoceno» o tolik, o kolik je posunuto zde. Bez zaškrtnutí nastaví stejnou teplotu a odstín. Vyžaduje skupinu «Vyvážení bílé a barva»."
 }
