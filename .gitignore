@@ -1,0 +1,23 @@
+# Бинарники сборки (пересобираются командами из CLAUDE.md)
+/vraw
+
+# Артефакты компилятора V
+*.o
+*.tmp.c
+
+# Служебное
+.DS_Store
+
+# Кэш
+/.cache/
+
+# Сайдкары правок vraw (рядом с RAW)
+*.vraw.json
+*.vraw.json.tmp
+
+# Рядом с программой (не в git): настройки, пресеты
+/settings.json
+/presets/
+
+# Портабельные сборки (tools/portable.sh, tools/windows.sh)
+/dist/

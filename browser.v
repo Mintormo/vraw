@@ -1,0 +1,751 @@
+module main
+
+// Браузер папки: лента миниатюр всех RAW-файлов папки открытого кадра
+// под областью просмотра. Щелчок по миниатюре или ←/→, Home/End -
+// переход к кадру; правки каждого кадра живут в его сайдкаре (sidecar.v),
+// поэтому переключение ничего не теряет: open_file просто открывает
+// следующий файл и восстанавливает его правки.
+//
+// Миниатюры - из встроенного в RAW превью камеры (raw.thumb_min, у CR3 -
+// 1620x1080, без демозаики): открытие + извлечение ~2-8 мс, декод ~15 мс,
+// уменьшение - единицы мс. Считаются в одном фоновом потоке по порядку
+// «от текущего кадра наружу» и по одной отдаются в главный поток через
+// app.post(). Кэша на диске нет: ~25 мс на кадр - 100 кадров за ~2.5 с
+// в фоне, лента при этом живая.
+//
+// Лента - горизонтальный vgui.ListBox (list_box_h): элемент - VBox из
+// миниатюры (Canvas, вписывание с сохранением пропорций, пассивный) и
+// подписи имени файла. Высота ленты меняется вертикальным сплиттером.
+// Скрытие ленты - пересборка области просмотра (VBox.clear + add):
+// VBox.remove в vgui не работает (сравнивает voidptr интерфейса и всегда
+// возвращает false).
+import os
+import math
+import vgui
+import raw
+import stbi
+import pipeline
+import i18n
+
+// Расширения RAW для сканирования папки (без учёта регистра)
+const raw_exts = ['cr3', 'cr2', 'crw', 'nef', 'arw', 'dng', 'raf', 'orf', 'rw2']
+
+// Буфер миниатюры: 3:2 (кадр Canon), вдвое больше ячейки - чётко на HiDPI
+const thumb_w = 276
+const thumb_h = 184
+// Лента: высота панели ленты при старте (вертикальный сплиттер), полоса
+// над лентой, подпись имени; ширина ячейки подстраивается под высоту
+// (strip_item_width) - миниатюра 3:2 растёт вместе с лентой
+const strip_pane_h = f32(170)
+const strip_bar_h = f32(26)
+const strip_name_h = f32(18)
+// Поле ListBox ленты: при 4 (по умолчанию) крайняя частично видимая
+// миниатюра заезжала на рамку - отсечение vgui расширено на 1 px наружу,
+// а поле почти целиком занято самой рамкой и кольцом фокуса
+const strip_pad = f32(8)
+// Поле панели ленты (strip_box: полоса + лента на фоне палитры pal.viewer)
+const strip_box_pad = f32(8)
+const thumb_bg = vgui.Color{30, 30, 33, 255}
+// Отметка «кадр изменён» (есть сайдкар) - кружок в правом верхнем углу
+const mark_color = vgui.Color{240, 160, 60, 255}
+const mark_ring = vgui.Color{20, 20, 22, 255}
+
+// Frame - кадр папки в ленте
+struct Frame {
+	path string
+mut:
+	edited bool // есть правки (сайдкар, current > 0)
+	mark   Mark // звёзды и флажок отбора (rating.v)
+	name   &vgui.Label = unsafe { nil } // подпись: у текущего кадра - жирная
+	// Ячейка ленты (миниатюра + подпись): строки ListBox пересобираются
+	// по фильтру из этих ячеек (apply_filter)
+	cell &vgui.VBox = unsafe { nil }
+	// Миниатюра живёт только в пикселях холста (без отдельной копии: ~200 КБ
+	// на кадр); отметка «изменён» только добавляется - рисуется поверх
+	cv &vgui.Canvas = unsafe { nil }
+	// Геометрия, которую показывает (или вот-вот покажет) миниатюра, и
+	// номер её расчёта: результат старее показанного отбрасывается
+	geom pipeline.Geom
+	seq  int
+}
+
+// StopFlag - флаг остановки фонового воркера миниатюр (смена папки,
+// выход). Читается воркером без синхронизации: bool, опоздание на одну
+// миниатюру безвредно.
+@[heap]
+struct StopFlag {
+mut:
+	stop bool
+}
+
+struct ThumbResult {
+	gen  int // номер загрузки папки: результаты старой папки отбрасываются
+	seq  int // номер расчёта (refresh_thumb): старее показанного - мимо
+	idx  int
+	pix  []u8
+	geom pipeline.Geom
+}
+
+// is_raw_file - файл с расширением RAW (без учёта регистра)
+fn is_raw_file(name string) bool {
+	return os.file_ext(name).to_lower().trim_left('.') in raw_exts
+}
+
+// scan_folder - все RAW-файлы папки (полные пути), по имени
+fn scan_folder(dir string) []string {
+	names := os.ls(dir) or { return [] }
+	mut out := []string{}
+	for n in names {
+		p := os.join_path(dir, n)
+		if is_raw_file(n) && !os.is_dir(p) {
+			out << p
+		}
+	}
+	out.sort()
+	return out
+}
+
+// thumb_order - порядок расчёта миниатюр: текущий кадр, затем соседи
+// через один в обе стороны - видимые в ленте появляются первыми.
+fn thumb_order(n int, cur int) []int {
+	mut order := []int{cap: n}
+	if n == 0 {
+		return order
+	}
+	c := if cur >= 0 && cur < n { cur } else { 0 }
+	order << c
+	for d in 1 .. n {
+		if c + d < n {
+			order << c + d
+		}
+		if c - d >= 0 {
+			order << c - d
+		}
+		if c + d >= n && c - d < 0 {
+			break
+		}
+	}
+	return order
+}
+
+// fit_thumb вписывает RGB-картинку w x h в буфер RGBA bw x bh (поля -
+// thumb_bg) с поворотом по flip LibRaw (3 - 180°, 5 - 90° против часовой,
+// 6 - 90° по часовой) и уменьшением усреднением по блоку источника.
+fn fit_thumb(src []u8, w int, h int, flip int, bw int, bh int) []u8 {
+	mut out := []u8{len: bw * bh * 4}
+	fit_thumb_into(mut out, src, w, h, flip, bw, bh)
+	return out
+}
+
+// fit_thumb_into - то же в готовый буфер out (bw * bh * 4; JPEG камеры
+// кадра - буфер вне сборщика, bufown.v)
+fn fit_thumb_into(mut out []u8, src []u8, w int, h int, flip int, bw int, bh int) {
+	for i in 0 .. bw * bh {
+		out[i * 4] = thumb_bg.r
+		out[i * 4 + 1] = thumb_bg.g
+		out[i * 4 + 2] = thumb_bg.b
+		out[i * 4 + 3] = 255
+	}
+	if w <= 0 || h <= 0 || src.len < w * h * 3 {
+		return
+	}
+	rot := flip & 4 != 0
+	ow := if rot { h } else { w } // размеры в ориентации показа
+	oh := if rot { w } else { h }
+	sx := f64(bw) / f64(ow)
+	sy := f64(bh) / f64(oh)
+	s := if sx < sy { sx } else { sy }
+	mut dw := int(f64(ow) * s + 0.5)
+	mut dh := int(f64(oh) * s + 0.5)
+	dw = if dw < 1 { 1 } else if dw > bw { bw } else { dw }
+	dh = if dh < 1 { 1 } else if dh > bh { bh } else { dh }
+	ox := (bw - dw) / 2
+	oy := (bh - dh) / 2
+	for y in 0 .. dh {
+		v0 := y * oh / dh
+		mut v1 := (y + 1) * oh / dh
+		if v1 <= v0 {
+			v1 = v0 + 1
+		}
+		for x in 0 .. dw {
+			u0 := x * ow / dw
+			mut u1 := (x + 1) * ow / dw
+			if u1 <= u0 {
+				u1 = u0 + 1
+			}
+			mut r := 0
+			mut g := 0
+			mut b := 0
+			for v in v0 .. v1 {
+				for u in u0 .. u1 {
+					// Точка (u, v) показа -> точка источника
+					px, py := match flip {
+						3 { w - 1 - u, h - 1 - v }
+						5 { w - 1 - v, u }
+						6 { v, h - 1 - u }
+						else { u, v }
+					}
+					k := (py * w + px) * 3
+					r += src[k]
+					g += src[k + 1]
+					b += src[k + 2]
+				}
+			}
+			n := (v1 - v0) * (u1 - u0)
+			d := ((oy + y) * bw + ox + x) * 4
+			out[d] = u8(r / n)
+			out[d + 1] = u8(g / n)
+			out[d + 2] = u8(b / n)
+		}
+	}
+	return
+}
+
+// thumb_geom - геометрия кадра из его сайдкара (как на выходе:
+// out_geom); нет сайдкара или не читается - без изменений
+fn thumb_geom(path string) pipeline.Geom {
+	side := load_sidecar(sidecar_path(path)) or { return pipeline.Geom{} }
+	if side.history.len == 0 {
+		return pipeline.Geom{}
+	}
+	return out_geom(&side.history[side.current].state)
+}
+
+// make_thumb - миниатюра RAW-файла с геометрией g (кадрирование и
+// поворот из сайдкара): своё открытие LibRaw (воркер не делит хендл с
+// GUI), встроенное превью не меньше буфера, поворот по ориентации
+// камеры; с геометрией - сначала обрезка во всю величину превью
+// (geom_rgba, ближайший пиксель), потом уменьшение усреднением.
+fn make_thumb(path string, g pipeline.Geom) ![]u8 {
+	mut d := raw.open(path)!
+	defer {
+		d.close()
+	}
+	j := d.thumb_min(thumb_w)!
+	flip := d.flip()
+	mut img := stbi.load_from_memory(j.data, j.len, desired_channels: 3)!
+	defer {
+		img.free()
+	}
+	src := unsafe { img.data.vbytes(img.width * img.height * 3) }
+	if g.is_identity() {
+		return fit_thumb(src, img.width, img.height, flip, thumb_w, thumb_h)
+	}
+	ow := if flip & 4 != 0 { img.height } else { img.width }
+	oh := if flip & 4 != 0 { img.width } else { img.height }
+	pix := fit_thumb(src, img.width, img.height, flip, ow, oh)
+	cw, ch := g.out_size(ow, oh, true)
+	cut := pipeline.geom_rgba(pix, ow, oh, g, true, cw, ch)
+	mut rgb := []u8{len: cw * ch * 3}
+	for i in 0 .. cw * ch {
+		rgb[i * 3] = cut[i * 4]
+		rgb[i * 3 + 1] = cut[i * 4 + 1]
+		rgb[i * 3 + 2] = cut[i * 4 + 2]
+	}
+	return fit_thumb(rgb, cw, ch, 0, thumb_w, thumb_h)
+}
+
+// thumb_worker выполняется в spawn: миниатюры по порядку order, каждая -
+// в главный поток через app.post (единственный потокобезопасный вход
+// vgui). Не читаемый файл пропускается - остаётся пустая ячейка.
+fn thumb_worker(paths []string, order []int, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+	for idx in order {
+		if stop.stop {
+			return
+		}
+		g := thumb_geom(paths[idx])
+		pix := make_thumb(paths[idx], g) or { continue }
+		res := ThumbResult{
+			gen:  gen
+			seq:  seq
+			idx:  idx
+			pix:  pix
+			geom: g
+		}
+		post_result(mut app, on_done, res)
+	}
+}
+
+// thumb_one выполняется в spawn: одна миниатюра заново (refresh_thumb)
+fn thumb_one(path string, g pipeline.Geom, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
+	pix := make_thumb(path, g) or { return }
+	res := ThumbResult{
+		gen:  gen
+		seq:  seq
+		idx:  idx
+		pix:  pix
+		geom: g
+	}
+	post_result(mut app, on_done, res)
+}
+
+// stop_thumbs останавливает воркер миниатюр (смена папки, выход);
+// дождаться - wait_thumbs.
+fn stop_thumbs(mut st State) {
+	if !isnil(st.thumb_stop) {
+		mut s := st.thumb_stop
+		s.stop = true
+	}
+}
+
+fn wait_thumbs(mut st State) {
+	stop_thumbs(mut st)
+	for t in st.thumb_threads {
+		t.wait()
+	}
+	st.thumb_threads.clear()
+}
+
+// StripCell - ячейка ленты: холст миниатюры, подпись, контейнер и
+// замыкание отметок поверх холста
+@[heap]
+struct StripCell {
+mut:
+	cv   &vgui.Canvas = unsafe { nil }
+	name &vgui.Label  = unsafe { nil }
+	cell &vgui.VBox   = unsafe { nil }
+}
+
+// strip_cell - ячейка ленты номер idx из запаса st.cells, при нехватке -
+// новая. Ячейки переиспользуются при смене папки: у каждой своё замыкание
+// on_overlay (рисует отметки кадра idx), а замыкания V не освобождает
+// никогда - вместе с захваченным холстом. Новые ячейки на каждую папку
+// держали бы все прежние ленты до выхода (~19 МБ на папку из 94 кадров
+// плюс текстуры); с запасом память ленты - по самой большой папке.
+fn strip_cell(mut st State, idx int) &StripCell {
+	if idx < st.cells.len {
+		return st.cells[idx]
+	}
+	mut cv := vgui.canvas(thumb_w, thumb_h)
+	// Вписывание с сохранением пропорций (auto_fit): любая высота ленты
+	cv.stretch = false
+	cv.passive = true // только рисует: щелчок уходит в список
+	cv.set_wheel_zoom(false)
+	cv.set_pan_buttons(0)
+	// Звёзды и флажок - поверх миниатюры, без правки её пикселей
+	// (пометка меняется - достаточно перерисовать)
+	cv.on_overlay = fn [mut st, idx, cv] (mut ctx vgui.RenderContext) {
+		if idx < st.frames.len {
+			draw_thumb_marks(mut ctx, cv, st.frames[idx].mark)
+		}
+	}
+	mut name := vgui.label('')
+	name.align = .center
+	name.font_size = 12
+	name.color = st.pal.secondary
+	mut cell := vgui.create_vbox_fill()
+	cell.set_spacing(4)
+	cell.add(cv, flex: 1)
+	cell.add(name)
+	c := &StripCell{
+		cv:   cv
+		name: name
+		cell: cell
+	}
+	st.cells << c
+	return c
+}
+
+// load_folder - новая папка в ленте: список кадров, ячейки с пустыми
+// миниатюрами, отметки изменённых и пометки отбора (начало сайдкара,
+// read_side_head), строки по фильтру, фоновый расчёт миниатюр. Без
+// открытого кадра (cur_path пусто) лента показывается, даже скрытая.
+fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
+	stop_thumbs(mut st)
+	st.thumb_gen++
+	st.folder = dir
+	paths := scan_folder(dir)
+	st.frames = []Frame{}
+	for p in paths {
+		// Ячейка ленты - из запаса (strip_cell): при смене папки не
+		// создаётся заново
+		sc := strip_cell(mut st, st.frames.len)
+		mut cv := sc.cv
+		mut name := sc.name
+		cell := sc.cell
+		name.text = os.file_name(p)
+		name.font_style = .regular
+		name.color = st.pal.secondary
+		cv.fill(thumb_bg)
+		head := read_side_head(p)
+		st.frames << Frame{
+			path:   p
+			edited: head.edited
+			mark:   head.mark
+			name:   name
+			cv:     cv
+			cell:   cell
+		}
+		draw_mark(mut st, st.frames.len - 1)
+	}
+	apply_filter(mut st)
+	cur := paths.index(cur_path)
+	stop := &StopFlag{}
+	st.thumb_stop = stop
+	st.thumb_seq++
+	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), st.thumb_gen,
+		st.thumb_seq, stop, mut app, st.thumb_done)
+	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
+	// (F6, в окне или в полноэкранном режиме) показывается
+	if cur_path == '' && paths.len > 0 && !strip_on(st) {
+		set_strip_visible(mut st, st.fullscreen, true)
+		return
+	}
+	layout_strip(mut st)
+}
+
+// take_thumb принимает миниатюру из воркера (главный поток)
+fn take_thumb(mut st State, res ThumbResult) {
+	if res.gen != st.thumb_gen || res.idx < 0 || res.idx >= st.frames.len
+		|| res.seq < st.frames[res.idx].seq {
+		return
+	}
+	st.frames[res.idx].seq = res.seq
+	st.frames[res.idx].geom = res.geom
+	mut cv := st.frames[res.idx].cv
+	cv.pixels = res.pix
+	draw_mark(mut st, res.idx)
+}
+
+// refresh_thumb - миниатюра кадра idx заново с геометрией g (после
+// кадрирования или поворота): одна в фоне, ~25 мс
+fn refresh_thumb(mut st State, idx int, g pipeline.Geom) {
+	if idx < 0 || idx >= st.frames.len || isnil(st.app) {
+		return
+	}
+	st.thumb_seq++
+	st.frames[idx].geom = g
+	st.frames[idx].seq = st.thumb_seq
+	mut app := st.app
+	st.thumb_threads << spawn thumb_one(st.frames[idx].path, g, st.thumb_gen, st.thumb_seq,
+		idx, mut app, st.thumb_done)
+}
+
+// sync_thumb - миниатюра открытого кадра под его геометрию (после
+// записи сайдкара: правка, откат, вставка настроек)
+fn sync_thumb(mut st State) {
+	if st.frame_idx < 0 || st.frame_idx >= st.frames.len {
+		return
+	}
+	g := out_geom(&st.edit)
+	if g != st.frames[st.frame_idx].geom {
+		refresh_thumb(mut st, st.frame_idx, g)
+	}
+}
+
+// draw_mark - отметка «изменён» (кружок в правом верхнем углу) поверх
+// миниатюры, если кадр изменён; холст перерисовывается в любом случае
+fn draw_mark(mut st State, idx int) {
+	f := st.frames[idx]
+	if isnil(f.cv) {
+		return
+	}
+	mut cv := f.cv
+	if f.edited {
+		draw_dot(mut cv.pixels, thumb_w - 18, 18, 12, mark_ring)
+		draw_dot(mut cv.pixels, thumb_w - 18, 18, 9, mark_color)
+	}
+	cv.mark_dirty()
+}
+
+// draw_dot - залитый круг в RGBA-буфере миниатюры (края сглажены)
+fn draw_dot(mut pix []u8, cx int, cy int, r int, c vgui.Color) {
+	for y in cy - r - 1 .. cy + r + 2 {
+		for x in cx - r - 1 .. cx + r + 2 {
+			if x < 0 || y < 0 || x >= thumb_w || y >= thumb_h {
+				continue
+			}
+			dx := f32(x - cx)
+			dy := f32(y - cy)
+			d := f32(r) + 0.5 - math.sqrtf(dx * dx + dy * dy)
+			a := if d >= 1 { f32(1) } else if d <= 0 { f32(0) } else { d }
+			if a == 0 {
+				continue
+			}
+			k := (y * thumb_w + x) * 4
+			pix[k] = u8(f32(pix[k]) * (1 - a) + f32(c.r) * a)
+			pix[k + 1] = u8(f32(pix[k + 1]) * (1 - a) + f32(c.g) * a)
+			pix[k + 2] = u8(f32(pix[k + 2]) * (1 - a) + f32(c.b) * a)
+		}
+	}
+}
+
+// mark_edited - у текущего кадра появились правки (запись сайдкара не
+// на «Открыт файл»; одна пометка отбора правкой не считается)
+fn mark_edited(mut st State) {
+	if st.hist_pos == 0 || st.frame_idx < 0 || st.frame_idx >= st.frames.len
+		|| st.frames[st.frame_idx].edited {
+		return
+	}
+	st.frames[st.frame_idx].edited = true
+	draw_mark(mut st, st.frame_idx)
+}
+
+// show_frame - после открытия файла: папка в ленте (новая - загрузить),
+// выделение и прокрутка к кадру, счётчик «N из M».
+fn show_frame(mut st State, path string, mut app vgui.App) {
+	if isnil(st.strip) {
+		return
+	}
+	dir := os.dir(path)
+	if dir != st.folder {
+		load_folder(mut st, dir, path, mut app)
+	}
+	st.frame_idx = -1
+	for i, f in st.frames {
+		if f.path == path {
+			st.frame_idx = i
+			break
+		}
+	}
+	sync_strip(mut st)
+}
+
+// refresh_folder - лента заново из папки (F5, кнопка на полосе): кадры,
+// добавленные в папку или убранные из неё за время работы. Открытый кадр
+// остаётся открытым (пропал с диска - просто без строки в ленте),
+// выделенные кадры - выделенными, фильтр - прежний.
+fn refresh_folder(mut st State) {
+	if st.folder == '' || isnil(st.strip) || isnil(st.app) {
+		return
+	}
+	sel := strip_selection(st).map(st.frames[it].path)
+	mut app := st.app
+	load_folder(mut st, st.folder, st.raw_path, mut app)
+	st.frame_idx = -1
+	for i, f in st.frames {
+		if st.raw_path != '' && f.path == st.raw_path {
+			st.frame_idx = i
+			break
+		}
+	}
+	sync_strip(mut st)
+	if sel.len < 2 {
+		return
+	}
+	// Несколько выделенных - снова те же (что остались и проходят
+	// фильтр); открытый кадр - последним, чтобы остался текущим
+	mut rows := []int{}
+	for i, f in st.frames {
+		r := row_of(st, i)
+		if r >= 0 && f.path in sel && i != st.frame_idx {
+			rows << r
+		}
+	}
+	cur := row_of(st, st.frame_idx)
+	if cur >= 0 && st.raw_path in sel {
+		rows << cur
+	}
+	if rows.len > 1 {
+		mut strip := st.strip
+		strip.set_selection(rows)
+		strip_info_text(mut st)
+		sync_avail(mut st)
+	}
+}
+
+// sync_strip - выделение ленты на текущем кадре, жирная подпись у него,
+// прокрутка - текущий по центру, подпись над лентой.
+fn sync_strip(mut st State) {
+	if isnil(st.strip) {
+		return
+	}
+	mut strip := st.strip
+	strip.set_selected(row_of(st, st.frame_idx)) // не прошёл фильтр - без выделения
+	for i, f in st.frames {
+		if isnil(f.name) {
+			continue
+		}
+		mut l := f.name
+		cur := i == st.frame_idx
+		// У редактируемого - ярче и жирным (выделение ленты может стоять
+		// на другом: одиночный щелчок только выделяет); цвета - из темы
+		l.color = if cur { st.pal.text } else { st.pal.secondary }
+		l.font_style = if cur { vgui.FontStyle.bold } else { vgui.FontStyle.regular }
+	}
+	center_strip(mut st)
+	strip_info_text(mut st)
+	sync_avail(mut st)
+}
+
+// strip_info_text - подпись над лентой: папка, «N из M», при выделении
+// нескольких кадров (Ctrl/Shift+щелчок) - «выделено K»
+fn strip_info_text(mut st State) {
+	if isnil(st.strip_info) || isnil(st.strip) {
+		return
+	}
+	mut info := st.strip_info
+	// С фильтром - номер и число кадров фильтра, всего в папке - в скобках
+	row := row_of(st, st.frame_idx)
+	total := if st.filter != 'all' { i18n.trf(' (в папке {0})', '${st.frames.len}') } else { '' }
+	pos := if row >= 0 {
+		i18n.trf('{0} из {1}{2}', '${row + 1}', '${st.shown.len}', '${total}')
+	} else {
+		'${st.shown.len} ${i18n.pl(st.shown.len, 'кадр|кадра|кадров')}${total}'
+	}
+	mut text := '${os.file_name(st.folder)}  ·  ${pos}'
+	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
+		mt := mark_text(st.frames[st.frame_idx].mark)
+		if mt.len > 0 {
+			text += '  ·  ${mt}'
+		}
+	}
+	n := st.strip.get_selection().len
+	if n > 1 {
+		text += i18n.trf('  ·  выделено {0}', '${n}')
+	}
+	info.text = text
+}
+
+// select_all_frames - выделить все кадры ленты (Ctrl+A); текущим
+// остаётся открытый кадр - лента не прокручивается к последнему.
+// set_selection не зовёт on_select - подпись здесь.
+fn select_all_frames(mut st State) {
+	if isnil(st.strip) || st.shown.len == 0 {
+		return
+	}
+	// Строки ленты (с фильтром - только его кадры)
+	mut idx := []int{len: st.shown.len, init: index}
+	cur := row_of(st, st.frame_idx)
+	if cur >= 0 {
+		// Текущей становится последняя из списка - открытый кадр в конец
+		idx.delete(cur)
+		idx << cur
+	}
+	mut strip := st.strip
+	strip.set_selection(idx)
+	strip_info_text(mut st)
+	sync_avail(mut st)
+}
+
+// strip_item_width - ширина ячейки ленты под высоту её панели pane_h
+// (полоса + лента): миниатюра 3:2 во всю высоту ячейки над подписью.
+// Отступы: 2 x strip_box_pad - поля панели, 4 - между полосой и лентой,
+// 2 x strip_pad - поля ListBox, 2 x 6 - поля ячейки, 4 - между
+// миниатюрой и подписью.
+fn strip_item_width(pane_h f32) f32 {
+	thumb := pane_h - 2 * strip_box_pad - strip_bar_h - 4 - 2 * strip_pad - 12 - 4 - strip_name_h
+	w := thumb * 1.5 + 12
+	return if w < 80 { 80 } else { w }
+}
+
+// fit_strip_items - ширина ячеек по текущей высоте панели ленты
+// (после перетаскивания сплиттера и при сборке раскладки); редактируемый
+// кадр - снова по центру.
+fn fit_strip_items(mut st State) {
+	if isnil(st.strip) || isnil(st.vsplit) {
+		return
+	}
+	sp := st.vsplit
+	mut pane := strip_pane_h
+	if sp.bounds.h > 0 {
+		pane = (sp.bounds.h - sp.bar_size) * strip_share(st)
+	}
+	mut strip := st.strip
+	strip.item_width = strip_item_width(pane)
+	// Щелчок колеса - один кадр
+	strip.scroll_x_speed = strip.item_width
+	center_strip(mut st)
+}
+
+// center_strip прокручивает ленту так, чтобы редактируемый кадр был по
+// центру (у краёв - сколько позволяет лента: лишнее обрежет arrange
+// ListBox). Ширина видимой части - по раскладке: сразу после
+// перетаскивания горизонтального сплиттера bounds ленты ещё старые,
+// поэтому она считается от доли сплиттера «просмотр | панель».
+fn center_strip(mut st State) {
+	row := row_of(st, st.frame_idx)
+	if isnil(st.strip) || row < 0 {
+		return
+	}
+	mut strip := st.strip
+	mut view_w := strip.bounds.w - 2 * strip.pad
+	if !isnil(st.hsplit) && st.hsplit.bounds.w > 0 {
+		sp := st.hsplit
+		// Ширина просмотра минус поля панели ленты; без панели сплиттер
+		// не в окне, но его ширина - прежняя ширина рабочей области
+		bar := if panel_on(st) { sp.bar_size } else { f32(0) }
+		view_w = (sp.bounds.w - bar) * viewer_share(st) - 2 * strip_box_pad - 2 * strip.pad
+	}
+	if view_w <= 0 {
+		return
+	}
+	iw := strip.item_width
+	mut x := f32(row) * iw + iw / 2 - view_w / 2
+	if x < 0 {
+		x = 0
+	}
+	strip.scroll_x = x
+}
+
+// layout_strip собирает область просмотра: без папки или с лентой,
+// скрытой целиком (strip_on), - только область снимка
+// (view_area); лента открыта - вертикальный сплиттер «снимок |
+// полоса + лента» (лента сверху - наоборот, settings.strip_top); скрыта - снимок и под ним панель с одной полосой
+// («Развернуть ленту»). Пересборка через clear + add: VBox.remove в vgui
+// не работает.
+fn layout_strip(mut st State) {
+	if isnil(st.viewer) || isnil(st.strip) || isnil(st.strip_bar) || isnil(st.vsplit)
+		|| isnil(st.view_area) {
+		return
+	}
+	mut v := st.viewer
+	mut sp := st.vsplit
+	mut sb := st.strip_box
+	v.clear()
+	sp.clear_first()
+	sp.clear_second()
+	sb.clear()
+	if !isnil(st.m_strip) {
+		mut m := st.m_strip
+		m.checked = strip_on(st)
+	}
+	// Без папки или лента скрыта целиком (F6; в полноэкранном режиме -
+	// своя видимость, strip_on) - только снимок
+	if st.frames.len == 0 || !strip_on(st) {
+		v.add(st.view_area, flex: 1)
+		return
+	}
+	sb.add(st.strip_bar)
+	top := st.settings.strip_top
+	if st.strip_open {
+		sb.add(st.strip, flex: 1)
+		strip_min := strip_bar_h + 80 + 2 * strip_box_pad
+		if top {
+			sp.min_first = strip_min
+			sp.min_second = view_min_h
+			sp.set_first(sb)
+			sp.set_second(st.view_area)
+		} else {
+			sp.min_first = view_min_h
+			sp.min_second = strip_min
+			sp.set_first(st.view_area)
+			sp.set_second(sb)
+		}
+		v.add(sp, flex: 1)
+		fit_strip_items(mut st)
+	} else if top {
+		v.add(sb)
+		v.add(st.view_area, flex: 1)
+	} else {
+		v.add(st.view_area, flex: 1)
+		v.add(sb)
+	}
+	if !isnil(st.strip_toggle) {
+		// Значок - панель со стрелкой к краю окна (свернуть) или от него
+		mut b := st.strip_toggle
+		side := if top { 'top' } else { 'bottom' }
+		b.icon_name = 'panel-${side}-' + if st.strip_open { 'close' } else { 'open' }
+		b.tooltip = if st.strip_open { i18n.tr('Свернуть ленту') } else { i18n.tr('Развернуть ленту') }
+	}
+}
+
+// set_strip_open - свернуть ленту до полосы и развернуть (кнопка на
+// полосе), выбор запоминается в настройках; скрыть целиком -
+// set_strip_visible (panel.v)
+fn set_strip_open(mut st State, open bool) {
+	st.strip_open = open
+	st.settings.strip_open = open
+	save_settings(st.settings)
+	layout_strip(mut st)
+}

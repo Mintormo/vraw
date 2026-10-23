@@ -89,17 +89,156 @@ les raccourcis clavier peuvent être réattribués.
 
 ![Thème clair macOS](screenshots/light.jpg)
 
+## Compiler depuis les sources
+
+vraw est écrit en [V](https://vlang.io) avec ma bibliothèque graphique
+[vgui](https://github.com/Mintormo/vgui). La plateforme principale est
+Linux (testé sous Ubuntu 24.04). La version Windows est compilée de
+façon croisée sous Linux ; la compilation directement sous Windows dans
+MSYS2 devrait aussi fonctionner, mais n'a pas encore été testée.
+
+### Dépendances
+
+| Composant | Version | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
+|---|---|---|---|
+| Compilateur V | 0.5.2 (a1c9e93) ou plus récent | depuis les sources (étape 3) | depuis les sources |
+| gcc (avec OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
+| LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
+| lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
+| libjpeg | toute version | `libjpeg-dev` | `mingw-w64-x86_64-libjpeg-turbo` |
+| SDL3, SDL3_ttf, SDL3_image | 3.2+, 3.2+, 3.4+ | depuis les sources (étape 2), pas encore dans les dépôts | `mingw-w64-x86_64-sdl3`, `-sdl3-ttf`, `-sdl3-image` |
+| vgui | dernière | `git clone` (étape 4) | `git clone` |
+
+vraw se compile uniquement avec gcc (`-cc gcc`).
+
+### Linux
+
+**1. Paquets système** — compilateur, LibRaw, lensfun, libjpeg et les
+bibliothèques avec lesquelles SDL3 est compilée :
+
+```bash
+sudo apt install build-essential git cmake pkg-config curl \
+  libraw-dev liblensfun-dev libjpeg-dev \
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+  libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev \
+  libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+  libdrm-dev libgbm-dev libdbus-1-dev libibus-1.0-dev libudev-dev \
+  libasound2-dev libpulse-dev libpipewire-0.3-dev \
+  libfreetype-dev libharfbuzz-dev libpng-dev libwebp-dev libtiff-dev
+```
+
+Sous Fedora, Arch et les autres distributions, installez les mêmes
+bibliothèques avec leur gestionnaire de paquets. S'il fournit déjà SDL3,
+SDL3_ttf et SDL3_image 3.4 ou plus récents (avec les paquets
+`-devel`/`-dev`), passez l'étape 2.
+
+**2. SDL3, SDL3_ttf, SDL3_image** — compilées depuis les sources et
+installées dans `/usr/local` :
+
+```bash
+mkdir -p ~/src && cd ~/src
+for repo in SDL SDL_ttf SDL_image; do
+  git clone --depth 1 https://github.com/libsdl-org/$repo
+  cmake -S $repo -B $repo/build -DCMAKE_BUILD_TYPE=Release
+  cmake --build $repo/build -j"$(nproc)"
+  sudo cmake --install $repo/build
+done
+sudo ldconfig
+```
+
+**3. Compilateur V :**
+
+```bash
+git clone https://github.com/vlang/v ~/soft/v
+cd ~/soft/v && make
+```
+
+**4. vgui et vraw.** V trouve le module `vgui` via `~/.vmodules` :
+
+```bash
+mkdir -p ~/.vmodules ~/projects
+git clone https://github.com/Mintormo/vgui ~/projects/vgui
+ln -s ~/projects/vgui ~/.vmodules/vgui
+git clone https://github.com/Mintormo/vraw ~/projects/vraw
+cd ~/projects/vraw
+~/soft/v/v -prod -cc gcc .     # -> ./vraw
+./vraw
+```
+
+`-prod` active les optimisations de gcc : le pipeline est environ
+2,5 fois plus rapide, la compilation prend environ une demi-minute.
+Autres commandes :
+
+```bash
+~/soft/v/v -cc gcc test .      # tests
+tools/portable.sh              # dossier portable et archive dans dist/
+```
+
+**5. Profils d'objectifs à jour (facultatif).** La base lensfun des
+paquets des distributions est ancienne. vraw lit aussi une base plus
+récente dans `~/.local/share/lensfun/updates/version_1` :
+
+```bash
+mkdir -p ~/.local/share/lensfun/updates/version_1
+curl -L https://lensfun.github.io/db/version_1.tar.bz2 \
+  | tar -xj -C ~/.local/share/lensfun/updates/version_1
+```
+
+### Windows
+
+**Compilation croisée sous Linux** — c'est ainsi que sont produites les
+archives des versions. Il faut V et vgui (étapes 3–4 pour Linux) ainsi
+que MinGW-w64 :
+
+```bash
+sudo apt install gcc-mingw-w64-x86-64 zstd
+python3 tools/win_deps.py      # SDL3, LibRaw, lensfun et leurs dépendances
+                               # depuis les paquets MSYS2 -> ~/soft/mingw64-vraw
+tools/windows.sh               # -> dist/vraw-windows-x86_64.zip
+```
+
+L'archive contient `vraw.exe`, toutes les DLL nécessaires et la base
+des objectifs.
+
+**Directement dans MSYS2 (pas encore testé).** Installez
+[MSYS2](https://www.msys2.org), ouvrez le terminal **MSYS2 MINGW64** et
+lancez :
+
+```bash
+pacman -S --needed git make mingw-w64-x86_64-gcc \
+  mingw-w64-x86_64-sdl3 mingw-w64-x86_64-sdl3-ttf mingw-w64-x86_64-sdl3-image \
+  mingw-w64-x86_64-libraw mingw-w64-x86_64-lensfun mingw-w64-x86_64-libjpeg-turbo
+git clone https://github.com/vlang/v ~/v
+(cd ~/v && make)
+mkdir -p "$USERPROFILE/.vmodules"
+git clone https://github.com/Mintormo/vgui "$USERPROFILE/.vmodules/vgui"
+git clone https://github.com/Mintormo/vraw ~/vraw
+cd ~/vraw && ~/v/v -prod -cc gcc .
+```
+
+Pour lancer `vraw.exe` hors du terminal MSYS2, placez à côté de lui les
+DLL nécessaires de `C:\msys64\mingw64\bin` (`tools/windows.sh` montre
+comment les rassembler).
+
+### Documentation pour les développeurs
+
+Le code est commenté en détail. Les notes de conception sont en russe :
+[PROJECT.md](PROJECT.md) — modules et pipeline,
+[ROADMAP.md](ROADMAP.md) — ce qui est fait et ce qui est prévu,
+[REQUIREMENTS.md](REQUIREMENTS.md) — ce que fait le programme
+aujourd'hui.
+
 ## Fait avec Claude Code
 
 vraw a été créé en vibe coding : écrit avec
 [Claude Code](https://claude.com/claude-code), l'assistant de
 programmation IA d'Anthropic. Le programme est écrit en
-[V](https://vlang.io) sur ma propre bibliothèque graphique vgui, avec son
+[V](https://vlang.io) sur ma propre bibliothèque graphique [vgui](https://github.com/Mintormo/vgui), avec son
 propre pipeline de tons ; LibRaw se charge uniquement du dématriçage.
 
 ## Licence
 
-MIT, voir [LICENSE](LICENSE). Le code source n'est pas publié. Les
+MIT, voir [LICENSE](LICENSE). Le code source se trouve dans ce dépôt. Les
 composants tiers inclus dans les archives (LibRaw, lensfun, SDL3
 et d'autres) relèvent de leurs propres licences :
 voir `THIRD_PARTY.md` et le dossier `licenses/` dans l'archive.

@@ -90,17 +90,153 @@ sistema. Tutte le scorciatoie da tastiera si possono riassegnare.
 
 ![Tema chiaro macOS](screenshots/light.jpg)
 
+## Compilare dai sorgenti
+
+vraw è scritto in [V](https://vlang.io) sulla mia libreria grafica
+[vgui](https://github.com/Mintormo/vgui). La piattaforma principale è
+Linux (provato su Ubuntu 24.04). La versione per Windows viene
+cross-compilata su Linux; la compilazione direttamente su Windows in
+MSYS2 dovrebbe funzionare, ma non è ancora stata provata.
+
+### Dipendenze
+
+| Componente | Versione | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
+|---|---|---|---|
+| Compilatore V | 0.5.2 (a1c9e93) o successiva | dai sorgenti (passo 3) | dai sorgenti |
+| gcc (con OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
+| LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
+| lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
+| libjpeg | qualsiasi | `libjpeg-dev` | `mingw-w64-x86_64-libjpeg-turbo` |
+| SDL3, SDL3_ttf, SDL3_image | 3.2+, 3.2+, 3.4+ | dai sorgenti (passo 2), non ancora nei repository | `mingw-w64-x86_64-sdl3`, `-sdl3-ttf`, `-sdl3-image` |
+| vgui | l'ultima | `git clone` (passo 4) | `git clone` |
+
+vraw si compila solo con gcc (`-cc gcc`).
+
+### Linux
+
+**1. Pacchetti di sistema** — compilatore, LibRaw, lensfun, libjpeg e le
+librerie con cui viene compilata SDL3:
+
+```bash
+sudo apt install build-essential git cmake pkg-config curl \
+  libraw-dev liblensfun-dev libjpeg-dev \
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+  libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev \
+  libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+  libdrm-dev libgbm-dev libdbus-1-dev libibus-1.0-dev libudev-dev \
+  libasound2-dev libpulse-dev libpipewire-0.3-dev \
+  libfreetype-dev libharfbuzz-dev libpng-dev libwebp-dev libtiff-dev
+```
+
+Su Fedora, Arch e altre distribuzioni installate le stesse librerie con
+il loro gestore di pacchetti. Se fornisce già SDL3, SDL3_ttf e
+SDL3_image 3.4 o successive (con i pacchetti `-devel`/`-dev`), saltate
+il passo 2.
+
+**2. SDL3, SDL3_ttf, SDL3_image** — compilate dai sorgenti e installate
+in `/usr/local`:
+
+```bash
+mkdir -p ~/src && cd ~/src
+for repo in SDL SDL_ttf SDL_image; do
+  git clone --depth 1 https://github.com/libsdl-org/$repo
+  cmake -S $repo -B $repo/build -DCMAKE_BUILD_TYPE=Release
+  cmake --build $repo/build -j"$(nproc)"
+  sudo cmake --install $repo/build
+done
+sudo ldconfig
+```
+
+**3. Compilatore V:**
+
+```bash
+git clone https://github.com/vlang/v ~/soft/v
+cd ~/soft/v && make
+```
+
+**4. vgui e vraw.** V trova il modulo `vgui` tramite `~/.vmodules`:
+
+```bash
+mkdir -p ~/.vmodules ~/projects
+git clone https://github.com/Mintormo/vgui ~/projects/vgui
+ln -s ~/projects/vgui ~/.vmodules/vgui
+git clone https://github.com/Mintormo/vraw ~/projects/vraw
+cd ~/projects/vraw
+~/soft/v/v -prod -cc gcc .     # -> ./vraw
+./vraw
+```
+
+`-prod` attiva le ottimizzazioni di gcc: la pipeline è circa 2,5 volte
+più veloce, la compilazione richiede circa mezzo minuto. Altri comandi:
+
+```bash
+~/soft/v/v -cc gcc test .      # test
+tools/portable.sh              # cartella portatile e archivio in dist/
+```
+
+**5. Profili degli obiettivi aggiornati (facoltativo).** Il database di
+lensfun nei pacchetti delle distribuzioni è vecchio. vraw legge anche
+uno più recente da `~/.local/share/lensfun/updates/version_1`:
+
+```bash
+mkdir -p ~/.local/share/lensfun/updates/version_1
+curl -L https://lensfun.github.io/db/version_1.tar.bz2 \
+  | tar -xj -C ~/.local/share/lensfun/updates/version_1
+```
+
+### Windows
+
+**Cross-compilazione su Linux** — così vengono creati gli archivi delle
+versioni. Servono V e vgui dai passi 3–4 per Linux e MinGW-w64:
+
+```bash
+sudo apt install gcc-mingw-w64-x86-64 zstd
+python3 tools/win_deps.py      # SDL3, LibRaw, lensfun e le loro dipendenze
+                               # dai pacchetti MSYS2 -> ~/soft/mingw64-vraw
+tools/windows.sh               # -> dist/vraw-windows-x86_64.zip
+```
+
+L'archivio contiene `vraw.exe`, tutte le DLL necessarie e il database
+degli obiettivi.
+
+**Direttamente in MSYS2 (non ancora provato).** Installate
+[MSYS2](https://www.msys2.org), aprite il terminale **MSYS2 MINGW64** ed
+eseguite:
+
+```bash
+pacman -S --needed git make mingw-w64-x86_64-gcc \
+  mingw-w64-x86_64-sdl3 mingw-w64-x86_64-sdl3-ttf mingw-w64-x86_64-sdl3-image \
+  mingw-w64-x86_64-libraw mingw-w64-x86_64-lensfun mingw-w64-x86_64-libjpeg-turbo
+git clone https://github.com/vlang/v ~/v
+(cd ~/v && make)
+mkdir -p "$USERPROFILE/.vmodules"
+git clone https://github.com/Mintormo/vgui "$USERPROFILE/.vmodules/vgui"
+git clone https://github.com/Mintormo/vraw ~/vraw
+cd ~/vraw && ~/v/v -prod -cc gcc .
+```
+
+Per avviare `vraw.exe` fuori dal terminale MSYS2, mettete accanto le DLL
+necessarie da `C:\msys64\mingw64\bin` (`tools/windows.sh` mostra come
+raccoglierle).
+
+### Documentazione per sviluppatori
+
+Il codice è commentato in dettaglio. Le note di progetto sono in russo:
+[PROJECT.md](PROJECT.md) — moduli e pipeline,
+[ROADMAP.md](ROADMAP.md) — cosa è fatto e cosa è in programma,
+[REQUIREMENTS.md](REQUIREMENTS.md) — cosa fa il programma adesso.
+
 ## Fatto con Claude Code
 
 vraw è stato scritto in vibe coding, insieme a
 [Claude Code](https://claude.com/claude-code), l'assistente di
 programmazione IA di Anthropic. Il programma è scritto in
-[V](https://vlang.io) sulla mia libreria grafica vgui, con una propria
+[V](https://vlang.io) sulla mia libreria grafica [vgui](https://github.com/Mintormo/vgui), con una propria
 pipeline dei toni; LibRaw si occupa solo del demosaicing.
 
 ## Licenza
 
-MIT, vedi [LICENSE](LICENSE). Il codice sorgente non è pubblicato. I
+MIT, vedi [LICENSE](LICENSE). Il codice sorgente è in questo repository. I
 componenti di terze parti inclusi negli archivi (LibRaw, lensfun, SDL3 e
 altri) sono soggetti alle proprie licenze: vedi `THIRD_PARTY.md` e la
 cartella `licenses/` dentro l'archivio.

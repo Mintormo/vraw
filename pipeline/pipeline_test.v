@@ -1,0 +1,558 @@
+module pipeline
+
+import math
+
+// Инварианты пайплайна на синтетическом градиенте.
+fn test_pipeline_basics() {
+	// Серый градиент 256 пикселей: линейные значения 0..65535
+	npix := 256
+	mut src := []u16{len: npix * 3}
+	for i in 0 .. npix {
+		v := u16(i * 257)
+		src[i * 3] = v
+		src[i * 3 + 1] = v
+		src[i * 3 + 2] = v
+	}
+	nomask := &u16(unsafe { nil })
+
+	// Нейтральные параметры: монотонно, серое остаётся серым,
+	// края на месте (0 -> 0, 65535 -> 255)
+	mut out := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut out, 4)
+	assert out[0] == 0
+	assert out[(npix - 1) * 4] == 255
+	for i in 0 .. npix {
+		assert out[i * 4] == out[i * 4 + 1]
+		assert out[i * 4] == out[i * 4 + 2]
+		assert out[i * 4 + 3] == 255
+		if i > 0 {
+			assert out[i * 4] >= out[(i - 1) * 4]
+		}
+	}
+
+	// Экспозиция +1 EV делает средний тон светлее
+	mut brighter := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ exposure: 1.0, dither: false }, mut brighter, 4)
+	assert brighter[128 * 4] > out[128 * 4]
+
+	// Проявка теней поднимает тёмное, но не трогает белое
+	mut lifted := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ shadows: 1.0, dither: false }, mut lifted, 4)
+	assert lifted[16 * 4] > out[16 * 4]
+	assert lifted[(npix - 1) * 4] == out[(npix - 1) * 4]
+
+	// Контраст: тени темнее, света светлее, середина на месте (+-2)
+	mut contr := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ contrast: 1.0, dither: false }, mut contr, 4)
+	assert contr[32 * 4] < out[32 * 4]
+	assert contr[224 * 4] > out[224 * 4]
+
+	// Насыщенность 0 обесцвечивает цветной пиксель
+	col := [u16(50000), 20000, 10000]
+	mut cout := []u8{len: 3}
+	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ saturation: 0.0, dither: false }, mut cout, 3)
+	assert cout[0] == cout[1]
+	assert cout[1] == cout[2]
+
+	// Тон-эквалайзер: подъём полосы средних светлит середину, края почти не трогает
+	mut eqp := Params{ dither: false }
+	eqp.eq[2] = 1.0
+	mut eout := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, eqp, mut eout, 4)
+	assert eout[128 * 4] > out[128 * 4]
+	assert eout[(npix - 1) * 4] == out[(npix - 1) * 4]
+}
+
+// Камерная кривая: тождественная не меняет ничего, подсветляющая
+// поднимает середину и держит края; match_curve восстанавливает
+// известное тональное преобразование по гистограммам.
+fn test_camera_curve() {
+	npix := 4096
+	mut src := []u16{len: npix * 3}
+	for i in 0 .. npix {
+		v := u16(u32(i) * 65535 / u32(npix - 1))
+		src[i * 3] = v
+		src[i * 3 + 1] = v
+		src[i * 3 + 2] = v
+	}
+	nomask := &u16(unsafe { nil })
+
+	mut base := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut base, 4)
+
+	// Тождественная кривая - результат байт в байт как без кривой
+	mut ident := []f32{len: 256}
+	for i in 0 .. 256 {
+		ident[i] = f32(i)
+	}
+	mut same := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ curve: ident, dither: false }, mut same, 4)
+	assert base == same
+
+	// Подсветляющая кривая (t -> 255*sqrt(t/255)): середина светлее, края на месте
+	mut lift := []f32{len: 256}
+	for i in 0 .. 256 {
+		lift[i] = 255.0 * math.sqrtf(f32(i) / 255.0)
+	}
+	mut up := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ curve: lift, dither: false }, mut up, 4)
+	assert up[(npix / 4) * 4] > base[(npix / 4) * 4]
+	assert up[0] == base[0]
+	assert up[(npix - 1) * 4] == base[(npix - 1) * 4]
+
+	// match_curve: эталон - те же пиксели, прогнанные через lift.
+	// Сопоставление гистограмм должно вернуть кривую, близкую к lift.
+	mut ref_ := []u8{len: npix * 3}
+	for i in 0 .. npix {
+		t := math.powf(f32(src[i * 3]) / 65535.0, 1.0 / 2.2) * 255.0
+		u := u8(255.0 * math.sqrtf(t / 255.0))
+		ref_[i * 3] = u
+		ref_[i * 3 + 1] = u
+		ref_[i * 3 + 2] = u
+	}
+	curve := match_curve(unsafe { &u16(src.data) }, npix, unsafe { &u8(ref_.data) }, npix)
+	assert curve.len == 256
+	for v in 1 .. 256 {
+		assert curve[v] >= curve[v - 1] // монотонность
+	}
+	for v in [32, 64, 128, 192] {
+		want := 255.0 * math.sqrtf(f32(v) / 255.0)
+		diff := math.abs(curve[v] - want)
+		assert diff < 8.0, 'тон ${v}: ожидалось ~${want:.0f}, получено ${curve[v]:.0f}'
+	}
+}
+
+// «Тени/Света» (маска по размытой люме, как в RawTherapee):
+// подъём теней светлит тёмное и сохраняет локальный контраст,
+// приглушение светов темнит яркое, нейтральные значения - тождественны.
+fn test_shadows_highlights() {
+	// Кадр 64x64: левая половина тёмная (6% линейно) с мелкой шахматкой
+	// (локальный контраст), правая - яркая (80% линейно)
+	w := 64
+	h := 64
+	npix := w * h
+	dark_a := u16(3300)
+	dark_b := u16(4600)
+	bright := u16(52000)
+	mut src := []u16{len: npix * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			mut v := bright
+			if x < w / 2 {
+				v = if (x + y) % 2 == 0 { dark_a } else { dark_b }
+			}
+			i := (y * w + x) * 3
+			src[i] = v
+			src[i + 1] = v
+			src[i + 2] = v
+		}
+	}
+	mask := luma_masks(unsafe { &u16(src.data) }, w, h)
+	assert mask.len == npix * mask_ch
+	// Маска размыта: в глубине тёмной половины она темнее, чем в яркой
+	assert mask[((h / 2) * w + 8) * mask_ch] < mask[((h / 2) * w + w - 8) * mask_ch]
+
+	mut base := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ dither: false }, mut base, 4)
+
+	// Нулевые sh-параметры с маской = как без маски
+	mut nom := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, &u16(unsafe { nil }), npix, Params{ dither: false }, mut nom, 4)
+	assert base == nom
+
+	// Подъём теней: тёмная половина светлее, яркая почти не тронута,
+	// перепад шахматки (локальный контраст) не схлопывается в ноль
+	mut sh := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ sh_shadows: 80, dither: false }, mut sh, 4)
+	di := ((h / 2) * w + 8) * 4 // глубина тёмной половины
+	bi := ((h / 2) * w + w - 8) * 4 // глубина яркой половины
+	assert sh[di] > base[di]
+	assert int(sh[bi]) - int(base[bi]) < 3
+	// Соседние клетки шахматки после подъёма всё ещё различимы
+	assert sh[di] != sh[di + 4] || base[di] == base[di + 4]
+
+	// Приглушение светов: яркая половина темнее, тёмная почти не тронута
+	mut hl := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, Params{ sh_highlights: 80, dither: false }, mut hl, 4)
+	assert hl[bi] < base[bi]
+	assert int(base[di]) - int(hl[di]) <= 3
+}
+
+// Дизеринг (TPDF ±1 LSB) финального квантования в 8 бит: без дизера
+// результат детерминирован и "ступенчат", с дизером - тоже детерминирован
+// (по индексу пикселя), но разбивает полосы, не смещая среднюю яркость.
+fn test_dither() {
+	// Гладкий линейный градиент большой длины - без дизера на нём banding
+	// (соседние пиксели часто квантуются в один и тот же тон).
+	npix := 4096
+	mut src := []u16{len: npix * 3}
+	for i in 0 .. npix {
+		v := u16(u32(i) * 65535 / u32(npix - 1))
+		src[i * 3] = v
+		src[i * 3 + 1] = v
+		src[i * 3 + 2] = v
+	}
+	nomask := &u16(unsafe { nil })
+
+	// dither: false - округление без шума, детерминировано
+	mut nod1 := []u8{len: npix * 4}
+	mut nod2 := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut nod1, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: false }, mut nod2, 4)
+	assert nod1 == nod2
+
+	// dither: true - тоже детерминировано (два прогона на одном входе совпадают)
+	mut d1 := []u8{len: npix * 4}
+	mut d2 := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: true }, mut d1, 4)
+	apply(unsafe { &u16(src.data) }, nomask, npix, Params{ dither: true }, mut d2, 4)
+	assert d1 == d2
+
+	// Дизер разбивает ступени: дисперсия разностей соседних пикселей выше
+	mut sum_diff2_nod := f64(0)
+	mut sum_diff2_d := f64(0)
+	for i in 1 .. npix {
+		dn := int(nod1[i * 4]) - int(nod1[(i - 1) * 4])
+		dd := int(d1[i * 4]) - int(d1[(i - 1) * 4])
+		sum_diff2_nod += f64(dn * dn)
+		sum_diff2_d += f64(dd * dd)
+	}
+	assert sum_diff2_d > sum_diff2_nod
+
+	// Но среднее по большому блоку почти не меняется (шум не смещает яркость)
+	mut sum_nod := f64(0)
+	mut sum_d := f64(0)
+	for i in 0 .. npix {
+		sum_nod += f64(nod1[i * 4])
+		sum_d += f64(d1[i * 4])
+	}
+	mean_nod := sum_nod / f64(npix)
+	mean_d := sum_d / f64(npix)
+	diff := math.abs(mean_d - mean_nod)
+	assert diff < 1.0, 'среднее сместилось: без дизера ${mean_nod:.3f}, с дизером ${mean_d:.3f}'
+}
+
+// Смешанная камерная кривая (CamTone): серое - ровно кривая по тону
+// (оба способа на сером совпадают); у светлого цветного пикселя при
+// кривой с «плечом» цвет держится лучше, чем кривой по каналам; контраст
+// и тональные кривые действуют после неё, как раньше
+fn test_camera_curve_blend() {
+	mut sh := []f32{len: 256}
+	for i in 0 .. 256 {
+		t := 1 - f32(i) / 255
+		sh[i] = 255 * (1 - t * t)
+	}
+	tone := fn (x u16) f32 {
+		return math.powf(f32(x) / 65535, 1 / 2.2) * 255
+	}
+	g := px1(15000, 15000, 15000, Params{ curve: sh, dither: false })
+	want := curve_at(sh, tone(15000))
+	assert g[0] == g[1] && g[1] == g[2]
+	assert math.abs(f32(g[0]) - want) <= 1, '${g[0]} ~ ${want}'
+	// Светлый тёплый пиксель: размах каналов по каналам - разность кривых
+	r0, g0, b0 := u16(40000), u16(30000), u16(22000)
+	c := px1(r0, g0, b0, Params{ curve: sh, dither: false })
+	per_ch := curve_at(sh, tone(r0)) - curve_at(sh, tone(b0))
+	assert f32(c[0]) - f32(c[2]) > per_ch + 5, '${c[0] - c[2]} > ${per_ch}'
+	assert c[0] > c[1] && c[1] > c[2] // оттенок тот же
+	// Контраст и общая кривая - после камерной кривой
+	ct := px1(15000, 15000, 15000, Params{ curve: sh, contrast: 0.5, dither: false })
+	assert ct[0] != g[0]
+	lt := px1(15000, 15000, 15000, Params{ curve: sh, tc_rgb: lift_curve(20), dither: false })
+	assert math.abs(int(lt[0]) - int(g[0]) - 20) <= 1
+}
+
+// px1 - один пиксель через пайплайн (RGB 8 бит, без дизера)
+fn px1(r u16, g u16, b u16, p Params) []u8 {
+	src := [r, g, b]
+	mut out := []u8{len: 3}
+	apply(unsafe { &u16(src.data) }, unsafe { nil }, 1, p, mut out, 3)
+	return out
+}
+
+// Кривая «тон + d» на 256 узлов
+fn lift_curve(d f32) []f32 {
+	mut c := []f32{len: 256}
+	for i in 0 .. 256 {
+		v := f32(i) + d
+		c[i] = if v > 255 { f32(255) } else { v }
+	}
+	return c
+}
+
+// Тональные кривые: общая действует на все каналы, канальная - только на свой
+fn test_tone_curves() {
+	base := px1(20000, 20000, 20000, Params{ dither: false })
+	assert base[0] == base[1] && base[1] == base[2]
+
+	// Тождественная кривая ничего не меняет
+	mut id := []f32{len: 256}
+	for i in 0 .. 256 {
+		id[i] = f32(i)
+	}
+	same := px1(20000, 20000, 20000, Params{ dither: false, tc_rgb: id })
+	assert same == base
+
+	// Общая кривая +20: все каналы светлее, серое остаётся серым
+	lifted := px1(20000, 20000, 20000, Params{ dither: false, tc_rgb: lift_curve(20) })
+	assert lifted[0] == lifted[1] && lifted[1] == lifted[2]
+	assert int(lifted[0]) - int(base[0]) >= 19
+
+	// Кривая красного +20: только R
+	red := px1(20000, 20000, 20000, Params{ dither: false, tc_r: lift_curve(20) })
+	assert int(red[0]) - int(base[0]) >= 19
+	assert red[1] == base[1] && red[2] == base[2]
+
+	// Общая и канальная складываются: tc_b(tc_rgb(v))
+	both := px1(20000, 20000, 20000, Params{ dither: false, tc_rgb: lift_curve(10), tc_b: lift_curve(10) })
+	assert int(both[2]) - int(base[2]) >= 19
+	assert int(both[0]) - int(base[0]) >= 9 && int(both[0]) - int(base[0]) <= 11
+}
+
+// HSL-эквалайзер: действует на свой диапазон оттенков, серое не трогает
+fn test_hsl_equalizer() {
+	red := [u16(40000), 6000, 6000]
+	blue := [u16(6000), 8000, 40000]
+	base_r := px1(red[0], red[1], red[2], Params{ dither: false })
+	base_b := px1(blue[0], blue[1], blue[2], Params{ dither: false })
+	gray := px1(20000, 20000, 20000, Params{ dither: false })
+
+	// Насыщенность красных -100: красный пиксель почти серый, синий цел
+	mut p := Params{ dither: false }
+	p.hsl_sat[0] = -100
+	r2 := px1(red[0], red[1], red[2], p)
+	assert math.abs(int(r2[0]) - int(r2[1])) <= 1
+	assert px1(blue[0], blue[1], blue[2], p) == base_b
+	assert px1(20000, 20000, 20000, p) == gray
+
+	// Яркость синих +100: синий светлее, красный цел
+	mut pl := Params{ dither: false }
+	pl.hsl_lum[5] = 100
+	b2 := px1(blue[0], blue[1], blue[2], pl)
+	assert b2[2] > base_b[2]
+	assert px1(red[0], red[1], red[2], pl) == base_r
+
+	// Сдвиг оттенка красных +100 (+30°): красный уходит к оранжевому -
+	// зелёный канал растёт, красный остаётся максимальным
+	mut ph := Params{ dither: false }
+	ph.hsl_hue[0] = 100
+	r3 := px1(red[0], red[1], red[2], ph)
+	assert r3[1] > base_r[1] + 20
+	assert r3[0] >= r3[1]
+	assert px1(20000, 20000, 20000, ph) == gray
+}
+
+// Сочность: блёклый цвет поднимается сильнее насыщенного, тон кожи -
+// слабее такого же блёклого голубого, серое не меняется, минус - к серому
+fn test_vibrance() {
+	// Размах каналов (max - min) пикселя тонового пространства
+	spread := fn (r f32, g f32, b f32) f32 {
+		mx := if r > g { if r > b { r } else { b } } else { if g > b { g } else { b } }
+		mn := if r < g { if r < b { r } else { b } } else { if g < b { g } else { b } }
+		return mx - mn
+	}
+	// Серое не трогается
+	gr, gg, gb := vibrance_pixel(120, 120, 120, 1)
+	assert gr == 120 && gg == 120 && gb == 120
+	// Блёклый голубой (s ~ 0.2) против насыщенного (s ~ 0.8)
+	mr, mg, mb := vibrance_pixel(100, 115, 125, 1)
+	sr, sg, sb := vibrance_pixel(30, 90, 150, 1)
+	gain_muted := spread(mr, mg, mb) / spread(100, 115, 125)
+	gain_sat := spread(sr, sg, sb) / spread(30, 90, 150)
+	assert gain_muted > 1.5
+	assert gain_sat < 1.1 && gain_sat >= 1
+	// Кожа (оранжевый ~30°, та же насыщенность, что у голубого) - подъём меньше
+	kr, kg, kb := vibrance_pixel(125, 112, 100, 1)
+	gain_skin := spread(kr, kg, kb) / spread(125, 112, 100)
+	assert gain_skin > 1 && gain_skin < gain_muted
+	// Яркий цвет не клипается
+	br, bg, bb := vibrance_pixel(250, 200, 180, 1)
+	assert br <= 255 && bg <= 255 && bb >= 0
+	// Минус приглушает: блёклое сильнее насыщенного
+	nr, ng, nb := vibrance_pixel(100, 115, 125, -1)
+	xr, xg, xb := vibrance_pixel(30, 90, 150, -1)
+	assert spread(nr, ng, nb) < 0.5 * spread(100, 115, 125)
+	assert spread(xr, xg, xb) > 0.9 * spread(30, 90, 150)
+	// Через apply: vibrance 0 - как без сочности
+	nomask := &u16(unsafe { nil })
+	col := [u16(30000), 26000, 22000]
+	mut a := []u8{len: 3}
+	mut b := []u8{len: 3}
+	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ dither: false }, mut a, 3)
+	apply(unsafe { &u16(col.data) }, nomask, 1, Params{ vibrance: 100, dither: false }, mut b, 3)
+	assert int(b[0]) - int(b[2]) > int(a[0]) - int(a[2])
+}
+
+// Кривая по соответствию с «небом»: резкий скачок на узком участке тонов
+// (наклон x5 на 16 тонах) - в кривой наклон соседних участков меняется
+// плавно, без излома; кривая монотонна, концы на месте
+fn test_curve_from_mapping_smooth() {
+	mut mapping := []int{len: 256}
+	for v in 0 .. 256 {
+		mapping[v] = if v < 104 {
+			v * 150 / 104
+		} else if v < 120 {
+			150 + (v - 104) * 5
+		} else {
+			230 + (v - 120) * 25 / 135
+		}
+	}
+	c := curve_from_mapping(mapping)
+	assert c[0] == 0 && c[255] == 255
+	mut prev_slope := f32(-1)
+	for v := 8; v < 248; v += 8 {
+		slope := (c[v + 8] - c[v]) / 8
+		assert slope < 3.0, 'тон ${v}: наклон ${slope}'
+		if prev_slope >= 0 {
+			assert math.abs(slope - prev_slope) < 0.8, 'тон ${v}: излом ${prev_slope} -> ${slope}'
+		}
+		prev_slope = slope
+	}
+	for v in 1 .. 256 {
+		assert c[v] >= c[v - 1]
+	}
+}
+
+// match_saturation: эталон - наши же тона с насыщенностью x1.5 -
+// множитель ~1.5; эталон без изменений - ~1; серый кадр - 1
+fn test_match_saturation() {
+	npix := 40000
+	mut src := []u16{len: npix * 3}
+	for i in 0 .. npix {
+		// Цветной градиент средних тонов
+		t := f32(i % 200) / 200.0
+		src[i * 3] = u16(6000 + 14000 * t)
+		src[i * 3 + 1] = u16(9000 + 8000 * t)
+		src[i * 3 + 2] = u16(4000 + 20000 * (1 - t))
+	}
+	p := Params{}
+	tone := build_flut(&p)
+	mk := fn [src, tone, npix] (s f32) []u8 {
+		mut ref_ := []u8{len: npix * 3}
+		for i in 0 .. npix {
+			r := tone[src[i * 3]]
+			g := tone[src[i * 3 + 1]]
+			b := tone[src[i * 3 + 2]]
+			l := 0.2126 * r + 0.7152 * g + 0.0722 * b
+			for c, v in [r, g, b] {
+				x := l + s * (v - l)
+				ref_[i * 3 + c] = u8(if x < 0 { f32(0) } else if x > 255 { f32(255) } else { x + 0.5 })
+			}
+		}
+		return ref_
+	}
+	r15 := mk(1.5)
+	k15 := match_saturation(unsafe { &u16(src.data) }, npix, []f32{}, unsafe { &u8(r15.data) }, npix)
+	assert math.abs(k15 - 1.5) < 0.05, '${k15}'
+	r1 := mk(1.0)
+	k1 := match_saturation(unsafe { &u16(src.data) }, npix, []f32{}, unsafe { &u8(r1.data) }, npix)
+	assert math.abs(k1 - 1.0) < 0.03, '${k1}'
+	// Серый источник - считать не по чему
+	gray := []u16{len: npix * 3, init: 12000}
+	kg := match_saturation(unsafe { &u16(gray.data) }, npix, []f32{}, unsafe { &u8(r15.data) }, npix)
+	assert kg == 1
+}
+
+// Цвет «как JPEG» (match_hues): эталон - наш кадр с голубыми x1.4 по
+// насыщенности и зелёными, сдвинутыми на +12° - таблица это находит и
+// приближает; эталон без изменений - таблицы нет (подгонка не помогает)
+fn test_match_hues() {
+	w, h := 480, 90
+	mut ours := []u8{len: w * h * 3}
+	mut ref_ := []u8{len: w * h * 3}
+	for y in 0 .. h {
+		for x in 0 .. w {
+			// Круг оттенков по x, насыщенность 0.25..0.55 по y
+			hh := f32(x) / f32(w) * 6
+			s := 0.25 + 0.3 * f32(y) / f32(h)
+			v := f32(180)
+			r, g, b := hsv_to_rgb_test(hh, s, v)
+			i := (y * w + x) * 3
+			ours[i], ours[i + 1], ours[i + 2] = u8(r), u8(g), u8(b)
+			mut h2 := hh
+			mut s2 := s
+			if hh >= 3.0 && hh < 3.8 { // голубые
+				s2 = s * 1.4
+			}
+			if hh >= 1.6 && hh < 2.4 { // зелёные
+				h2 = hh + 0.2 * s
+			}
+			r2, g2, b2 := hsv_to_rgb_test(h2, s2, v)
+			ref_[i], ref_[i + 1], ref_[i + 2] = u8(r2), u8(g2), u8(b2)
+		}
+	}
+	dh, sk := match_hues(unsafe { &u8(ours.data) }, 3, unsafe { &u8(ref_.data) }, 3, w, h)
+	assert dh.len == cam_tab_n && sk.len == cam_tab_n
+	pd := unsafe { &f32(dh.data) }
+	ps := unsafe { &f32(sk.data) }
+	_, k_cyan := cam_lookup(pd, ps, 3.4, 0.4, 180)
+	d_green, _ := cam_lookup(pd, ps, 2.0, 0.4, 180)
+	d_red, k_red := cam_lookup(pd, ps, 0.5, 0.4, 180)
+	assert k_cyan > 1.15, '${k_cyan}'
+	assert d_green > 0.1, '${d_green}'
+	assert math.abs(d_red) < 0.05 && math.abs(k_red - 1) < 0.1
+	// Эталон совпадает с нашим - подгонка не нужна
+	dh0, _ := match_hues(unsafe { &u8(ours.data) }, 3, unsafe { &u8(ours.data) }, 3, w, h)
+	assert dh0.len == 0
+}
+
+fn hsv_to_rgb_test(h0 f32, s f32, v f32) (f32, f32, f32) {
+	mut h := h0
+	for h >= 6 {
+		h -= 6
+	}
+	sec := int(h)
+	f := h - f32(sec)
+	p := v * (1 - s)
+	q := v * (1 - s * f)
+	t := v * (1 - s * (1 - f))
+	return match sec {
+		0 { v, t, p }
+		1 { q, v, p }
+		2 { p, v, t }
+		3 { p, q, v }
+		4 { t, p, v }
+		else { v, p, q }
+	}
+}
+
+// Многопоточный рендер (render: полосы пикселей в потоках) - байт в байт
+// как однопоточный: большой кадр целиком против тех же строк по одной
+// (строка мала - считается в одном потоке); с дизером - тоже, он зависит
+// только от номера пикселя
+fn test_render_threads_match() {
+	w, h := 700, 500 // 350 тыс. пикселей - больше порога потоков
+	npix := w * h
+	mut src := []u16{len: npix * 3}
+	mut mask := []u16{len: npix * mask_ch}
+	mut s := u32(12345)
+	for i in 0 .. npix * 3 {
+		s = s * 1664525 + 1013904223
+		src[i] = u16(s >> 16)
+	}
+	for i in 0 .. npix {
+		mask[i * mask_ch] = src[i * 3 + 1]
+		mask[i * mask_ch + 1] = src[i * 3]
+	}
+	mut p := Params{
+		exposure:    0.5
+		contrast:    0.3
+		saturation:  1.2
+		sh_shadows:  30
+		clarity:     40
+		dither:      false
+		cam_hue:     []f32{len: cam_tab_n, init: 0.1}
+		cam_hsat:    []f32{len: cam_tab_n, init: 1.2}
+	}
+	p.hsl_sat[3] = 40
+	mut full := []u8{len: npix * 4}
+	apply(unsafe { &u16(src.data) }, unsafe { &u16(mask.data) }, npix, p, mut full, 4)
+	mut rows := []u8{len: npix * 4}
+	for y in 0 .. h {
+		mut row := []u8{len: w * 4}
+		apply(unsafe { &u16(src.data) + y * w * 3 }, unsafe { &u16(mask.data) + y * w * mask_ch }, w,
+			p, mut row, 4)
+		unsafe { vmemcpy(&u8(rows.data) + y * w * 4, row.data, w * 4) }
+	}
+	assert full == rows
+}
