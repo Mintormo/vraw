@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} di folder)",
  " (и ещё {0})": " (dan {0} lagi)",
  " - проявка...": " - sedang diproses...",
- " и ": " dan ",
  ", 16 бит": ", 16 bit",
  ", качество {0}": ", kualitas {0}",
  "100% / вписать": "100% / pas",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Lensa: distorsi",
  "Объектив: средняя точка": "Lensa: titik tengah",
  "Обычная": "Normal",
- "Окно": "Jendela",
  "Округлость": "Kebulatan",
  "Оранжевый": "Oranye",
  "Ореолы": "Tepi warna",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Tampilkan panel alat{0}",
  "Полностью": "Penuh",
  "Полноэкранный режим": "Layar penuh",
- "Полноэкранный режим{0}": "Layar penuh{0}",
  "Пометка не сохранена: {0}": "Tanda tidak tersimpan: {0}",
  "Порог": "Ambang",
  "Портрет": "Potret",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Gradasi warna: keseimbangan",
  "Цветокоррекция: смешение": "Gradasi warna: pencampuran",
  "Ч/Б: {0}": "H/P: {0}",
- "Что показывать вокруг снимка": "Apa yang ditampilkan di sekitar foto",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Apa yang ditampilkan di sekitar foto; {0} dalam mode ini - sama",
  "Чёрно-белое": "Hitam putih",
  "Чёрно-белое: {0}": "Hitam putih: {0}",
  "Чёрные": "Hitam",
@@ -671,5 +666,6 @@
  "Линия яркости": "Garis luminans",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekualiser: {0} {1} EV - seret ke kiri atau kanan",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Arahkan ke zona - penggeser ekualisernya, seret ke samping - ubah. Segitiga: bayangan tenggelam (kiri) dan sorotan terbakar (kanan) - klik untuk menampilkannya di foto, J - keduanya",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data sensor, sumbu - langkah EV hingga terpotong. Tepi kanan - kanal terpotong: data ini tidak dapat dipulihkan. Segitiga kanan menunjukkannya pada foto"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data sensor, sumbu - langkah EV hingga terpotong. Tepi kanan - kanal terpotong: data ini tidak dapat dipulihkan. Segitiga kanan menunjukkannya pada foto",
+ "Окно и полноэкранный режим": "Jendela dan layar penuh"
 }

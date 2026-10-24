@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} i mappen)",
  " (и ещё {0})": " (og {0} mere)",
  " - проявка...": " - fremkalder...",
- " и ": " og ",
  ", 16 бит": ", 16 bit",
  ", качество {0}": ", kvalitet {0}",
  "100% / вписать": "100 % / tilpas",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektiv: forvrængning",
  "Объектив: средняя точка": "Objektiv: midtpunkt",
  "Обычная": "Normal",
- "Окно": "Vindue",
  "Округлость": "Rundhed",
  "Оранжевый": "Orange",
  "Ореолы": "Farvekanter",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Vis værktøjspanel{0}",
  "Полностью": "Fuldt",
  "Полноэкранный режим": "Fuld skærm",
- "Полноэкранный режим{0}": "Fuld skærm{0}",
  "Пометка не сохранена: {0}": "Markering ikke gemt: {0}",
  "Порог": "Tærskel",
  "Портрет": "Portræt",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Farvegradering: balance",
  "Цветокоррекция: смешение": "Farvegradering: blanding",
  "Ч/Б: {0}": "S/H: {0}",
- "Что показывать вокруг снимка": "Hvad der vises omkring fotoet",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Hvad der vises omkring fotoet; {0} i tilstanden - det samme",
  "Чёрно-белое": "Sort-hvid",
  "Чёрно-белое: {0}": "Sort-hvid: {0}",
  "Чёрные": "Sorte",
@@ -671,5 +666,6 @@
  "Линия яркости": "Lysstyrkelinje",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizer: {0} {1} EV - træk til venstre eller højre",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Hold over en zone - dens equalizer-skyder, træk til siden - ændr. Trekanter: udbrændte skygger (venstre) og højlys (højre) - klik viser dem i fotoet, J - begge",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, aksen - EV-trin til klipning. Højre kant - udbrændte kanaler: disse data kan ikke hentes frem. Den højre trekant viser dem på billedet"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, aksen - EV-trin til klipning. Højre kant - udbrændte kanaler: disse data kan ikke hentes frem. Den højre trekant viser dem på billedet",
+ "Окно и полноэкранный режим": "Vindue og fuld skærm"
 }

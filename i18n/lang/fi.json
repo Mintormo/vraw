@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} kansiossa)",
  " (и ещё {0})": " (ja {0} muuta)",
  " - проявка...": " - kehitetään...",
- " и ": " ja ",
  ", 16 бит": ", 16 bittiä",
  ", качество {0}": ", laatu {0}",
  "100% / вписать": "100 % / sovita",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektiivi: vääristymä",
  "Объектив: средняя точка": "Objektiivi: keskipiste",
  "Обычная": "Normaali",
- "Окно": "Ikkuna",
  "Округлость": "Pyöreys",
  "Оранжевый": "Oranssi",
  "Ореолы": "Värireunat",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Näytä työkalupaneeli{0}",
  "Полностью": "Täysi",
  "Полноэкранный режим": "Koko näyttö",
- "Полноэкранный режим{0}": "Koko näyttö{0}",
  "Пометка не сохранена: {0}": "Merkintää ei tallennettu: {0}",
  "Порог": "Kynnys",
  "Портрет": "Muotokuva",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Värien korjaus: tasapaino",
  "Цветокоррекция: смешение": "Värien korjaus: sekoitus",
  "Ч/Б: {0}": "M/V: {0}",
- "Что показывать вокруг снимка": "Mitä näytetään kuvan ympärillä",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Mitä näytetään kuvan ympärillä; {0} tilassa - sama",
  "Чёрно-белое": "Mustavalkoinen",
  "Чёрно-белое: {0}": "Mustavalkoinen: {0}",
  "Чёрные": "Mustat",
@@ -671,5 +666,6 @@
  "Линия яркости": "Kirkkausviiva",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Taajuuskorjain: {0} {1} EV - vedä vasemmalle tai oikealle",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Vie osoitin alueelle - sen taajuuskorjaimen liukusäädin, vedä sivulle - muuta. Kolmiot: tukkeutuneet varjot (vasemmalla) ja puhki palaneet (oikealla) - napsautus näyttää ne kuvassa, J - molemmat",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: kennon data, akseli - EV-askeleet leikkautumiseen. Oikea reuna - puhki palaneet kanavat: tätä dataa ei voi palauttaa. Oikea kolmio näyttää ne kuvassa"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: kennon data, akseli - EV-askeleet leikkautumiseen. Oikea reuna - puhki palaneet kanavat: tätä dataa ei voi palauttaa. Oikea kolmio näyttää ne kuvassa",
+ "Окно и полноэкранный режим": "Ikkuna ja koko näyttö"
 }

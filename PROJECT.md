@@ -1910,13 +1910,13 @@ LTO после кадрирования были пустые превью и г
   с программой (`app_dir()` — папка бинарника, vraw переносим) (json2) — `theme` (ключ из
   `theme_keys`), `ui_scale` (масштаб интерфейса, %), `viewer_bg` (ключ из `bg_keys`), `strip_open`,
   раскладка окна (`no_panel`, `no_strip`, `panel_left`, `strip_top`,
-  `fs_panel`, `fs_strip`,
   `panel_order`, `panel_hidden`, `panel_w` — ширина панели, px — см.
   «Раскладка окна» и «Компоновка»),
   читаются в начале main, пишутся при изменении (`set_viewer_bg`,
   `set_strip_open`, `apply_theme`); испорченный файл — значения по
   умолчанию (поля прежних версий — `ai_model`, `export_no_ai`,
-  `no_ai_cache` — молча пропускаются, тест `test_settings_old_ai_fields`).
+  `no_ai_cache`, `fs_panel`, `fs_strip` — молча пропускаются, тесты
+  `test_settings_old_ai_fields`, `test_panel_settings_roundtrip`).
   Старого места (`~/.config/vraw`) не читаем.
 - **Окно «Настройки»** (`settings_ui.v`, «Правка - Настройки...», Ctrl+P;
   с 08.10.2026 содержимое — `vgui.TabBox` из четырёх вкладок: «Общие» (оформление,
@@ -1968,12 +1968,13 @@ LTO после кадрирования были пустые превью и г
   `win.set_fullscreen`, полоса меню `visible = false` (остаётся в корне:
   с `MenuBar.keys_when_hidden` её сочетания клавиш работают и скрытой),
   `layout_work`/`layout_strip` при `st.fullscreen` кладут один снимок,
-  поля `view_area` — 0 вместо `view_pad`. Панель и лента у режима свои:
-  `fs_panel`/`fs_strip` (по умолчанию скрыты — один снимок), в окне —
-  `no_panel`/`no_strip`; видимость сейчас — `panel_on`/`strip_on`.
-  F8/F6 и пункты меню меняют флаги текущего режима
-  (`set_panel_visible(st, fs, v)`, `set_strip_visible`), в окне
-  настроек — свои флажки для окна и для режима. Открыта папка без кадра
+  поля `view_area` — 0 вместо `view_pad`. Панель и лента — общие для
+  окна и режима (с 25.10.2026, просьба Игоря; раньше у режима были свои
+  `fs_panel`/`fs_strip`): `no_panel`/`no_strip`, видимость —
+  `panel_on`/`strip_on`. F8/F6, пункты меню и флажки окна настроек
+  (блок «Окно и полноэкранный режим») — `set_panel_visible(st, v)`,
+  `set_strip_visible(st, v)`: скрытое в окне скрыто и в режиме, и
+  наоборот. Открыта папка без кадра
   (`load_folder`, `cur_path` пуст), а лента скрыта — показывается сама:
   иначе кадр не выбрать.
   Меню «Вид»: «Лента кадров» F6, «Обновить ленту» F5, «Лента сверху», «Панель инструментов»

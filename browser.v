@@ -565,9 +565,9 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), edited, cur,
 		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.thumb_done)
 	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
-	// (F6, в окне или в полноэкранном режиме) показывается
+	// (F6) показывается
 	if cur_path == '' && paths.len > 0 && !strip_on(st) {
-		set_strip_visible(mut st, st.fullscreen, true)
+		set_strip_visible(mut st, true)
 		return
 	}
 	layout_strip(mut st)

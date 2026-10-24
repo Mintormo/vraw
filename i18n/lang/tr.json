@@ -5,7 +5,6 @@
  " (в папке {0})": " (klasörde {0})",
  " (и ещё {0})": " (ve {0} tane daha)",
  " - проявка...": " - işleniyor...",
- " и ": " ve ",
  ", 16 бит": ", 16 bit",
  ", качество {0}": ", kalite {0}",
  "100% / вписать": "100% / sığdır",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektif: bozulma",
  "Объектив: средняя точка": "Objektif: orta nokta",
  "Обычная": "Normal",
- "Окно": "Pencere",
  "Округлость": "Yuvarlaklık",
  "Оранжевый": "Turuncu",
  "Ореолы": "Saçaklar",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Araç panelini göster{0}",
  "Полностью": "Tam",
  "Полноэкранный режим": "Tam ekran",
- "Полноэкранный режим{0}": "Tam ekran{0}",
  "Пометка не сохранена: {0}": "İşaret kaydedilmedi: {0}",
  "Порог": "Eşik",
  "Портрет": "Portre",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Renk derecelendirme: denge",
  "Цветокоррекция: смешение": "Renk derecelendirme: karıştırma",
  "Ч/Б: {0}": "S/B: {0}",
- "Что показывать вокруг снимка": "Fotoğrafın çevresinde ne gösterilecek",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Fotoğrafın çevresinde ne gösterilecek; bu modda {0} - aynısı",
  "Чёрно-белое": "Siyah beyaz",
  "Чёрно-белое: {0}": "Siyah beyaz: {0}",
  "Чёрные": "Siyahlar",
@@ -671,5 +666,6 @@
  "Линия яркости": "Parlaklık çizgisi",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekolayzer: {0} {1} EV - sola veya sağa sürükleyin",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Bir bölgenin üzerine gelin - ekolayzer kaydırıcısı, yana sürükleyin - değiştirin. Üçgenler: gölge kırpması (solda) ve parlak alan kırpması (sağda) - tıklama bunları fotoğrafta gösterir, J - ikisi",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensör verisi, eksen - kırpmaya kadar EV adımları. Sağ kenar - kırpılmış kanallar: bu veri kurtarılamaz. Sağ üçgen onları fotoğrafta gösterir"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensör verisi, eksen - kırpmaya kadar EV adımları. Sağ kenar - kırpılmış kanallar: bu veri kurtarılamaz. Sağ üçgen onları fotoğrafta gösterir",
+ "Окно и полноэкранный режим": "Pencere ve tam ekran"
 }

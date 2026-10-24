@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} kaustas)",
  " (и ещё {0})": " (ja veel {0})",
  " - проявка...": " - ilmutamine...",
- " и ": " ja ",
  ", 16 бит": ", 16 bitti",
  ", качество {0}": ", kvaliteet {0}",
  "100% / вписать": "100% / sobita",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektiiv: moonutus",
  "Объектив: средняя точка": "Objektiiv: keskpunkt",
  "Обычная": "Tavaline",
- "Окно": "Aken",
  "Округлость": "Ümarus",
  "Оранжевый": "Oranž",
  "Ореолы": "Värviservad",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Näita tööriistapaneeli{0}",
  "Полностью": "Täielikult",
  "Полноэкранный режим": "Täisekraan",
- "Полноэкранный режим{0}": "Täisekraan{0}",
  "Пометка не сохранена: {0}": "Märget ei salvestatud: {0}",
  "Порог": "Lävi",
  "Портрет": "Portree",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Värviparandus: tasakaal",
  "Цветокоррекция: смешение": "Värviparandus: segamine",
  "Ч/Б: {0}": "M/V: {0}",
- "Что показывать вокруг снимка": "Mida näidata foto ümber",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Mida näidata foto ümber; {0} režiimis - sama",
  "Чёрно-белое": "Mustvalge",
  "Чёрно-белое: {0}": "Mustvalge: {0}",
  "Чёрные": "Mustad",
@@ -671,5 +666,6 @@
  "Линия яркости": "Heleduse joon",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaiser: {0} {1} EV - lohista vasakule või paremale",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Vii kursor tsoonile - selle ekvalaiseri liugur, lohista külgsuunas - muuda. Kolmnurgad: uppunud varjud (vasakul) ja läbipõlenud heledad (paremal) - klõps näitab neid fotol, J - mõlemad",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensori andmed, telg - EV-astmed kuni lõikumiseni. Parem serv - läbipõlenud kanalid: neid andmeid ei saa taastada. Parem kolmnurk näitab neid pildil"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensori andmed, telg - EV-astmed kuni lõikumiseni. Parem serv - läbipõlenud kanalid: neid andmeid ei saa taastada. Parem kolmnurk näitab neid pildil",
+ "Окно и полноэкранный режим": "Aken ja täisekraan"
 }

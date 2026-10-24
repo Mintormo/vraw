@@ -32,8 +32,6 @@ mut:
 	side_cb  &vgui.ComboBox = unsafe { nil }
 	strip_ck &vgui.CheckBox = unsafe { nil }
 	top_cb   &vgui.ComboBox = unsafe { nil }
-	fs_panel &vgui.CheckBox = unsafe { nil }
-	fs_strip &vgui.CheckBox = unsafe { nil }
 	sec_box  &vgui.VBox     = unsafe { nil } // ряды разделов по порядку
 	sec_rows []SecRow // по индексу panel_sections
 	// Горячие клавиши (hotkeys_ui.v): ряды по индексу st.hk, ждущий
@@ -41,8 +39,6 @@ mut:
 	hk_rows []HkRow
 	hk_msg  &vgui.Label = unsafe { nil }
 	// подписи со вписанными сочетаниями (полноэкранный режим, F8 и F6)
-	fs_cap  &vgui.Label = unsafe { nil }
-	fs_note &vgui.Label = unsafe { nil }
 }
 
 // SecRow - ряд раздела панели в окне: показывать ли, вверх, вниз
@@ -400,14 +396,14 @@ fn build_lang_row(mut st State) &vgui.VBox {
 }
 
 // build_iface_tab - вкладки «Интерфейс» (видимость панели инструментов
-// и ленты в окне и в полноэкранном режиме, их стороны) и «Разделы
+// и ленты - общая для окна и полноэкранного режима, их стороны) и «Разделы
 // панели» (показывать ли, порядок кнопками вверх/вниз; отдельной
 // вкладкой - иначе окно выше экрана). Ряды разделов создаются один раз,
 // порядок - пересборкой sec_box (sync_settings_ui).
 fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VBox, &vgui.VBox) {
 	mut panel_ck := vgui.checkbox(i18n.tr('Показывать панель инструментов (F8)'))
 	panel_ck.on_change = fn [mut st] (v bool) {
-		set_panel_visible(mut st, false, v)
+		set_panel_visible(mut st, v)
 	}
 	u.panel_ck = panel_ck
 	mut side_cb := vgui.combo_box()
@@ -418,7 +414,7 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 	u.side_cb = side_cb
 	mut strip_ck := vgui.checkbox(i18n.tr('Показывать ленту кадров (F6)'))
 	strip_ck.on_change = fn [mut st] (v bool) {
-		set_strip_visible(mut st, false, v)
+		set_strip_visible(mut st, v)
 	}
 	u.strip_ck = strip_ck
 	mut top_cb := vgui.combo_box()
@@ -427,16 +423,6 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 		set_strip_top(mut st, i == 1)
 	}
 	u.top_cb = top_cb
-	mut fs_panel := vgui.checkbox(i18n.tr('Панель инструментов'))
-	fs_panel.on_change = fn [mut st] (v bool) {
-		set_panel_visible(mut st, true, v)
-	}
-	u.fs_panel = fs_panel
-	mut fs_strip := vgui.checkbox(i18n.tr('Лента кадров'))
-	fs_strip.on_change = fn [mut st] (v bool) {
-		set_strip_visible(mut st, true, v)
-	}
-	u.fs_strip = fs_strip
 	side_col := column_width(mut dw, [i18n.tr('Расположение панели'), i18n.tr('Расположение ленты')], 8)
 	mut side_items := i18n.tr_all(panel_side_names)
 	side_items << i18n.tr_all(strip_side_names)
@@ -494,17 +480,11 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 	mut v := tab_page()
 	v.add(caption(i18n.tr('Язык')))
 	v.add(build_lang_row(mut st))
-	v.add(caption(i18n.tr('Окно')))
+	v.add(caption(i18n.tr('Окно и полноэкранный режим')))
 	v.add(panel_ck)
 	v.add(labeled(i18n.tr('Расположение панели'), side_cb, side_col, side_w))
 	v.add(strip_ck)
 	v.add(labeled(i18n.tr('Расположение ленты'), top_cb, side_col, side_w))
-	u.fs_cap = caption(i18n.tr('Полноэкранный режим'))
-	v.add(u.fs_cap)
-	u.fs_note = note(mut u, '')
-	v.add(u.fs_note)
-	v.add(fs_panel)
-	v.add(fs_strip)
 	mut secs := tab_page()
 	secs.add(caption(i18n.tr('Разделы панели инструментов')))
 	secs.add(note(mut u, i18n.tr('Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.')))
@@ -529,10 +509,6 @@ fn sync_iface(mut u SettingsUi, s &Settings) {
 	mut tcb := u.top_cb
 	tcb.set_selected(if s.strip_top { 1 } else { 0 })
 	tcb.enabled = !s.no_strip
-	mut fpc := u.fs_panel
-	fpc.checked = s.fs_panel
-	mut fsc := u.fs_strip
-	fsc.checked = s.fs_strip
 	order := panel_order_from(s.panel_order)
 	mut box := u.sec_box
 	box.clear()
@@ -609,7 +585,7 @@ fn fmt_cache_mb(mb int) string {
 }
 
 // sync_hk_texts - подписи вкладки «Интерфейс» с текущими сочетаниями
-// (hotkeys.v): флажки панели и ленты, полноэкранный режим
+// (hotkeys.v): флажки панели и ленты
 fn sync_hk_texts(mut u SettingsUi, st &State) {
 	if isnil(u.panel_ck) {
 		return
@@ -618,15 +594,4 @@ fn sync_hk_texts(mut u SettingsUi, st &State) {
 	pck.text = i18n.trf('Показывать панель инструментов{0}', '${hk_paren(st, 'view.panel')}')
 	mut sck := u.strip_ck
 	sck.text = i18n.trf('Показывать ленту кадров{0}', '${hk_paren(st, 'view.strip')}')
-	mut cap := u.fs_cap
-	cap.text = i18n.trf('Полноэкранный режим{0}', '${hk_paren(st, 'view.full')}')
-	kp := hk_key(st, 'view.panel')
-	ks := hk_key(st, 'view.strip')
-	keys := [kp, ks].filter(it.len > 0)
-	mut n := u.fs_note
-	n.text = if keys.len > 0 {
-		i18n.trf('Что показывать вокруг снимка; {0} в режиме - то же', keys.join(i18n.tr(' и ')))
-	} else {
-		i18n.tr('Что показывать вокруг снимка')
-	}
 }

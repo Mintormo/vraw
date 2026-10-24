@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} nella cartella)",
  " (и ещё {0})": " (e altre {0})",
  " - проявка...": " - sviluppo...",
- " и ": " e ",
  ", 16 бит": ", 16 bit",
  ", качество {0}": ", qualità {0}",
  "100% / вписать": "100% / adatta",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Obiettivo: distorsione",
  "Объектив: средняя точка": "Obiettivo: punto medio",
  "Обычная": "Normale",
- "Окно": "Finestra",
  "Округлость": "Rotondità",
  "Оранжевый": "Arancione",
  "Ореолы": "Frange",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Mostra il pannello strumenti{0}",
  "Полностью": "Completa",
  "Полноэкранный режим": "Schermo intero",
- "Полноэкранный режим{0}": "Schermo intero{0}",
  "Пометка не сохранена: {0}": "Contrassegno non salvato: {0}",
  "Порог": "Soglia",
  "Портрет": "Ritratto",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Color grading: bilanciamento",
  "Цветокоррекция: смешение": "Color grading: fusione",
  "Ч/Б: {0}": "B/N: {0}",
- "Что показывать вокруг снимка": "Cosa mostrare intorno alla foto",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Cosa mostrare intorno alla foto; {0} in questa modalità - lo stesso",
  "Чёрно-белое": "Bianco e nero",
  "Чёрно-белое: {0}": "Bianco e nero: {0}",
  "Чёрные": "Neri",
@@ -671,5 +666,6 @@
  "Линия яркости": "Linea della luminanza",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizzatore: {0} {1} EV - trascina a sinistra o a destra",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Passa su una zona - il suo cursore dell’equalizzatore, trascina di lato - modificalo. Triangoli: ombre chiuse (a sinistra) e luci bruciate (a destra) - un clic le mostra nella foto, J - entrambe",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dati del sensore, asse - stop EV fino al clipping. Bordo destro - canali bruciati: questi dati non si recuperano. Il triangolo destro li mostra sulla foto"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dati del sensore, asse - stop EV fino al clipping. Bordo destro - canali bruciati: questi dati non si recuperano. Il triangolo destro li mostra sulla foto",
+ "Окно и полноэкранный режим": "Finestra e schermo intero"
 }

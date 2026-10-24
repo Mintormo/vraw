@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} in de map)",
  " (и ещё {0})": " (en nog {0})",
  " - проявка...": " - ontwikkelen...",
- " и ": " en ",
  ", 16 бит": ", 16 bit",
  ", качество {0}": ", kwaliteit {0}",
  "100% / вписать": "100% / passend",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objectief: vervorming",
  "Объектив: средняя точка": "Objectief: middelpunt",
  "Обычная": "Normaal",
- "Окно": "Venster",
  "Округлость": "Rondheid",
  "Оранжевый": "Oranje",
  "Ореолы": "Kleurranden",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Gereedschapspaneel tonen{0}",
  "Полностью": "Volledig",
  "Полноэкранный режим": "Volledig scherm",
- "Полноэкранный режим{0}": "Volledig scherm{0}",
  "Пометка не сохранена: {0}": "Markering niet opgeslagen: {0}",
  "Порог": "Drempel",
  "Портрет": "Portret",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Kleurcorrectie: balans",
  "Цветокоррекция: смешение": "Kleurcorrectie: menging",
  "Ч/Б: {0}": "Z/W: {0}",
- "Что показывать вокруг снимка": "Wat rond de foto te tonen",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Wat rond de foto te tonen; {0} in deze modus - hetzelfde",
  "Чёрно-белое": "Zwart-wit",
  "Чёрно-белое: {0}": "Zwart-wit: {0}",
  "Чёрные": "Zwarte tinten",
@@ -671,5 +666,6 @@
  "Линия яркости": "Luminantielijn",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizer: {0} {1} EV - sleep naar links of rechts",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Beweeg over een zone - de equalizer-schuif ervan, sleep opzij - wijzig. Driehoeken: dichtgelopen schaduwen (links) en uitgebeten hoge lichten (rechts) - klik toont ze in de foto, J - beide",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensorgegevens, as - EV-stappen tot clipping. Rechterrand - uitgebeten kanalen: deze gegevens zijn niet terug te halen. De rechter driehoek toont ze op de foto"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensorgegevens, as - EV-stappen tot clipping. Rechterrand - uitgebeten kanalen: deze gegevens zijn niet terug te halen. De rechter driehoek toont ze op de foto",
+ "Окно и полноэкранный режим": "Venster en volledig scherm"
 }

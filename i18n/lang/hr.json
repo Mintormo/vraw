@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} u mapi)",
  " (и ещё {0})": " (i još {0})",
  " - проявка...": " - razvijanje...",
- " и ": " i ",
  ", 16 бит": ", 16 bita",
  ", качество {0}": ", kvaliteta {0}",
  "100% / вписать": "100% / prilagodi",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektiv: distorzija",
  "Объектив: средняя точка": "Objektiv: srednja točka",
  "Обычная": "Uobičajeno",
- "Окно": "Prozor",
  "Округлость": "Zaobljenost",
  "Оранжевый": "Narančasta",
  "Ореолы": "Rubovi",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Prikazuj ploču s alatima{0}",
  "Полностью": "Potpuno",
  "Полноэкранный режим": "Cijeli zaslon",
- "Полноэкранный режим{0}": "Cijeli zaslon{0}",
  "Пометка не сохранена: {0}": "Oznaka nije spremljena: {0}",
  "Порог": "Prag",
  "Портрет": "Portret",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Korekcija boja: ravnoteža",
  "Цветокоррекция: смешение": "Korekcija boja: miješanje",
  "Ч/Б: {0}": "C/B: {0}",
- "Что показывать вокруг снимка": "Što prikazati oko snimke",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Što prikazati oko snimke; {0} u načinu - isto",
  "Чёрно-белое": "Crno-bijelo",
  "Чёрно-белое: {0}": "Crno-bijelo: {0}",
  "Чёрные": "Crne",
@@ -671,5 +666,6 @@
  "Линия яркости": "Linija svjetline",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalizator: {0} {1} EV - povucite lijevo ili desno",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Prijeđite mišem preko zone - njezin klizač ekvalizatora, povucite u stranu - mijenjajte. Trokuti: propali dijelovi (lijevo) i pregorjeli (desno) - klik ih prikazuje na snimci, J - oboje",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: podaci senzora, os - EV stupnjevi do odsijecanja. Desni rub - pregorjeli kanali: ti se podaci ne mogu vratiti. Desni trokut pokazuje ih na snimci"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: podaci senzora, os - EV stupnjevi do odsijecanja. Desni rub - pregorjeli kanali: ti se podaci ne mogu vratiti. Desni trokut pokazuje ih na snimci",
+ "Окно и полноэкранный режим": "Prozor i cijeli zaslon"
 }

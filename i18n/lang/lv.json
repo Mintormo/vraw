@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} mapē)",
  " (и ещё {0})": " (un vēl {0})",
  " - проявка...": " - attīsta...",
- " и ": " un ",
  ", 16 бит": ", 16 biti",
  ", качество {0}": ", kvalitāte {0}",
  "100% / вписать": "100% / ietilpināt",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektīvs: kropļojums",
  "Объектив: средняя точка": "Objektīvs: viduspunkts",
  "Обычная": "Parastā",
- "Окно": "Logs",
  "Округлость": "Apaļums",
  "Оранжевый": "Oranžs",
  "Ореолы": "Krāsu apmales",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Rādīt rīku paneli{0}",
  "Полностью": "Pilnībā",
  "Полноэкранный режим": "Pilnekrāns",
- "Полноэкранный режим{0}": "Pilnekrāns{0}",
  "Пометка не сохранена: {0}": "Atzīme nav saglabāta: {0}",
  "Порог": "Slieksnis",
  "Портрет": "Portrets",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Krāsu korekcija: līdzsvars",
  "Цветокоррекция: смешение": "Krāsu korekcija: sajaukšana",
  "Ч/Б: {0}": "M/B: {0}",
- "Что показывать вокруг снимка": "Ko rādīt ap fotoattēlu",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Ko rādīt ap fotoattēlu; {0} režīmā - tas pats",
  "Чёрно-белое": "Melnbalts",
  "Чёрно-белое: {0}": "Melnbalts: {0}",
  "Чёрные": "Melnie",
@@ -671,5 +666,6 @@
  "Линия яркости": "Spilgtuma līnija",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaizers: {0} {1} EV - velciet pa kreisi vai pa labi",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Novietojiet kursoru uz zonas - tās ekvalaizera slīdnis, velciet uz sāniem - mainiet. Trīsstūri: pārtumšotās vietas (pa kreisi) un pārgaismotās (pa labi) - klikšķis tās parāda fotoattēlā, J - abas",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensora dati, ass - EV pakāpes līdz nogriešanai. Labā mala - pārdeguši kanāli: šos datus nevar atgūt. Labais trīsstūris tos parāda attēlā"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensora dati, ass - EV pakāpes līdz nogriešanai. Labā mala - pārdeguši kanāli: šos datus nevar atgūt. Labais trīsstūris tos parāda attēlā",
+ "Окно и полноэкранный режим": "Logs un pilnekrāns"
 }

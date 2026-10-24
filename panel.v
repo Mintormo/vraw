@@ -248,25 +248,20 @@ fn panel_dragged(mut st State) {
 	save_settings(st.settings)
 }
 
-// panel_on / strip_on - видны ли панель и лента сейчас: в окне - по
-// no_panel/no_strip, в полноэкранном режиме - по fs_panel/fs_strip
+// panel_on / strip_on - видны ли панель и лента (no_panel/no_strip):
+// одинаково в окне и в полноэкранном режиме
 fn panel_on(st &State) bool {
-	return if st.fullscreen { st.settings.fs_panel } else { !st.settings.no_panel }
+	return !st.settings.no_panel
 }
 
 fn strip_on(st &State) bool {
-	return if st.fullscreen { st.settings.fs_strip } else { !st.settings.no_strip }
+	return !st.settings.no_strip
 }
 
-// set_panel_visible - показать/скрыть панель инструментов в окне (fs =
-// false) или в полноэкранном режиме (fs = true). Меню «Вид» и F8 - для
-// текущего режима, окно настроек - для каждого своим флажком.
-fn set_panel_visible(mut st State, fs bool, v bool) {
-	if fs {
-		st.settings.fs_panel = v
-	} else {
-		st.settings.no_panel = !v
-	}
+// set_panel_visible - показать/скрыть панель инструментов (меню «Вид»,
+// F8, окно настроек) - в окне и в полноэкранном режиме разом
+fn set_panel_visible(mut st State, v bool) {
+	st.settings.no_panel = !v
 	save_settings(st.settings)
 	layout_work(mut st)
 	sync_settings_ui(mut st)
@@ -298,9 +293,9 @@ fn strip_start_ratio(top bool) f32 {
 
 // set_fullscreen - полноэкранный режим (меню «Вид», F; выход - F, Esc):
 // окно SDL на весь экран, полоса меню скрыта (её сочетания клавиш
-// работают - keys_when_hidden), снимок без полей. Панель и лента - свои
-// у режима (fs_panel, fs_strip; по умолчанию скрыты, F8/F6 в режиме -
-// они): по выходе в окне всё как было.
+// работают - keys_when_hidden), снимок без полей. Панель и лента - как в
+// окне (no_panel, no_strip): скрытое в окне скрыто и в режиме, F8/F6 в
+// режиме меняют их и для окна.
 fn set_fullscreen(mut st State, on bool) {
 	if isnil(st.win) || isnil(st.menu) || st.fullscreen == on {
 		return
@@ -342,14 +337,10 @@ fn set_strip_top(mut st State, top bool) {
 }
 
 // set_strip_visible - показать/скрыть ленту кадров целиком, вместе с
-// полосой, в окне или в полноэкранном режиме (fs, как у панели);
+// полосой, - в окне и в полноэкранном режиме разом (как у панели);
 // свернуть до полосы - set_strip_open
-fn set_strip_visible(mut st State, fs bool, v bool) {
-	if fs {
-		st.settings.fs_strip = v
-	} else {
-		st.settings.no_strip = !v
-	}
+fn set_strip_visible(mut st State, v bool) {
+	st.settings.no_strip = !v
 	save_settings(st.settings)
 	layout_strip(mut st)
 	sync_settings_ui(mut st)

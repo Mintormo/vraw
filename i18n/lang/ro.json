@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} în dosar)",
  " (и ещё {0})": " (și încă {0})",
  " - проявка...": " - developare...",
- " и ": " și ",
  ", 16 бит": ", 16 biți",
  ", качество {0}": ", calitate {0}",
  "100% / вписать": "100% / încadrare",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Obiectiv: distorsiune",
  "Объектив: средняя точка": "Obiectiv: punct median",
  "Обычная": "Normală",
- "Окно": "Fereastră",
  "Округлость": "Rotunjime",
  "Оранжевый": "Portocaliu",
  "Ореолы": "Franjuri",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Arată panoul de instrumente{0}",
  "Полностью": "Complet",
  "Полноэкранный режим": "Ecran complet",
- "Полноэкранный режим{0}": "Ecran complet{0}",
  "Пометка не сохранена: {0}": "Marcaj nesalvat: {0}",
  "Порог": "Prag",
  "Портрет": "Portret",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Gradarea culorilor: echilibru",
  "Цветокоррекция: смешение": "Gradarea culorilor: amestec",
  "Ч/Б: {0}": "A/N: {0}",
- "Что показывать вокруг снимка": "Ce se arată în jurul fotografiei",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Ce se arată în jurul fotografiei; {0} în acest mod - la fel",
  "Чёрно-белое": "Alb-negru",
  "Чёрно-белое: {0}": "Alb-negru: {0}",
  "Чёрные": "Negre",
@@ -671,5 +666,6 @@
  "Линия яркости": "Linia luminanței",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Egalizator: {0} {1} EV - trageți la stânga sau la dreapta",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Treceți peste o zonă - glisorul ei din egalizator, trageți lateral - modificați. Triunghiuri: umbre înecate (stânga) și lumini arse (dreapta) - un clic le arată în fotografie, J - ambele",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: datele senzorului, axa - trepte EV până la tăiere. Marginea dreaptă - canale arse: aceste date nu pot fi recuperate. Triunghiul din dreapta le arată pe fotografie"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: datele senzorului, axa - trepte EV până la tăiere. Marginea dreaptă - canale arse: aceste date nu pot fi recuperate. Triunghiul din dreapta le arată pe fotografie",
+ "Окно и полноэкранный режим": "Fereastră și ecran complet"
 }

@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} aplanke)",
  " (и ещё {0})": " (ir dar {0})",
  " - проявка...": " - ryškinama...",
- " и ": " ir ",
  ", 16 бит": ", 16 bitų",
  ", качество {0}": ", kokybė {0}",
  "100% / вписать": "100 % / pritaikyti",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektyvas: iškraipymas",
  "Объектив: средняя точка": "Objektyvas: vidurio taškas",
  "Обычная": "Įprasta",
- "Окно": "Langas",
  "Округлость": "Apvalumas",
  "Оранжевый": "Oranžinė",
  "Ореолы": "Spalviniai kraštai",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Rodyti įrankių skydelį{0}",
  "Полностью": "Visiškai",
  "Полноэкранный режим": "Visas ekranas",
- "Полноэкранный режим{0}": "Visas ekranas{0}",
  "Пометка не сохранена: {0}": "Žymė neišsaugota: {0}",
  "Порог": "Slenkstis",
  "Портрет": "Portretas",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Spalvų korekcija: balansas",
  "Цветокоррекция: смешение": "Spalvų korekcija: maišymas",
  "Ч/Б: {0}": "N/B: {0}",
- "Что показывать вокруг снимка": "Ką rodyti aplink nuotrauką",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Ką rodyti aplink nuotrauką; {0} režime - tas pats",
  "Чёрно-белое": "Nespalvota",
  "Чёрно-белое: {0}": "Nespalvota: {0}",
  "Чёрные": "Juodos",
@@ -671,5 +666,6 @@
  "Линия яркости": "Šviesumo linija",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaizeris: {0} {1} EV - tempkite į kairę arba į dešinę",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Užveskite ant zonos - jos ekvalaizerio slankiklis, tempkite į šoną - keiskite. Trikampiai: užtamsėjusios vietos (kairėje) ir perdegusios (dešinėje) - spustelėjus jos parodomos nuotraukoje, J - abi",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: jutiklio duomenys, ašis - EV žingsniai iki nukirtimo. Dešinysis kraštas - perdegę kanalai: šių duomenų atkurti negalima. Dešinysis trikampis parodo juos nuotraukoje"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: jutiklio duomenys, ašis - EV žingsniai iki nukirtimo. Dešinysis kraštas - perdegę kanalai: šių duomenų atkurti negalima. Dešinysis trikampis parodo juos nuotraukoje",
+ "Окно и полноэкранный режим": "Langas ir visas ekranas"
 }

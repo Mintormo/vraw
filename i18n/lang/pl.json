@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} w folderze)",
  " (и ещё {0})": " (i jeszcze {0})",
  " - проявка...": " - wywoływanie...",
- " и ": " i ",
  ", 16 бит": ", 16 bitów",
  ", качество {0}": ", jakość {0}",
  "100% / вписать": "100% / dopasuj",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Obiektyw: dystorsja",
  "Объектив: средняя точка": "Obiektyw: punkt środkowy",
  "Обычная": "Normalne",
- "Окно": "Okno",
  "Округлость": "Zaokrąglenie",
  "Оранжевый": "Pomarańczowy",
  "Ореолы": "Obwódki",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Pokaż panel narzędzi{0}",
  "Полностью": "Pełna",
  "Полноэкранный режим": "Pełny ekran",
- "Полноэкранный режим{0}": "Pełny ekran{0}",
  "Пометка не сохранена: {0}": "Nie zapisano oznaczenia: {0}",
  "Порог": "Próg",
  "Портрет": "Portret",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Gradacja kolorów: balans",
  "Цветокоррекция: смешение": "Gradacja kolorów: mieszanie",
  "Ч/Б: {0}": "Cz/B: {0}",
- "Что показывать вокруг снимка": "Co pokazywać wokół zdjęcia",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Co pokazywać wokół zdjęcia; {0} w tym trybie - to samo",
  "Чёрно-белое": "Czarno-białe",
  "Чёрно-белое: {0}": "Czarno-białe: {0}",
  "Чёрные": "Czernie",
@@ -671,5 +666,6 @@
  "Линия яркости": "Linia jasności",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Korektor: {0} {1} EV - przeciągnij w lewo lub w prawo",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Najedź na strefę - jej suwak korektora, przeciągnij w bok - zmieniaj. Trójkąty: niedoświetlenia (po lewej) i prześwietlenia (po prawej) - kliknięcie pokazuje je na zdjęciu, J - oba",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dane matrycy, oś - stopnie EV do przycięcia. Prawa krawędź - przepalone kanały: tych danych nie da się odzyskać. Prawy trójkąt pokazuje je na zdjęciu"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dane matrycy, oś - stopnie EV do przycięcia. Prawa krawędź - przepalone kanały: tych danych nie da się odzyskać. Prawy trójkąt pokazuje je na zdjęciu",
+ "Окно и полноэкранный режим": "Okno i pełny ekran"
 }

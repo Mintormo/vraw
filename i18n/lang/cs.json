@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} ve složce)",
  " (и ещё {0})": " (a dalších {0})",
  " - проявка...": " - vyvolávání...",
- " и ": " a ",
  ", 16 бит": ", 16 bitů",
  ", качество {0}": ", kvalita {0}",
  "100% / вписать": "100 % / přizpůsobit",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektiv: zkreslení",
  "Объектив: средняя точка": "Objektiv: střed",
  "Обычная": "Normální",
- "Окно": "Okno",
  "Округлость": "Zaoblení",
  "Оранжевый": "Oranžová",
  "Ореолы": "Lemy",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Zobrazovat panel nástrojů{0}",
  "Полностью": "Úplně",
  "Полноэкранный режим": "Celá obrazovka",
- "Полноэкранный режим{0}": "Celá obrazovka{0}",
  "Пометка не сохранена: {0}": "Značka neuložena: {0}",
  "Порог": "Práh",
  "Портрет": "Portrét",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Barevné tónování: vyvážení",
  "Цветокоррекция: смешение": "Barevné tónování: prolnutí",
  "Ч/Б: {0}": "Č/B: {0}",
- "Что показывать вокруг снимка": "Co zobrazovat kolem snímku",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Co zobrazovat kolem snímku; {0} v tomto režimu - totéž",
  "Чёрно-белое": "Černobílý",
  "Чёрно-белое: {0}": "Černobílý: {0}",
  "Чёрные": "Černé",
@@ -671,5 +666,6 @@
  "Линия яркости": "Čára jasu",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalizér: {0} {1} EV - táhněte doleva nebo doprava",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Najeďte na zónu - její posuvník ekvalizéru, táhněte do strany - měňte. Trojúhelníky: podexpozice (vlevo) a přepaly (vpravo) - klepnutí je ukáže na snímku, J - obojí",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data senzoru, osa - stupně EV do ořezu. Pravý okraj - přepálené kanály: tato data nelze vytáhnout. Pravý trojúhelník je ukáže na snímku"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data senzoru, osa - stupně EV do ořezu. Pravý okraj - přepálené kanály: tato data nelze vytáhnout. Pravý trojúhelník je ukáže na snímku",
+ "Окно и полноэкранный режим": "Okno a celá obrazovka"
 }

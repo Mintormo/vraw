@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} i mappen)",
  " (и ещё {0})": " (och {0} till)",
  " - проявка...": " - framkallar...",
- " и ": " och ",
  ", 16 бит": ", 16 bitar",
  ", качество {0}": ", kvalitet {0}",
  "100% / вписать": "100 % / anpassa",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektiv: distorsion",
  "Объектив: средняя точка": "Objektiv: mittpunkt",
  "Обычная": "Normal",
- "Окно": "Fönster",
  "Округлость": "Rundhet",
  "Оранжевый": "Orange",
  "Ореолы": "Färgkanter",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Visa verktygspanel{0}",
  "Полностью": "Helt",
  "Полноэкранный режим": "Helskärm",
- "Полноэкранный режим{0}": "Helskärm{0}",
  "Пометка не сохранена: {0}": "Markering inte sparad: {0}",
  "Порог": "Tröskel",
  "Портрет": "Porträtt",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Färggradering: balans",
  "Цветокоррекция: смешение": "Färggradering: blandning",
  "Ч/Б: {0}": "S/V: {0}",
- "Что показывать вокруг снимка": "Vad som visas runt fotot",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Vad som visas runt fotot; {0} i läget - samma",
  "Чёрно-белое": "Svartvitt",
  "Чёрно-белое: {0}": "Svartvitt: {0}",
  "Чёрные": "Svarta",
@@ -671,5 +666,6 @@
  "Линия яркости": "Luminanslinje",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Utjämnare: {0} {1} EV - dra åt vänster eller höger",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Håll över en zon - dess utjämnarreglage, dra åt sidan - ändra. Trianglar: urfrätta skuggor (vänster) och högdagrar (höger) - klick visar dem i fotot, J - båda",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, axeln - EV-steg till klippning. Högerkanten - urfrätta kanaler: denna data går inte att återställa. Den högra triangeln visar dem på bilden"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, axeln - EV-steg till klippning. Högerkanten - urfrätta kanaler: denna data går inte att återställa. Den högra triangeln visar dem på bilden",
+ "Окно и полноэкранный режим": "Fönster och helskärm"
 }

@@ -3039,7 +3039,7 @@ fn main() {
 	mut m_strip := vgui.menu_checkbox(i18n.tr('Лента кадров'), !st.settings.no_strip)
 	m_strip.shortcut = 'F6'
 	m_strip.on_toggle = fn [mut st] (v bool) {
-		set_strip_visible(mut st, st.fullscreen, v)
+		set_strip_visible(mut st, v)
 	}
 	st.m_strip = m_strip
 	// Обновить ленту: файлы, скопированные в папку во время работы
@@ -3051,7 +3051,7 @@ fn main() {
 	mut m_panel := vgui.menu_checkbox(i18n.tr('Панель инструментов'), !st.settings.no_panel)
 	m_panel.shortcut = 'F8'
 	m_panel.on_toggle = fn [mut st] (v bool) {
-		set_panel_visible(mut st, st.fullscreen, v)
+		set_panel_visible(mut st, v)
 	}
 	st.m_panel = m_panel
 	mut m_left := vgui.menu_checkbox(i18n.tr('Панель слева'), st.settings.panel_left)

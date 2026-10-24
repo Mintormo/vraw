@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} a mappában)",
  " (и ещё {0})": " (és még {0})",
  " - проявка...": " - előhívás...",
- " и ": " és ",
  ", 16 бит": ", 16 bit",
  ", качество {0}": ", minőség {0}",
  "100% / вписать": "100% / illesztés",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objektív: torzítás",
  "Объектив: средняя точка": "Objektív: középpont",
  "Обычная": "Normál",
- "Окно": "Ablak",
  "Округлость": "Kerekség",
  "Оранжевый": "Narancs",
  "Ореолы": "Színszegélyek",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Eszközpanel megjelenítése{0}",
  "Полностью": "Teljes",
  "Полноэкранный режим": "Teljes képernyő",
- "Полноэкранный режим{0}": "Teljes képernyő{0}",
  "Пометка не сохранена: {0}": "A jelölés nincs mentve: {0}",
  "Порог": "Küszöb",
  "Портрет": "Portré",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Színkorrekció: egyensúly",
  "Цветокоррекция: смешение": "Színkorrekció: keverés",
  "Ч/Б: {0}": "FF: {0}",
- "Что показывать вокруг снимка": "Mi látszódjon a kép körül",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Mi látszódjon a kép körül; {0} ebben a módban - ugyanaz",
  "Чёрно-белое": "Fekete-fehér",
  "Чёрно-белое: {0}": "Fekete-fehér: {0}",
  "Чёрные": "Feketék",
@@ -671,5 +666,6 @@
  "Линия яркости": "Fényességvonal",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Kiegyenlítő: {0} {1} EV - húzza balra vagy jobbra",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Vigye az egeret egy zónára - a kiegyenlítő csúszkája, húzza oldalra - módosítsa. Háromszögek: bebukott árnyékok (balra) és kiégett csúcsfények (jobbra) - kattintásra megjelennek a képen, J - mindkettő",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: szenzoradatok, a tengely - EV-lépések a levágásig. Jobb szél - kiégett csatornák: ezek az adatok nem hozhatók vissza. A jobb oldali háromszög megmutatja őket a képen"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: szenzoradatok, a tengely - EV-lépések a levágásig. Jobb szél - kiégett csatornák: ezek az adatok nem hozhatók vissza. A jobb oldali háromszög megmutatja őket a képen",
+ "Окно и полноэкранный режим": "Ablak és teljes képernyő"
 }

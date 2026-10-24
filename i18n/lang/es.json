@@ -5,7 +5,6 @@
  " (в папке {0})": " ({0} en la carpeta)",
  " (и ещё {0})": " (y {0} más)",
  " - проявка...": " - revelando...",
- " и ": " y ",
  ", 16 бит": ", 16 bits",
  ", качество {0}": ", calidad {0}",
  "100% / вписать": "100 % / ajustar",
@@ -271,7 +270,6 @@
  "Объектив: дисторсия": "Objetivo: distorsión",
  "Объектив: средняя точка": "Objetivo: punto medio",
  "Обычная": "Normal",
- "Окно": "Ventana",
  "Округлость": "Redondez",
  "Оранжевый": "Naranja",
  "Ореолы": "Halos",
@@ -353,7 +351,6 @@
  "Показывать панель инструментов{0}": "Mostrar el panel de herramientas{0}",
  "Полностью": "Completa",
  "Полноэкранный режим": "Pantalla completa",
- "Полноэкранный режим{0}": "Pantalla completa{0}",
  "Пометка не сохранена: {0}": "Marca no guardada: {0}",
  "Порог": "Umbral",
  "Портрет": "Retrato",
@@ -517,8 +514,6 @@
  "Цветокоррекция: баланс": "Gradación de color: equilibrio",
  "Цветокоррекция: смешение": "Gradación de color: fusión",
  "Ч/Б: {0}": "B/N: {0}",
- "Что показывать вокруг снимка": "Qué mostrar alrededor de la foto",
- "Что показывать вокруг снимка; {0} в режиме - то же": "Qué mostrar alrededor de la foto; {0} en ese modo - lo mismo",
  "Чёрно-белое": "Blanco y negro",
  "Чёрно-белое: {0}": "Blanco y negro: {0}",
  "Чёрные": "Negros",
@@ -671,5 +666,6 @@
  "Линия яркости": "Línea de luminancia",
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ecualizador: {0} {1} EV - arrastre a la izquierda o a la derecha",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Pase sobre una zona - su control del ecualizador, arrastre de lado - cámbielo. Triángulos: sombras recortadas (izquierda) e iluminaciones recortadas (derecha) - un clic las muestra en la foto, J - ambas",
- "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: datos del sensor, eje - pasos EV hasta el recorte. Borde derecho - canales recortados: esos datos no se pueden recuperar. El triángulo derecho los muestra en la foto"
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: datos del sensor, eje - pasos EV hasta el recorte. Borde derecho - canales recortados: esos datos no se pueden recuperar. El triángulo derecho los muestra en la foto",
+ "Окно и полноэкранный режим": "Ventana y pantalla completa"
 }
