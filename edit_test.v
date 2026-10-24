@@ -363,6 +363,34 @@ fn test_fit_thumb_downscale_averages() {
 	assert pixel(out, 2, 1, 0) == [u8(0), 0, 200]
 }
 
+// Миниатюра из превью открытого кадра (thumb_from_rgba): вписывание 3:2
+// без полей, широкий кадр - поля сверху и снизу, цвет - среднее выборки
+fn test_thumb_from_rgba() {
+	w := thumb_w * 4
+	h := thumb_h * 4
+	mut pix := []u8{len: w * h * 4}
+	for i in 0 .. w * h {
+		pix[i * 4] = 200
+		pix[i * 4 + 1] = 100
+		pix[i * 4 + 2] = 50
+		pix[i * 4 + 3] = 255
+	}
+	out := thumb_from_rgba(pix, w, h)
+	assert out.len == thumb_w * thumb_h * 4
+	c := (thumb_h / 2 * thumb_w + thumb_w / 2) * 4
+	assert out[c..c + 3] == [u8(200), 100, 50]
+	assert out[0..3] == [u8(200), 100, 50]
+	// широкий кадр 4:1 - верхний ряд буфера - поле
+	wide := []u8{len: 400 * 100 * 4, init: 255}
+	o2 := thumb_from_rgba(wide, 400, 100)
+	assert o2[0..3] == [thumb_bg.r, thumb_bg.g, thumb_bg.b]
+	m := (thumb_h / 2 * thumb_w + 5) * 4
+	assert o2[m..m + 3] == [u8(255), 255, 255]
+	// пустой буфер - только поля
+	o3 := thumb_from_rgba([]u8{}, 0, 0)
+	assert o3[0..3] == [thumb_bg.r, thumb_bg.g, thumb_bg.b]
+}
+
 fn test_make_thumb_real() {
 	path := os.join_path(@VMODROOT, 'IMG_0991.CR3')
 	if !os.exists(path) {

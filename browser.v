@@ -13,6 +13,15 @@ module main
 // app.post(). Кэша на диске нет: ~25 мс на кадр - 100 кадров за ~2.5 с
 // в фоне, лента при этом живая.
 //
+// Правки на миниатюрах (24.10.2026). Открытый кадр с правками - из его
+// превью: после каждого пересчёта (apply_pipeline) результат уменьшается
+// в буфер ленты (thumb_from_rgba, выборка точек, доли мс), миниатюра
+// меняется по ходу правки. Остальные правленные кадры (сайдкар с
+// current > 0) после быстрого прохода по JPEG камеры проявляются в том же
+// фоновом потоке по сайдкару (tone_thumb - путь экспорта в размере
+// превью, как левый кадр сравнения, без шумодава и резкости - на 276 px
+// их не видно), ~1 с на кадр с пониженным приоритетом.
+//
 // Лента - горизонтальный vgui.ListBox (list_box_h): элемент - VBox из
 // миниатюры (Canvas, вписывание с сохранением пропорций, пассивный) и
 // подписи имени файла. Высота ленты меняется вертикальным сплиттером.
@@ -25,6 +34,7 @@ import vgui
 import raw
 import stbi
 import pipeline
+import lens
 import i18n
 
 // Расширения RAW для сканирования папки (без учёта регистра)
@@ -67,6 +77,7 @@ mut:
 	// номер её расчёта: результат старее показанного отбрасывается
 	geom pipeline.Geom
 	seq  int
+	live bool // показывает превью открытого кадра (с правками), не JPEG камеры
 }
 
 // StopFlag - флаг остановки фонового воркера миниатюр (смена папки,
@@ -247,8 +258,11 @@ fn make_thumb(path string, g pipeline.Geom) ![]u8 {
 
 // thumb_worker выполняется в spawn: миниатюры по порядку order, каждая -
 // в главный поток через app.post (единственный потокобезопасный вход
-// vgui). Не читаемый файл пропускается - остаётся пустая ячейка.
-fn thumb_worker(paths []string, order []int, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+// vgui). Не читаемый файл пропускается - остаётся пустая ячейка. Вторым
+// проходом - правленные кадры (edited, кроме открытого cur: его
+// миниатюра - из превью) с правками (tone_thumb), с пониженным
+// приоритетом: окно и открытый кадр важнее.
+fn thumb_worker(paths []string, order []int, edited []bool, cur int, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
 	for idx in order {
 		if stop.stop {
 			return
@@ -264,19 +278,183 @@ fn thumb_worker(paths []string, order []int, gen int, seq int, stop &StopFlag, m
 		}
 		post_result(mut app, on_done, res)
 	}
+	mut slow := false
+	for idx in order {
+		if stop.stop {
+			return
+		}
+		if idx == cur || idx >= edited.len || !edited[idx] {
+			continue
+		}
+		e := side_thumb_edit(paths[idx]) or { continue }
+		if !slow {
+			apply_load(LoadLevel{
+				nice: pf_nice
+			})
+			slow = true
+		}
+		pix := tone_thumb(paths[idx], e, db, stop) or { continue }
+		post_result(mut app, on_done, ThumbResult{
+			gen:  gen
+			seq:  seq
+			idx:  idx
+			pix:  pix
+			geom: out_geom(&e)
+		})
+	}
 }
 
-// thumb_one выполняется в spawn: одна миниатюра заново (refresh_thumb)
-fn thumb_one(path string, g pipeline.Geom, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
-	pix := make_thumb(path, g) or { return }
-	res := ThumbResult{
+// thumb_one выполняется в spawn: одна миниатюра заново (refresh_thumb):
+// с правками из сайдкара - проявкой (tone_thumb), без них - JPEG камеры с
+// геометрией g
+fn thumb_one(path string, g pipeline.Geom, db &lens.Database, stop &StopFlag, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
+	mut pix := []u8{}
+	mut geom := g
+	if e := side_thumb_edit(path) {
+		apply_load(LoadLevel{
+			nice: pf_nice
+		})
+		pix = tone_thumb(path, e, db, stop) or { return }
+		geom = out_geom(&e)
+	} else {
+		pix = make_thumb(path, g) or { return }
+	}
+	post_result(mut app, on_done, ThumbResult{
 		gen:  gen
 		seq:  seq
 		idx:  idx
 		pix:  pix
-		geom: g
+		geom: geom
+	})
+}
+
+// side_thumb_edit - настройки кадра из сайдкара, если в нём есть правки
+// (current > 0); нет сайдкара или правок - none (миниатюра - JPEG камеры)
+fn side_thumb_edit(path string) ?EditState {
+	side := load_sidecar(sidecar_path(path)) or { return none }
+	if side.history.len == 0 || side.current <= 0 || side.current >= side.history.len {
+		return none
 	}
-	post_result(mut app, on_done, res)
+	return side.history[side.current].state
+}
+
+// tone_thumb - миниатюра с правками: проявка по настройкам e путём
+// экспорта в размере превью (develop_full half, как левый кадр сравнения)
+// и вписывание в буфер ленты. Шумодав и резкость выключены: на 276 px их
+// не видно, а шумодав - самая долгая часть. Отмена - по stop между этапами.
+fn tone_thumb(path string, e EditState, db &lens.Database, stop &StopFlag) ![]u8 {
+	mut te := e
+	te.nr = [4]f32{}
+	te.params.sharp.amount = 0
+	te.params.sharp.dc_amount = 0
+	d := batch_derive(path, te, db)!
+	mut img := develop_full(path, d, db,
+		half:     true
+		progress: StageProgress(PairStop{
+			stop: stop
+		})
+	)!
+	defer {
+		img.free()
+	}
+	return fit_thumb(img.rgb, img.width, img.height, 0, thumb_w, thumb_h)
+}
+
+// thumb_from_rgba - миниатюра из RGBA-результата превью (w x h, уже в
+// ориентации и с геометрией кадра): вписывание в буфер ленты как у
+// fit_thumb, по блоку источника - среднее до live_thumb_pts x
+// live_thumb_pts точек (полное усреднение 6 Мп - десятки мс на каждый
+// пересчёт превью; выборки на 276 px хватает)
+const live_thumb_pts = 4
+
+fn thumb_from_rgba(pix []u8, w int, h int) []u8 {
+	bw := thumb_w
+	bh := thumb_h
+	mut out := []u8{len: bw * bh * 4}
+	for i in 0 .. bw * bh {
+		out[i * 4] = thumb_bg.r
+		out[i * 4 + 1] = thumb_bg.g
+		out[i * 4 + 2] = thumb_bg.b
+		out[i * 4 + 3] = 255
+	}
+	if w <= 0 || h <= 0 || pix.len < w * h * 4 {
+		return out
+	}
+	sx := f64(bw) / f64(w)
+	sy := f64(bh) / f64(h)
+	s := if sx < sy { sx } else { sy }
+	mut dw := int(f64(w) * s + 0.5)
+	mut dh := int(f64(h) * s + 0.5)
+	dw = if dw < 1 { 1 } else if dw > bw { bw } else { dw }
+	dh = if dh < 1 { 1 } else if dh > bh { bh } else { dh }
+	ox := (bw - dw) / 2
+	oy := (bh - dh) / 2
+	for y in 0 .. dh {
+		v0 := y * h / dh
+		v1 := math.max((y + 1) * h / dh, v0 + 1)
+		vs := math.max((v1 - v0) / live_thumb_pts, 1)
+		for x in 0 .. dw {
+			u0 := x * w / dw
+			u1 := math.max((x + 1) * w / dw, u0 + 1)
+			us := math.max((u1 - u0) / live_thumb_pts, 1)
+			mut r := 0
+			mut g := 0
+			mut b := 0
+			mut n := 0
+			for v := v0; v < v1; v += vs {
+				for u := u0; u < u1; u += us {
+					k := (v * w + u) * 4
+					r += pix[k]
+					g += pix[k + 1]
+					b += pix[k + 2]
+					n++
+				}
+			}
+			d := ((oy + y) * bw + ox + x) * 4
+			out[d] = u8(r / n)
+			out[d + 1] = u8(g / n)
+			out[d + 2] = u8(b / n)
+		}
+	}
+	return out
+}
+
+// open_frame_ok - открытый кадр стоит в ленте под frame_idx (при смене
+// файла индекс обновляется позже первого пересчёта)
+fn open_frame_ok(st &State) bool {
+	return st.frame_idx >= 0 && st.frame_idx < st.frames.len
+		&& st.frames[st.frame_idx].path == st.raw_path
+}
+
+// update_live_thumb - после пересчёта превью (apply_pipeline, чистый
+// результат до подсветок): уменьшенная копия для ленты; у кадра с
+// правками - сразу на миниатюру (видно по ходу правки)
+fn update_live_thumb(mut st State, pix []u8, w int, h int) {
+	if !open_frame_ok(st) {
+		return
+	}
+	st.live_thumb = thumb_from_rgba(pix, w, h)
+	st.live_gen = st.file_gen
+	if st.hist_pos > 0 {
+		push_live_thumb(mut st)
+	}
+}
+
+// push_live_thumb - копия превью открытого кадра на его миниатюру;
+// новый номер расчёта - фоновые миниатюры этого кадра её не перекроют
+fn push_live_thumb(mut st State) {
+	if !open_frame_ok(st) || st.live_thumb.len != thumb_w * thumb_h * 4
+		|| st.live_gen != st.file_gen {
+		return
+	}
+	idx := st.frame_idx
+	st.thumb_seq++
+	st.frames[idx].seq = st.thumb_seq
+	st.frames[idx].geom = out_geom(&st.edit)
+	st.frames[idx].live = true
+	mut cv := st.frames[idx].cv
+	cv.pixels = st.live_thumb.clone()
+	draw_mark(mut st, idx)
 }
 
 // stop_thumbs останавливает воркер миниатюр (смена папки, выход);
@@ -383,8 +561,9 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	stop := &StopFlag{}
 	st.thumb_stop = stop
 	st.thumb_seq++
-	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), st.thumb_gen,
-		st.thumb_seq, stop, mut app, st.thumb_done)
+	edited := st.frames.map(it.edited)
+	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), edited, cur,
+		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.thumb_done)
 	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
 	// (F6, в окне или в полноэкранном режиме) показывается
 	if cur_path == '' && paths.len > 0 && !strip_on(st) {
@@ -402,6 +581,7 @@ fn take_thumb(mut st State, res ThumbResult) {
 	}
 	st.frames[res.idx].seq = res.seq
 	st.frames[res.idx].geom = res.geom
+	st.frames[res.idx].live = false
 	mut cv := st.frames[res.idx].cv
 	cv.pixels = res.pix
 	draw_mark(mut st, res.idx)
@@ -417,18 +597,27 @@ fn refresh_thumb(mut st State, idx int, g pipeline.Geom) {
 	st.frames[idx].geom = g
 	st.frames[idx].seq = st.thumb_seq
 	mut app := st.app
-	st.thumb_threads << spawn thumb_one(st.frames[idx].path, g, st.thumb_gen, st.thumb_seq,
-		idx, mut app, st.thumb_done)
+	st.thumb_threads << spawn thumb_one(st.frames[idx].path, g, st.lens_db, st.thumb_stop,
+		st.thumb_gen, st.thumb_seq, idx, mut app, st.thumb_done)
 }
 
-// sync_thumb - миниатюра открытого кадра под его геометрию (после
-// записи сайдкара: правка, откат, вставка настроек)
+// sync_thumb - миниатюра открытого кадра после записи сайдкара (правка,
+// откат, вставка настроек): с правками - его превью (push_live_thumb; в
+// кадрировании превью без обрезки - миниатюра ждёт выхода из режима), без
+// правок (откат к открытию) - снова JPEG камеры под его геометрию
 fn sync_thumb(mut st State) {
-	if st.frame_idx < 0 || st.frame_idx >= st.frames.len {
+	if !open_frame_ok(st) {
+		return
+	}
+	if st.hist_pos > 0 {
+		if !st.crop_mode {
+			push_live_thumb(mut st)
+		}
 		return
 	}
 	g := out_geom(&st.edit)
-	if g != st.frames[st.frame_idx].geom {
+	if g != st.frames[st.frame_idx].geom || st.frames[st.frame_idx].live {
+		st.frames[st.frame_idx].live = false
 		refresh_thumb(mut st, st.frame_idx, g)
 	}
 }

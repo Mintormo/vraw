@@ -107,6 +107,10 @@ mut:
 	thumb_threads []thread
 	thumb_done    fn (ThumbResult) = unsafe { nil }
 	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
+	// Миниатюра открытого кадра из его превью (browser.v, update_live_thumb)
+	// и номер файла, к которому она относится
+	live_thumb []u8
+	live_gen   int
 	// Отбор (rating.v): пометка открытого кадра (в его сайдкаре), фильтр
 	// ленты и кадры, прошедшие его (строки ленты), список фильтра на
 	// полосе; переход к кадру (goto_frame из main) - для «Переходить к
@@ -554,6 +558,11 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	// результата, подсветка - поверх уже посчитанной гистограммы
 	show_clip_marks(mut st, mut hist)
 	if !st.haze_show {
+		// Миниатюра в ленте - по чистому результату, до подсветок (browser.v);
+		// в кадрировании превью без обрезки - не подходит
+		if !st.crop_mode {
+			update_live_thumb(mut st, cv.pixels, cv.width, cv.height)
+		}
 		// в RAW-виде пересветы - по сырью (histogram.v)
 		mark_clipping_src(mut cv.pixels, st.clip_hi, st.clip_lo, raw_clip_src(mut st,
 			npix))
