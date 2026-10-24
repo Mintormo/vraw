@@ -664,5 +664,6 @@
  "Файлов": "Datoteka",
  "не удалось переместить в корзину (код {0})": "nije moguće premjestiti u smeće (kod {0})",
  "Баланс белого сдвигом от «как снято»": "Balans bijele kao pomak od «kako je snimljeno»",
- "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Predložak pomiče balans bijele svake fotografije od njezina «kako je snimljeno» za onoliko koliko je pomaknut ovdje. Bez kvačice - postavlja istu temperaturu i nijansu. Potrebna je grupa «Balans bijele i boja»."
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Predložak pomiče balans bijele svake fotografije od njezina «kako je snimljeno» za onoliko koliko je pomaknut ovdje. Bez kvačice - postavlja istu temperaturu i nijansu. Potrebna je grupa «Balans bijele i boja».",
+ "Ввести значение: Enter - применить, Esc - отмена": "Unesi vrijednost: Enter - primijeni, Esc - odustani"
 }

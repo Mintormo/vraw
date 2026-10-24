@@ -1712,7 +1712,7 @@ fn brush_slider(mut st State, label string, which int, lbl_w f32, val_w f32) &vg
 		mut u := st.mask_ui
 		u.brush_sl << sl
 	}
-	return slider_row(mut st, lb, mut sl, vl, def, lbl_w, val_w)
+	return slider_row(mut st, lb, mut sl, vl, def, lbl_w, val_w, NumConv{ digits: 0 })
 }
 
 struct MaskSliderSpec {

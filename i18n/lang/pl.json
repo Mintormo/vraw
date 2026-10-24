@@ -664,5 +664,6 @@
  "Файлов": "Plików",
  "не удалось переместить в корзину (код {0})": "nie udało się przenieść do kosza (kod {0})",
  "Баланс белого сдвигом от «как снято»": "Balans bieli jako przesunięcie od «jak zrobiono»",
- "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Ustawienie przesunie balans bieli każdego zdjęcia od jego «jak zrobiono» o tyle, o ile jest przesunięty tutaj. Bez zaznaczenia - ustawia tę samą temperaturę i barwę. Wymaga grupy «Balans bieli i kolor»."
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Ustawienie przesunie balans bieli każdego zdjęcia od jego «jak zrobiono» o tyle, o ile jest przesunięty tutaj. Bez zaznaczenia - ustawia tę samą temperaturę i barwę. Wymaga grupy «Balans bieli i kolor».",
+ "Ввести значение: Enter - применить, Esc - отмена": "Wpisz wartość: Enter - zastosuj, Esc - anuluj"
 }

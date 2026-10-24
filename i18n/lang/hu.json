@@ -664,5 +664,6 @@
  "Файлов": "Fájl",
  "не удалось переместить в корзину (код {0})": "nem sikerült a lomtárba helyezni (kód {0})",
  "Баланс белого сдвигом от «как снято»": "Fehéregyensúly eltolásként a «felvétel szerint» értékhez képest",
- "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "A beállításkészlet minden kép fehéregyensúlyát a saját «felvétel szerint» értékéhez képest annyival tolja el, amennyivel itt el van tolva. Bejelölés nélkül - ugyanazt a színhőmérsékletet és színárnyalatot állítja be. A «Fehéregyensúly és szín» csoport szükséges."
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "A beállításkészlet minden kép fehéregyensúlyát a saját «felvétel szerint» értékéhez képest annyival tolja el, amennyivel itt el van tolva. Bejelölés nélkül - ugyanazt a színhőmérsékletet és színárnyalatot állítja be. A «Fehéregyensúly és szín» csoport szükséges.",
+ "Ввести значение: Enter - применить, Esc - отмена": "Érték megadása: Enter - alkalmaz, Esc - mégse"
 }

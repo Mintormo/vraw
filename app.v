@@ -984,20 +984,24 @@ fn reset_button(tip string) &vgui.Button {
 }
 
 // slider_row собирает стандартный ряд панели: подпись, ползунок, значение
-// справа от ползунка и кнопка сброса этого параметра. set_value сам вызывает
-// on_change ползунка, поэтому кнопке достаточно вернуть значение по умолчанию.
-// Ширины колонок подписи/значения общие на всю панель - считаются в main
-// через column_width, чтобы колонки рядов были выровнены.
-fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32) &vgui.HBox {
+// справа от ползунка, кнопка ввода точного значения (numedit.v, conv -
+// перевод числа в поле в значение ползунка) и кнопка сброса этого
+// параметра. set_value сам вызывает on_change ползунка, поэтому кнопкам
+// достаточно выставить значение. Ширины колонок подписи/значения общие на
+// всю панель - считаются в main через column_width, чтобы колонки рядов
+// были выровнены.
+fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32, conv NumConv) &vgui.HBox {
 	mut b := reset_button(i18n.tr('Сбросить'))
 	b.on_click = fn [mut sl, def] () {
 		sl.set_value(def)
 	}
+	cell, eb := value_cell(mut st, mut sl, vl, conv)
 	mut row := vgui.create_hbox_fill()
 	row.set_spacing(6)
 	row.add(lb, min: lw)
 	row.add(sl, flex: 1)
-	row.add(vl, min: vw)
+	row.add(cell, min: vw)
+	row.add(eb)
 	row.add(b)
 	st.slider_rows[voidptr(sl)] = row
 	return row
@@ -1055,6 +1059,10 @@ struct SliderCfg {
 	// live: пересчёт и по ходу перетаскивания (угол поворота - видно
 	// горизонт), запись в истории - по отпусканию
 	live bool
+	// Ввод числом (numedit.v): значение ползунка -> число в поле и
+	// обратно; nil - число и есть значение
+	to_num   fn (f32) f32 = unsafe { nil }
+	from_num fn (f32) f32 = unsafe { nil }
 }
 
 // EditSlider - собранный ползунок: подпись, ползунок, значение
@@ -1062,8 +1070,9 @@ struct EditSlider {
 mut:
 	lb  &vgui.Label  = unsafe { nil }
 	sl  &vgui.Slider = unsafe { nil }
-	vl  &vgui.Label  = unsafe { nil }
-	def f32
+	vl   &vgui.Label  = unsafe { nil }
+	def  f32
+	conv NumConv // ввод точного значения (numedit.v)
 }
 
 fn slider_text(cfg SliderCfg, v f32) string {
@@ -1130,14 +1139,19 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 	return EditSlider{
 		lb:  lb
 		sl:  sl
-		vl:  vl
-		def: cfg.def
+		vl:   vl
+		def:  cfg.def
+		conv: NumConv{
+			digits: cfg.digits
+			to:     cfg.to_num
+			from:   cfg.from_num
+		}
 	}
 }
 
 // edit_row - стандартный ряд панели (slider_row) для ползунка edit_slider
 fn edit_row(mut st State, mut s EditSlider, lw f32, vw f32) &vgui.HBox {
-	return slider_row(mut st, s.lb, mut s.sl, s.vl, s.def, lw, vw)
+	return slider_row(mut st, s.lb, mut s.sl, s.vl, s.def, lw, vw, s.conv)
 }
 
 // Цвет холста до первого кадра (он скрыт заглушкой) и запасной фон

@@ -664,5 +664,6 @@
  "Файлов": "Fichiers",
  "не удалось переместить в корзину (код {0})": "impossible de mettre à la corbeille (code {0})",
  "Баланс белого сдвигом от «как снято»": "Balance des blancs en décalage depuis «tel que pris»",
- "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Le préréglage décale la balance des blancs de chaque photo depuis son «tel que pris» d'autant qu'elle est décalée ici. Décoché - applique la même température et la même teinte. Nécessite le groupe «Balance des blancs et couleur»."
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Le préréglage décale la balance des blancs de chaque photo depuis son «tel que pris» d'autant qu'elle est décalée ici. Décoché - applique la même température et la même teinte. Nécessite le groupe «Balance des blancs et couleur».",
+ "Ввести значение: Enter - применить, Esc - отмена": "Saisir une valeur : Entrée - appliquer, Échap - annuler"
 }

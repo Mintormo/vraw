@@ -676,7 +676,7 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 			defer_fx(mut st, st.tone_fx)
 		}
 	}
-	rows << SectionRow{slider_row(mut st, lb, mut sl, vl, 50, lbl_w, val_w)}
+	rows << SectionRow{slider_row(mut st, lb, mut sl, vl, 50, lbl_w, val_w, NumConv{ digits: 0 })}
 
 	mut hint := vgui.label(i18n.tr('Щелчок по снимку - пятно, источник ищется сам'))
 	hint.font_size = 12

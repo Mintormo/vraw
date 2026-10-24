@@ -8,6 +8,7 @@ module main
 // нет, ползунки показывают температуру и оттенок камерного ББ (st.shot_*).
 // Всё - тональная правка: пересчёт - обычный apply (живые ползунки по
 // отпусканию), LibRaw не перепроявляется.
+import math
 import vgui
 import pipeline
 import i18n
@@ -244,6 +245,14 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		show:   fn (v f32) string {
 			return temp_text(pos_to_temp(v))
 		}
+		// Вводят кельвины, ползунок - положение на шкале
+		to_num:   fn (v f32) f32 {
+			return f32(int(pos_to_temp(v) / 50 + 0.5) * 50)
+		}
+		from_num: fn (t f32) f32 {
+			// 0 и минус шкала не переварит - сразу к краю диапазона
+			return temp_to_pos(f32(math.clamp(t, pipeline.wb_temp_min, pipeline.wb_temp_max)))
+		}
 		get:    fn [st] (e &EditState) f32 {
 			t, _ := wb_values(st, e)
 			return temp_to_pos(t)
@@ -293,7 +302,9 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	temp_row.set_spacing(6)
 	temp_row.add(temp.lb, min: lbl_w)
 	temp_row.add(temp.sl, flex: 1)
-	temp_row.add(temp.vl, min: val_w)
+	t_cell, t_edit := value_cell(mut st, mut temp.sl, temp.vl, temp.conv)
+	temp_row.add(t_cell, min: val_w)
+	temp_row.add(t_edit)
 	temp_row.add(t_reset)
 	mut n_reset := reset_button(i18n.tr('Как снято'))
 	n_reset.on_click = fn [mut st] () {
@@ -303,7 +314,9 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	tint_row.set_spacing(6)
 	tint_row.add(tint.lb, min: lbl_w)
 	tint_row.add(tint.sl, flex: 1)
-	tint_row.add(tint.vl, min: val_w)
+	n_cell, n_edit := value_cell(mut st, mut tint.sl, tint.vl, tint.conv)
+	tint_row.add(n_cell, min: val_w)
+	tint_row.add(n_edit)
 	tint_row.add(n_reset)
 	mut hint := vgui.label(i18n.tr('Оттенок: минус - зеленее, плюс - пурпурнее'))
 	hint.font_size = 12

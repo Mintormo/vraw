@@ -664,5 +664,6 @@
  "Файлов": "Archivos",
  "не удалось переместить в корзину (код {0})": "no se pudo mover a la papelera (código {0})",
  "Баланс белого сдвигом от «как снято»": "Balance de blancos como desplazamiento desde «según toma»",
- "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "El preajuste desplaza el balance de blancos de cada foto desde su «según toma» tanto como está desplazado aquí. Sin marcar - aplica la misma temperatura y tono. Requiere el grupo «Balance de blancos y color»."
+ "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "El preajuste desplaza el balance de blancos de cada foto desde su «según toma» tanto como está desplazado aquí. Sin marcar - aplica la misma temperatura y tono. Requiere el grupo «Balance de blancos y color».",
+ "Ввести значение: Enter - применить, Esc - отмена": "Introducir valor: Enter - aplicar, Esc - cancelar"
 }
