@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Tonutjämnare (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punkter i fotot: flytta, övergång, storlek och rotation",
  "Трети": "Tredjedelar",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trianglar: urfrätta skuggor (vänster) och högdagrar (höger) - klick visar dem i fotot, J - båda",
  "Тяните круг, его край или голубой источник": "Dra cirkeln, dess kant eller den cyanfärgade källan",
  "Тёмная": "Mörk",
  "Тёмно-серый": "Mörkgrå",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "kunde inte flyttas till papperskorgen (kod {0})",
  "Баланс белого сдвигом от «как снято»": "Vitbalans som förskjutning från «som fotograferat»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Förinställningen förskjuter varje bilds vitbalans från dess «som fotograferat» lika mycket som den är förskjuten här. Utan bock - sätter samma temperatur och nyans. Kräver gruppen «Vitbalans och färg».",
- "Ввести значение: Enter - применить, Esc - отмена": "Ange värde: Enter - verkställ, Esc - avbryt"
+ "Ввести значение: Enter - применить, Esc - отмена": "Ange värde: Enter - verkställ, Esc - avbryt",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: sensordata",
+ "Логарифмическая шкала": "Logaritmisk skala",
+ "Линия яркости": "Luminanslinje",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Utjämnare: {0} {1} EV - dra åt vänster eller höger",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Håll över en zon - dess utjämnarreglage, dra åt sidan - ändra. Trianglar: urfrätta skuggor (vänster) och högdagrar (höger) - klick visar dem i fotot, J - båda",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, axeln - EV-steg till klippning. Högerkanten - urfrätta kanaler: denna data går inte att återställa. Den högra triangeln visar dem på bilden"
 }

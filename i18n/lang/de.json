@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Ton-Equalizer (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punkte im Foto: verschieben, Übergang, Größe und Drehung",
  "Трети": "Drittel",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Dreiecke: Tiefenbeschnitt (links) und Lichterbeschnitt (rechts) - Klick zeigt sie im Foto, J - beide",
  "Тяните круг, его край или голубой источник": "Ziehen Sie den Kreis, seinen Rand oder die cyanfarbene Quelle",
  "Тёмная": "Dunkel",
  "Тёмно-серый": "Dunkelgrau",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "konnte nicht in den Papierkorb verschoben werden (Code {0})",
  "Баланс белого сдвигом от «как снято»": "Weißabgleich als Verschiebung von «wie aufgenommen»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Die Vorgabe verschiebt den Weißabgleich jedes Fotos von seinem «wie aufgenommen» um so viel, wie er hier verschoben ist. Ohne Häkchen - setzt dieselbe Temperatur und denselben Farbton. Erfordert die Gruppe «Weißabgleich und Farbe».",
- "Ввести значение: Enter - применить, Esc - отмена": "Wert eingeben: Enter - übernehmen, Esc - abbrechen"
+ "Ввести значение: Enter - применить, Esc - отмена": "Wert eingeben: Enter - übernehmen, Esc - abbrechen",
+ "Гистограмма": "Histogramm",
+ "RAW: данные сенсора": "RAW: Sensordaten",
+ "Логарифмическая шкала": "Logarithmische Skala",
+ "Линия яркости": "Helligkeitslinie",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizer: {0} {1} EV - nach links oder rechts ziehen",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Über eine Zone fahren - ihr Equalizer-Regler, seitlich ziehen - ändern. Dreiecke: Tiefenbeschnitt (links) und Lichterbeschnitt (rechts) - Klick zeigt sie im Foto, J - beide",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: Sensordaten, Achse - EV-Stufen bis zum Beschnitt. Rechter Rand - ausgefressene Kanäle: diese Daten lassen sich nicht zurückholen. Das rechte Dreieck zeigt sie im Bild"
 }

@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Korektor tonów (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punkty na zdjęciu: przesunięcie, przejście, rozmiar i obrót",
  "Трети": "Trójpodział",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trójkąty: niedoświetlenia (po lewej) i prześwietlenia (po prawej) - kliknięcie pokazuje je na zdjęciu, J - oba",
  "Тяните круг, его край или голубой источник": "Przeciągnij koło, jego brzeg lub błękitne źródło",
  "Тёмная": "Ciemny",
  "Тёмно-серый": "Ciemnoszary",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "nie udało się przenieść do kosza (kod {0})",
  "Баланс белого сдвигом от «как снято»": "Balans bieli jako przesunięcie od «jak zrobiono»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Ustawienie przesunie balans bieli każdego zdjęcia od jego «jak zrobiono» o tyle, o ile jest przesunięty tutaj. Bez zaznaczenia - ustawia tę samą temperaturę i barwę. Wymaga grupy «Balans bieli i kolor».",
- "Ввести значение: Enter - применить, Esc - отмена": "Wpisz wartość: Enter - zastosuj, Esc - anuluj"
+ "Ввести значение: Enter - применить, Esc - отмена": "Wpisz wartość: Enter - zastosuj, Esc - anuluj",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: dane matrycy",
+ "Логарифмическая шкала": "Skala logarytmiczna",
+ "Линия яркости": "Linia jasności",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Korektor: {0} {1} EV - przeciągnij w lewo lub w prawo",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Najedź na strefę - jej suwak korektora, przeciągnij w bok - zmieniaj. Trójkąty: niedoświetlenia (po lewej) i prześwietlenia (po prawej) - kliknięcie pokazuje je na zdjęciu, J - oba",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dane matrycy, oś - stopnie EV do przycięcia. Prawa krawędź - przepalone kanały: tych danych nie da się odzyskać. Prawy trójkąt pokazuje je na zdjęciu"
 }

@@ -10,8 +10,12 @@ fn test_settings_roundtrip() {
 	s.frame_cache_mb = 3072
 	s.lang = 'de'
 	s.preset_wb_shift = true
+	s.hist_raw = true
+	s.hist_log = true
+	s.no_hist_luma = true
 	back := settings_from(json2.decode[Settings](json2.encode(s))!)
 	assert back.no_frame_cache
+	assert back.hist_raw && back.hist_log && back.no_hist_luma
 	assert back.preset_wb_shift
 	assert back.frame_cache_mb == 3072
 	assert back.lang == 'de'

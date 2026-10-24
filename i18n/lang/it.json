@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Equalizzatore dei toni (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punti sulla foto: spostamento, transizione, dimensione e rotazione",
  "Трети": "Terzi",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Triangoli: ombre chiuse (a sinistra) e luci bruciate (a destra) - un clic le mostra nella foto, J - entrambe",
  "Тяните круг, его край или голубой источник": "Trascina il cerchio, il suo bordo o la sorgente azzurra",
  "Тёмная": "Scuro",
  "Тёмно-серый": "Grigio scuro",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "impossibile spostare nel cestino (codice {0})",
  "Баланс белого сдвигом от «как снято»": "Bilanciamento del bianco come spostamento da «come scattato»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Il preset sposta il bilanciamento del bianco di ogni foto dal suo «come scattato» di quanto è spostato qui. Senza spunta - imposta la stessa temperatura e tonalità. Richiede il gruppo «Bilanciamento del bianco e colore».",
- "Ввести значение: Enter - применить, Esc - отмена": "Inserisci un valore: Invio - applica, Esc - annulla"
+ "Ввести значение: Enter - применить, Esc - отмена": "Inserisci un valore: Invio - applica, Esc - annulla",
+ "Гистограмма": "Istogramma",
+ "RAW: данные сенсора": "RAW: dati del sensore",
+ "Логарифмическая шкала": "Scala logaritmica",
+ "Линия яркости": "Linea della luminanza",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizzatore: {0} {1} EV - trascina a sinistra o a destra",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Passa su una zona - il suo cursore dell’equalizzatore, trascina di lato - modificalo. Triangoli: ombre chiuse (a sinistra) e luci bruciate (a destra) - un clic le mostra nella foto, J - entrambe",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dati del sensore, asse - stop EV fino al clipping. Bordo destro - canali bruciati: questi dati non si recuperano. Il triangolo destro li mostra sulla foto"
 }

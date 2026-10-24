@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Égaliseur de tons (IL)",
  "Точки на снимке: перенос, переход, размер и поворот": "Points sur la photo : déplacement, transition, taille et rotation",
  "Трети": "Tiers",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Triangles : ombres bouchées (à gauche) et hautes lumières brûlées (à droite) - un clic les montre sur la photo, J - les deux",
  "Тяните круг, его край или голубой источник": "Faites glisser le cercle, son bord ou la source cyan",
  "Тёмная": "Sombre",
  "Тёмно-серый": "Gris foncé",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "impossible de mettre à la corbeille (code {0})",
  "Баланс белого сдвигом от «как снято»": "Balance des blancs en décalage depuis «tel que pris»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Le préréglage décale la balance des blancs de chaque photo depuis son «tel que pris» d'autant qu'elle est décalée ici. Décoché - applique la même température et la même teinte. Nécessite le groupe «Balance des blancs et couleur».",
- "Ввести значение: Enter - применить, Esc - отмена": "Saisir une valeur : Entrée - appliquer, Échap - annuler"
+ "Ввести значение: Enter - применить, Esc - отмена": "Saisir une valeur : Entrée - appliquer, Échap - annuler",
+ "Гистограмма": "Histogramme",
+ "RAW: данные сенсора": "RAW : données du capteur",
+ "Логарифмическая шкала": "Échelle logarithmique",
+ "Линия яркости": "Ligne de luminance",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Égaliseur : {0} {1} EV - faites glisser à gauche ou à droite",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Survolez une zone - son curseur d’égaliseur, faites glisser de côté - modifiez-le. Triangles : ombres bouchées (à gauche) et hautes lumières brûlées (à droite) - un clic les montre sur la photo, J - les deux",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW : données du capteur, axe - IL jusqu’à l’écrêtage. Bord droit - canaux écrêtés : ces données sont irrécupérables. Le triangle de droite les montre sur la photo"
 }

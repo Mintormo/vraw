@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Ekvalizator tonova (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Točke na snimci: premještanje, prijelaz, veličina i zakretanje",
  "Трети": "Trećine",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trokuti: propali dijelovi (lijevo) i pregorjeli (desno) - klik ih prikazuje na snimci, J - oboje",
  "Тяните круг, его край или голубой источник": "Povucite krug, njegov rub ili svijetloplavi izvor",
  "Тёмная": "Tamna",
  "Тёмно-серый": "Tamnosiva",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "nije moguće premjestiti u smeće (kod {0})",
  "Баланс белого сдвигом от «как снято»": "Balans bijele kao pomak od «kako je snimljeno»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Predložak pomiče balans bijele svake fotografije od njezina «kako je snimljeno» za onoliko koliko je pomaknut ovdje. Bez kvačice - postavlja istu temperaturu i nijansu. Potrebna je grupa «Balans bijele i boja».",
- "Ввести значение: Enter - применить, Esc - отмена": "Unesi vrijednost: Enter - primijeni, Esc - odustani"
+ "Ввести значение: Enter - применить, Esc - отмена": "Unesi vrijednost: Enter - primijeni, Esc - odustani",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: podaci senzora",
+ "Логарифмическая шкала": "Logaritamska skala",
+ "Линия яркости": "Linija svjetline",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalizator: {0} {1} EV - povucite lijevo ili desno",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Prijeđite mišem preko zone - njezin klizač ekvalizatora, povucite u stranu - mijenjajte. Trokuti: propali dijelovi (lijevo) i pregorjeli (desno) - klik ih prikazuje na snimci, J - oboje",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: podaci senzora, os - EV stupnjevi do odsijecanja. Desni rub - pregorjeli kanali: ti se podaci ne mogu vratiti. Desni trokut pokazuje ih na snimci"
 }

@@ -62,12 +62,13 @@ mut:
 	hist_r []u32
 	hist_g []u32
 	hist_b []u32
-	// Гистограмма на экране (themes.v перерисовывает её при смене темы):
-	// холст, показанные счётчики R, G, B (пусто - чистый фон), есть ли
-	// на ней треугольники клипа
-	hist_cv    &vgui.Canvas = unsafe { nil }
-	hist_shown [][]u32
-	hist_marks bool
+	// Гистограмма на экране (histogram.v; themes.v перерисовывает её при
+	// смене темы): холст и состояние вида - счётчики, зона, перетаскивание
+	hist_cv &vgui.Canvas = unsafe { nil }
+	hv      HistView
+	// Ползунок эквалайзера ведёт перетаскивание зоны гистограммы:
+	// edit_slider пишет значение и откладывает пересчёт, без истории
+	hist_drag bool
 	// История правок (history.v): записи, текущая, время последней записи
 	// для склейки шагов (0 - не склеивать), особое название следующей записи
 	history    []HistEntry
@@ -553,7 +554,9 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	// результата, подсветка - поверх уже посчитанной гистограммы
 	show_clip_marks(mut st, mut hist)
 	if !st.haze_show {
-		mark_clipping(mut cv.pixels, st.clip_hi, st.clip_lo)
+		// в RAW-виде пересветы - по сырью (histogram.v)
+		mark_clipping_src(mut cv.pixels, st.clip_hi, st.clip_lo, raw_clip_src(mut st,
+			npix))
 		mask_paint(st, mut cv.pixels) // заливка маски фильтра (masks.v)
 	}
 	sync_crop_total(mut st)
@@ -835,113 +838,6 @@ fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) 
 	report(mut app, on_done, .saved, i18n.trf('Сохранено: {0} ({1}, {2}x{3}, {4} МБ{5}, {6} с)', '${job.dst}', '${job.format.name()}', '${img.width}', '${img.height}', '${size_mb:.1f}', '${q}', '${sec:.1f}'))
 }
 
-// render_histogram считает и рисует RGB-гистограмму по 8-битному результату
-// (RGBA-буфер холста). Сэмплируется каждый второй пиксель - на форму
-// гистограммы это не влияет, а стоимость вдвое ниже.
-fn render_histogram(mut st State, mut hist vgui.Canvas, pixels []u8) ([]u32, []u32, []u32) {
-	mut hr := []u32{len: 256}
-	mut hg := []u32{len: 256}
-	mut hb := []u32{len: 256}
-	unsafe {
-		mut s := &u8(pixels.data)
-		pr := &u32(hr.data)
-		pg := &u32(hg.data)
-		pb := &u32(hb.data)
-		for _ in 0 .. pixels.len / 8 {
-			pr[s[0]]++
-			pg[s[1]]++
-			pb[s[2]]++
-			s += 8
-		}
-	}
-	st.hist_shown = [hr, hg, hb]
-	st.hist_marks = false
-	draw_histogram(mut hist, hr, hg, hb, st.pal)
-	return hr, hg, hb
-}
-
-// draw_histogram - столбцы трёх каналов в цветах палитры темы: цвет
-// пикселя - по маске каналов, чей столбец его накрывает
-fn draw_histogram(mut hist vgui.Canvas, hr []u32, hg []u32, hb []u32, p Palette) {
-	mut mx := u32(1)
-	for i in 0 .. 256 {
-		if hr[i] > mx {
-			mx = hr[i]
-		}
-		if hg[i] > mx {
-			mx = hg[i]
-		}
-		if hb[i] > mx {
-			mx = hb[i]
-		}
-	}
-	w := hist.width // 256: колонка = бин
-	h := hist.height
-	unsafe {
-		mut dst := &u8(hist.pixels.data)
-		for x in 0 .. w {
-			th_r := int(u64(hr[x]) * u64(h) / u64(mx))
-			th_g := int(u64(hg[x]) * u64(h) / u64(mx))
-			th_b := int(u64(hb[x]) * u64(h) / u64(mx))
-			for y in 0 .. h {
-				up := h - y // высота столбца, накрывающего строку y
-				m := (if th_r >= up { 1 } else { 0 }) | (if th_g >= up { 2 } else { 0 }) | (if th_b >= up {
-					4
-				} else {
-					0
-				})
-				c := p.hist[m]
-				mut d := dst + (y * w + x) * 4
-				d[0] = c.r
-				d[1] = c.g
-				d[2] = c.b
-				d[3] = 255
-			}
-		}
-	}
-	hist.mark_dirty()
-}
-
-// clear_histogram - пустая гистограмма (кадр закрыт) - фон темы
-fn clear_histogram(mut st State, mut hist vgui.Canvas) {
-	st.hist_shown = [][]u32{}
-	st.hist_marks = false
-	hist.fill(st.pal.hist[0])
-	hist.mark_dirty()
-}
-
-// show_clip_marks - треугольники клипа по показанной гистограмме
-fn show_clip_marks(mut st State, mut hist vgui.Canvas) {
-	if st.hist_shown.len != 3 {
-		return
-	}
-	hr := st.hist_shown[0]
-	hg := st.hist_shown[1]
-	hb := st.hist_shown[2]
-	hi_seen := hr[255] + hg[255] + hb[255] > 0
-	lo_seen := hr[0] + hg[0] + hb[0] > 0
-	draw_clip_marks(mut hist, hi_seen, lo_seen, st.clip_hi, st.clip_lo, st.pal)
-	st.hist_marks = true
-}
-
-// repaint_histogram - перерисовать показанную гистограмму в цветах
-// текущей палитры (смена темы)
-fn repaint_histogram(mut st State) {
-	if isnil(st.hist_cv) {
-		return
-	}
-	mut hist := st.hist_cv
-	if st.hist_shown.len != 3 {
-		clear_histogram(mut st, mut hist)
-		return
-	}
-	marks := st.hist_marks
-	draw_histogram(mut hist, st.hist_shown[0], st.hist_shown[1], st.hist_shown[2], st.pal)
-	if marks {
-		show_clip_marks(mut st, mut hist)
-	}
-}
-
 // Подпись профиля объектива, пока снимок не выбран
 const lens_no_info = 'Информации нет'
 
@@ -1120,6 +1016,12 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 		}
 		if sl.dragging && !st.suppress && cfg.live {
 			defer_fx(mut st, cfg.fx)
+		}
+		// Тянут зону гистограммы (histogram.v): живой пересчёт, история -
+		// по отпусканию (on_release)
+		if st.hist_drag && !st.suppress {
+			defer_fx(mut st, cfg.fx)
+			return
 		}
 		if st.suppress || sl.dragging {
 			return
@@ -1508,19 +1410,13 @@ fn main() {
 	hist.fill(st.pal.hist[0])
 	st.hist_cv = hist
 	// Треугольники в верхних углах (clipping.v): левый - провалы, правый -
-	// пересветы; щелчок включает/выключает показ своего края
+	// пересветы; щелчок включает/выключает показ своего края. Зоны
+	// эквалайзера - наведение и перетаскивание (histogram.v)
 	hist.take_keys = false
 	hist.on_input = fn [mut st] (ev &vgui.CanvasInputEvent) {
-		if ev.kind != .pointer_down || ev.button != 1 {
-			return
-		}
-		match clip_hit_test(ev.x, ev.y, 256) {
-			1 { set_clip_warn(mut st, !st.clip_hi, st.clip_lo) }
-			-1 { set_clip_warn(mut st, st.clip_hi, !st.clip_lo) }
-			else {}
-		}
+		hist_input(mut st, ev)
 	}
-	hist.tooltip = i18n.tr('Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба')
+	hist.tooltip = if st.settings.hist_raw { hist_tip_raw() } else { hist_tip_default() }
 
 	// Уведомления (тосты) вместо статусной строки: начало/окончание
 	// обработки, ошибки. NotificationManager добавляется напрямую в окно
@@ -1878,6 +1774,9 @@ fn main() {
 			fx:    tone_fx
 		})
 		eq_rows << edit_row(mut st, mut s, lbl_w, val_w)
+		// зоны гистограммы ведут эти ползунки (histogram.v)
+		st.hv.eq_sl << s.sl
+		st.hv.eq_txt << eq_names[i]
 	}
 
 	// ── Кривые: кнопки каналов, редактор, подсказка ──
@@ -3214,8 +3113,10 @@ fn main() {
 		st.m_theme << it
 		m_themes.add(it)
 	}
+	// Вид гистограммы (histogram.v)
+	m_hist, hist_items := hist_menu(mut st)
 	bar.add_menu(i18n.tr('Вид'), [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_refresh, m_top, m_panel, m_left, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_hist, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_refresh, m_top, m_panel, m_left, m_bg, m_themes])
 	view_ids := ['view.fit', 'view.z50', 'view.z100', 'view.z200', 'view.zoom', 'view.split',
 		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.info', 'view.nav', 'view.full',
 		'view.strip', 'view.refresh', 'view.top', 'view.panel', 'view.left']
@@ -3223,6 +3124,10 @@ fn main() {
 		m_clipwarn, m_mask, m_info, m_nav, m_full, m_strip, m_refresh, m_top, m_panel, m_left]
 	for i, id in view_ids {
 		mut it := view_items[i]
+		hk_add(mut st, id, 'Вид', mut it)
+	}
+	for i, id in ['view.hist_raw', 'view.hist_log', 'view.hist_luma'] {
+		mut it := hist_items[i]
 		hk_add(mut st, id, 'Вид', mut it)
 	}
 	avail_add(mut st, .frame, [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_jpeg,

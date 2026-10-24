@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Ton ekolayzeri (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Fotoğraftaki noktalar: taşıma, geçiş, boyut ve döndürme",
  "Трети": "Üçte birler",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Üçgenler: gölge kırpması (solda) ve parlak alan kırpması (sağda) - tıklama bunları fotoğrafta gösterir, J - ikisi",
  "Тяните круг, его край или голубой источник": "Daireyi, kenarını veya camgöbeği kaynağı sürükleyin",
  "Тёмная": "Koyu",
  "Тёмно-серый": "Koyu gri",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "çöpe taşınamadı (kod {0})",
  "Баланс белого сдвигом от «как снято»": "Beyaz dengesi «çekildiği gibi» değerinden kayma olarak",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Ön ayar, her fotoğrafın beyaz dengesini kendi «çekildiği gibi» değerinden burada kaydırıldığı kadar kaydırır. İşaretsiz - aynı sıcaklığı ve tonu ayarlar. «Beyaz dengesi ve renk» grubu gerekir.",
- "Ввести значение: Enter - применить, Esc - отмена": "Değer girin: Enter - uygula, Esc - iptal"
+ "Ввести значение: Enter - применить, Esc - отмена": "Değer girin: Enter - uygula, Esc - iptal",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: sensör verisi",
+ "Логарифмическая шкала": "Logaritmik ölçek",
+ "Линия яркости": "Parlaklık çizgisi",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekolayzer: {0} {1} EV - sola veya sağa sürükleyin",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Bir bölgenin üzerine gelin - ekolayzer kaydırıcısı, yana sürükleyin - değiştirin. Üçgenler: gölge kırpması (solda) ve parlak alan kırpması (sağda) - tıklama bunları fotoğrafta gösterir, J - ikisi",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensör verisi, eksen - kırpmaya kadar EV adımları. Sağ kenar - kırpılmış kanallar: bu veri kurtarılamaz. Sağ üçgen onları fotoğrafta gösterir"
 }

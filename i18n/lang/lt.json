@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Tonų ekvalaizeris (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Taškai nuotraukoje: perkėlimas, perėjimas, dydis ir pasukimas",
  "Трети": "Trečdaliai",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trikampiai: užtamsėjusios vietos (kairėje) ir perdegusios (dešinėje) - spustelėjus jos parodomos nuotraukoje, J - abi",
  "Тяните круг, его край или голубой источник": "Tempkite apskritimą, jo kraštą ar žydrą šaltinį",
  "Тёмная": "Tamsi",
  "Тёмно-серый": "Tamsiai pilka",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "nepavyko perkelti į šiukšlinę (kodas {0})",
  "Баланс белого сдвигом от «как снято»": "Baltos spalvos balansas kaip poslinkis nuo «kaip nufotografuota»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Ruošinys paslenka kiekvienos nuotraukos baltos spalvos balansą nuo jos «kaip nufotografuota» tiek, kiek jis paslinktas čia. Be žymės - nustato tą pačią temperatūrą ir atspalvį. Reikia grupės «Baltos spalvos balansas ir spalva».",
- "Ввести значение: Enter - применить, Esc - отмена": "Įvesti reikšmę: Enter - taikyti, Esc - atšaukti"
+ "Ввести значение: Enter - применить, Esc - отмена": "Įvesti reikšmę: Enter - taikyti, Esc - atšaukti",
+ "Гистограмма": "Histograma",
+ "RAW: данные сенсора": "RAW: jutiklio duomenys",
+ "Логарифмическая шкала": "Logaritminė skalė",
+ "Линия яркости": "Šviesumo linija",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaizeris: {0} {1} EV - tempkite į kairę arba į dešinę",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Užveskite ant zonos - jos ekvalaizerio slankiklis, tempkite į šoną - keiskite. Trikampiai: užtamsėjusios vietos (kairėje) ir perdegusios (dešinėje) - spustelėjus jos parodomos nuotraukoje, J - abi",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: jutiklio duomenys, ašis - EV žingsniai iki nukirtimo. Dešinysis kraštas - perdegę kanalai: šių duomenų atkurti negalima. Dešinysis trikampis parodo juos nuotraukoje"
 }

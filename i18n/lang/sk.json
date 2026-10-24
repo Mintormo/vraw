@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Ekvalizér tónov (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Body na snímke: presun, prechod, veľkosť a otočenie",
  "Трети": "Tretiny",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trojuholníky: podexponované miesta (vľavo) a prepaly (vpravo) - kliknutie ich ukáže na snímke, J - oboje",
  "Тяните круг, его край или голубой источник": "Ťahajte kruh, jeho okraj alebo azúrový zdroj",
  "Тёмная": "Tmavá",
  "Тёмно-серый": "Tmavosivá",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "nedá sa presunúť do koša (kód {0})",
  "Баланс белого сдвигом от «как снято»": "Vyváženie bielej ako posun od «ako bolo nasnímané»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Predvoľba posunie vyváženie bielej každej snímky od jej «ako bolo nasnímané» o toľko, o koľko je posunuté tu. Bez zaškrtnutia - nastaví rovnakú teplotu a odtieň. Vyžaduje skupinu «Vyváženie bielej a farba».",
- "Ввести значение: Enter - применить, Esc - отмена": "Zadať hodnotu: Enter - použiť, Esc - zrušiť"
+ "Ввести значение: Enter - применить, Esc - отмена": "Zadať hodnotu: Enter - použiť, Esc - zrušiť",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: dáta snímača",
+ "Логарифмическая шкала": "Logaritmická stupnica",
+ "Линия яркости": "Čiara jasu",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalizér: {0} {1} EV - ťahajte doľava alebo doprava",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Prejdite na zónu - jej posuvník ekvalizéra, ťahajte do strany - meňte. Trojuholníky: podexponované miesta (vľavo) a prepaly (vpravo) - kliknutie ich ukáže na snímke, J - oboje",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dáta snímača, os - stupne EV po orezanie. Pravý okraj - prepálené kanály: tieto dáta sa nedajú vytiahnuť. Pravý trojuholník ich ukáže na snímke"
 }

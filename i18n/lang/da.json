@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Toneudligner (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punkter i fotoet: flyt, overgang, størrelse og rotation",
  "Трети": "Tredjedele",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trekanter: udbrændte skygger (venstre) og højlys (højre) - klik viser dem i fotoet, J - begge",
  "Тяните круг, его край или голубой источник": "Træk cirklen, dens kant eller den cyanfarvede kilde",
  "Тёмная": "Mørk",
  "Тёмно-серый": "Mørkegrå",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "kunne ikke flyttes til papirkurven (kode {0})",
  "Баланс белого сдвигом от «как снято»": "Hvidbalance som forskydning fra «som optaget»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Forudindstillingen forskyder hvert billedes hvidbalance fra dets «som optaget» lige så meget, som den er forskudt her. Uden flueben - sætter samme temperatur og nuance. Kræver gruppen «Hvidbalance og farve».",
- "Ввести значение: Enter - применить, Esc - отмена": "Indtast værdi: Enter - anvend, Esc - annuller"
+ "Ввести значение: Enter - применить, Esc - отмена": "Indtast værdi: Enter - anvend, Esc - annuller",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: sensordata",
+ "Логарифмическая шкала": "Logaritmisk skala",
+ "Линия яркости": "Lysstyrkelinje",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizer: {0} {1} EV - træk til venstre eller højre",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Hold over en zone - dens equalizer-skyder, træk til siden - ændr. Trekanter: udbrændte skygger (venstre) og højlys (højre) - klik viser dem i fotoet, J - begge",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, aksen - EV-trin til klipning. Højre kant - udbrændte kanaler: disse data kan ikke hentes frem. Den højre trekant viser dem på billedet"
 }

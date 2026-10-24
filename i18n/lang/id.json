@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Ekualiser nada (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Titik di foto: pindah, transisi, ukuran, dan rotasi",
  "Трети": "Sepertiga",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Segitiga: bayangan tenggelam (kiri) dan sorotan terbakar (kanan) - klik untuk menampilkannya di foto, J - keduanya",
  "Тяните круг, его край или голубой источник": "Seret lingkaran, tepinya, atau sumber sian",
  "Тёмная": "Gelap",
  "Тёмно-серый": "Abu-abu tua",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "tidak dapat dipindah ke tempat sampah (kode {0})",
  "Баланс белого сдвигом от «как снято»": "Keseimbangan putih sebagai pergeseran dari «sesuai pemotretan»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Preset menggeser keseimbangan putih setiap foto dari «sesuai pemotretan» miliknya sebanyak pergeseran di sini. Tanpa centang - memasang suhu dan rona yang sama. Memerlukan grup «Keseimbangan putih dan warna».",
- "Ввести значение: Enter - применить, Esc - отмена": "Masukkan nilai: Enter - terapkan, Esc - batal"
+ "Ввести значение: Enter - применить, Esc - отмена": "Masukkan nilai: Enter - terapkan, Esc - batal",
+ "Гистограмма": "Histogram",
+ "RAW: данные сенсора": "RAW: data sensor",
+ "Логарифмическая шкала": "Skala logaritmik",
+ "Линия яркости": "Garis luminans",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekualiser: {0} {1} EV - seret ke kiri atau kanan",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Arahkan ke zona - penggeser ekualisernya, seret ke samping - ubah. Segitiga: bayangan tenggelam (kiri) dan sorotan terbakar (kanan) - klik untuk menampilkannya di foto, J - keduanya",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data sensor, sumbu - langkah EV hingga terpotong. Tepi kanan - kanal terpotong: data ini tidak dapat dipulihkan. Segitiga kanan menunjukkannya pada foto"
 }

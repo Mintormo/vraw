@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Toņu ekvalaizers (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punkti fotoattēlā: pārvietošana, pāreja, izmērs un pagriešana",
  "Трети": "Trešdaļas",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Trīsstūri: pārtumšotās vietas (pa kreisi) un pārgaismotās (pa labi) - klikšķis tās parāda fotoattēlā, J - abas",
  "Тяните круг, его край или голубой источник": "Velciet apli, tā malu vai gaiši zilo avotu",
  "Тёмная": "Tumšā",
  "Тёмно-серый": "Tumši pelēks",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "neizdevās pārvietot uz atkritni (kods {0})",
  "Баланс белого сдвигом от «как снято»": "Baltā balanss kā nobīde no «kā uzņemts»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Sagatave nobīda katra kadra baltā balansu no tā «kā uzņemts» tikpat, cik tas ir nobīdīts šeit. Bez atzīmes - iestata to pašu temperatūru un nokrāsu. Nepieciešama grupa «Baltā balanss un krāsa».",
- "Ввести значение: Enter - применить, Esc - отмена": "Ievadīt vērtību: Enter - lietot, Esc - atcelt"
+ "Ввести значение: Enter - применить, Esc - отмена": "Ievadīt vērtību: Enter - lietot, Esc - atcelt",
+ "Гистограмма": "Histogramma",
+ "RAW: данные сенсора": "RAW: sensora dati",
+ "Логарифмическая шкала": "Logaritmiska skala",
+ "Линия яркости": "Spilgtuma līnija",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaizers: {0} {1} EV - velciet pa kreisi vai pa labi",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Novietojiet kursoru uz zonas - tās ekvalaizera slīdnis, velciet uz sāniem - mainiet. Trīsstūri: pārtumšotās vietas (pa kreisi) un pārgaismotās (pa labi) - klikšķis tās parāda fotoattēlā, J - abas",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensora dati, ass - EV pakāpes līdz nogriešanai. Labā mala - pārdeguši kanāli: šos datus nevar atgūt. Labais trīsstūris tos parāda attēlā"
 }

@@ -81,7 +81,7 @@ fn test_hist_theme_colors() {
 	mut hr := []u32{len: 256}
 	hr[100] = 10
 	z := []u32{len: 256}
-	draw_histogram(mut hist, hr, z, z, lp)
+	draw_histogram(mut hist, HistBins{ r: hr, g: z, b: z, y: z }, HistLook{}, lp)
 	k := (99 * 256 + 100) * 4
 	assert hist.pixels[k..k + 3] == [lp.hist[1].r, lp.hist[1].g, lp.hist[1].b]
 	assert hist.pixels[0..3] == [bg.r, bg.g, bg.b]

@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Bộ cân bằng tông (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Các điểm trên ảnh: di chuyển, chuyển tiếp, kích thước và xoay",
  "Трети": "Một phần ba",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Tam giác: vùng tối mất chi tiết (trái) và vùng cháy sáng (phải) - nhấp để hiện trên ảnh, J - cả hai",
  "Тяните круг, его край или голубой источник": "Kéo vòng tròn, viền của nó hoặc nguồn màu xanh lơ",
  "Тёмная": "Tối",
  "Тёмно-серый": "Xám đậm",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "không thể chuyển vào thùng rác (mã {0})",
  "Баланс белого сдвигом от «как снято»": "Cân bằng trắng dạng dịch chuyển từ «như khi chụp»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Thiết lập sẵn dịch cân bằng trắng của mỗi ảnh từ «như khi chụp» của nó đúng bằng mức đã dịch ở đây. Không đánh dấu - đặt cùng nhiệt độ và sắc độ. Cần nhóm «Cân bằng trắng và màu».",
- "Ввести значение: Enter - применить, Esc - отмена": "Nhập giá trị: Enter - áp dụng, Esc - hủy"
+ "Ввести значение: Enter - применить, Esc - отмена": "Nhập giá trị: Enter - áp dụng, Esc - hủy",
+ "Гистограмма": "Biểu đồ histogram",
+ "RAW: данные сенсора": "RAW: dữ liệu cảm biến",
+ "Логарифмическая шкала": "Thang logarit",
+ "Линия яркости": "Đường độ sáng",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Bộ cân bằng: {0} {1} EV - kéo sang trái hoặc phải",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Di chuột lên một vùng - thanh trượt bộ cân bằng của nó, kéo ngang - thay đổi. Tam giác: vùng tối mất chi tiết (trái) và vùng cháy sáng (phải) - nhấp để hiện trên ảnh, J - cả hai",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dữ liệu cảm biến, trục - các bước EV tới ngưỡng cháy. Mép phải - kênh bị cháy: không thể khôi phục dữ liệu này. Tam giác bên phải hiển thị chúng trên ảnh"
 }

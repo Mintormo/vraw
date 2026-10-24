@@ -48,6 +48,34 @@ fn mark_clipping(mut pix []u8, hi bool, lo bool) {
 	}
 }
 
+// mark_clipping_src - как mark_clipping, но пересветы - по сырью raw
+// (16 бит, 3 канала, та же сетка пикселей): хоть один канал на уровне
+// клипа LibRaw (raw_clip_lvl, histogram.v) - красный; провалы - по
+// результату. raw = nil - mark_clipping.
+fn mark_clipping_src(mut pix []u8, hi bool, lo bool, raw &u16) {
+	if isnil(raw) || !hi {
+		mark_clipping(mut pix, hi, lo)
+		return
+	}
+	unsafe {
+		mut p := &u8(pix.data)
+		mut s := &u16(raw)
+		for _ in 0 .. pix.len / 4 {
+			if s[0] >= raw_clip_lvl || s[1] >= raw_clip_lvl || s[2] >= raw_clip_lvl {
+				p[0] = clip_hi_color.r
+				p[1] = clip_hi_color.g
+				p[2] = clip_hi_color.b
+			} else if lo && (p[0] == 0 || p[1] == 0 || p[2] == 0) {
+				p[0] = clip_lo_color.r
+				p[1] = clip_lo_color.g
+				p[2] = clip_lo_color.b
+			}
+			p += 4
+			s += 3
+		}
+	}
+}
+
 // draw_clip_marks - треугольники в углах гистограммы: цвет - есть клип
 // (hi_seen/lo_seen), обводка - показ включён
 fn draw_clip_marks(mut hist vgui.Canvas, hi_seen bool, lo_seen bool, hi_on bool, lo_on bool, p Palette) {

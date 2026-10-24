@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Egalizator de tonuri (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Puncte în fotografie: mutare, tranziție, dimensiune și rotire",
  "Трети": "Treimi",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Triunghiuri: umbre înecate (stânga) și lumini arse (dreapta) - un clic le arată în fotografie, J - ambele",
  "Тяните круг, его край или голубой источник": "Trageți cercul, marginea lui sau sursa cyan",
  "Тёмная": "Întunecată",
  "Тёмно-серый": "Gri închis",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "nu s-a putut muta în coș (cod {0})",
  "Баланс белого сдвигом от «как снято»": "Balans de alb ca deplasare de la «ca la fotografiere»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Presetarea deplasează balansul de alb al fiecărei fotografii de la propriul «ca la fotografiere» cu cât este deplasat aici. Nebifat - setează aceeași temperatură și nuanță. Necesită grupul «Balans de alb și culoare».",
- "Ввести значение: Enter - применить, Esc - отмена": "Introduceți valoarea: Enter - aplică, Esc - anulează"
+ "Ввести значение: Enter - применить, Esc - отмена": "Introduceți valoarea: Enter - aplică, Esc - anulează",
+ "Гистограмма": "Histogramă",
+ "RAW: данные сенсора": "RAW: datele senzorului",
+ "Логарифмическая шкала": "Scară logaritmică",
+ "Линия яркости": "Linia luminanței",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Egalizator: {0} {1} EV - trageți la stânga sau la dreapta",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Treceți peste o zonă - glisorul ei din egalizator, trageți lateral - modificați. Triunghiuri: umbre înecate (stânga) și lumini arse (dreapta) - un clic le arată în fotografie, J - ambele",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: datele senzorului, axa - trepte EV până la tăiere. Marginea dreaptă - canale arse: aceste date nu pot fi recuperate. Triunghiul din dreapta le arată pe fotografie"
 }

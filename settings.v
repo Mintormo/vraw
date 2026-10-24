@@ -31,6 +31,11 @@ mut:
 	// сведения о съёмке (shotinfo.v) и миникарта при увеличении (navigator)
 	no_info      bool
 	no_navigator bool
+	// Гистограмма (histogram.v): по сырью, логарифмическая шкала, без
+	// линии яркости (отрицание - в старом файле поля нет, линия есть)
+	hist_raw     bool
+	hist_log     bool
+	no_hist_luma bool
 	// демозаика полного кадра (ключ из demosaic_keys): 1:1, экспорт
 	demosaic string = 'ahd'
 	// Недавние файлы и папки (recent.v), новые - первыми
@@ -212,6 +217,9 @@ fn settings_from(s Settings) Settings {
 		no_frame_cache: s.no_frame_cache
 		no_info:        s.no_info
 		no_navigator:   s.no_navigator
+		hist_raw:       s.hist_raw
+		hist_log:       s.hist_log
+		no_hist_luma:   s.no_hist_luma
 		demosaic:       if s.demosaic in demosaic_keys { s.demosaic } else { 'ahd' }
 		recent_files:   s.recent_files.filter(it != '')#[..recent_limit(s.recent_files_n)].clone()
 		recent_dirs:    s.recent_dirs.filter(it != '')#[..recent_limit(s.recent_dirs_n)].clone()

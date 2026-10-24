@@ -470,7 +470,6 @@
  "Тон-эквалайзер (EV)": "Tooni ekvalaiser (EV)",
  "Точки на снимке: перенос, переход, размер и поворот": "Punktid fotol: teisaldamine, üleminek, suurus ja pööramine",
  "Трети": "Kolmandikud",
- "Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Kolmnurgad: uppunud varjud (vasakul) ja läbipõlenud heledad (paremal) - klõps näitab neid fotol, J - mõlemad",
  "Тяните круг, его край или голубой источник": "Lohistage ringi, selle serva või tsüaani allikat",
  "Тёмная": "Tume",
  "Тёмно-серый": "Tumehall",
@@ -665,5 +664,12 @@
  "не удалось переместить в корзину (код {0})": "prügikasti viimine ebaõnnestus (kood {0})",
  "Баланс белого сдвигом от «как снято»": "Valge tasakaal nihkena «nagu pildistatud» suhtes",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Eelseadistus nihutab iga kaadri valge tasakaalu tema «nagu pildistatud» suhtes sama palju, kui see on siin nihutatud. Ilma märkeruuduta - seab sama temperatuuri ja tooni. Vajab gruppi «Valge tasakaal ja värv».",
- "Ввести значение: Enter - применить, Esc - отмена": "Sisesta väärtus: Enter - rakenda, Esc - loobu"
+ "Ввести значение: Enter - применить, Esc - отмена": "Sisesta väärtus: Enter - rakenda, Esc - loobu",
+ "Гистограмма": "Histogramm",
+ "RAW: данные сенсора": "RAW: sensori andmed",
+ "Логарифмическая шкала": "Logaritmiline skaala",
+ "Линия яркости": "Heleduse joon",
+ "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaiser: {0} {1} EV - lohista vasakule või paremale",
+ "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Vii kursor tsoonile - selle ekvalaiseri liugur, lohista külgsuunas - muuda. Kolmnurgad: uppunud varjud (vasakul) ja läbipõlenud heledad (paremal) - klõps näitab neid fotol, J - mõlemad",
+ "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensori andmed, telg - EV-astmed kuni lõikumiseni. Parem serv - läbipõlenud kanalid: neid andmeid ei saa taastada. Parem kolmnurk näitab neid pildil"
 }
