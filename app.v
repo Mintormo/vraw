@@ -1185,7 +1185,7 @@ fn set_placeholder_text(mut ph Placeholder, folder bool) {
 		title.text = i18n.tr('Выберите кадр')
 		hint.text = i18n.tr('Двойной щелчок по миниатюре в ленте')
 	} else {
-		title.text = i18n.tr('Откройте RAW-файл или папку')
+		title.text = i18n.tr('Откройте или перетащите сюда RAW-файл или папку')
 		hint.text = ph.open_hint
 	}
 }
@@ -3460,6 +3460,21 @@ fn main() {
 	view_area.add(view_stack, flex: 1)
 	st.view_area = view_area
 	st.view_stack = view_stack
+	// Перетаскивание из файлового менеджера в область снимка (vgui/dnd.v):
+	// цель - вся область (и заглушка, и открытый кадр). RAW-файл
+	// открывается как из меню, папка - как «Открыть папку». Брошено
+	// несколько файлов - SDL присылает их по одному, открытым остаётся
+	// последний RAW. Прочие файлы - предупреждение, а не ошибка LibRaw.
+	vgui.set_drop_target(mut view_area, [vgui.dnd_kind_files], fn [open_file, open_folder, mut nm] (info vgui.DropInfo) {
+		path := info.data.text
+		if os.is_dir(path) {
+			open_folder(path)
+		} else if is_raw_file(path) {
+			open_file(path)
+		} else {
+			nm.show_warning(i18n.trf('Не RAW-файл: {0}', os.file_name(path)))
+		}
+	})
 	// Область просмотра - снимок и под ним лента кадров папки
 	// (layout_strip, когда открыт файл или папка)
 	mut viewer := vgui.create_vbox_fill()
