@@ -3526,10 +3526,8 @@ fn main() {
 	// Свои цвета vraw по палитре темы (фоны панелей, разделители, подписи)
 	paint_ui(mut st, theme)
 	win.add_widget(nm)
-	// Удержание «\» (до/после) и буквы в русской раскладке (compare.v)
-	win.add_widget(&KeyWatch{
-		st: st
-	})
+	// Удержание «\» - до/после (compare.v)
+	bind_ba_hold(mut win, mut st)
 	app.add_window(win)
 
 	// Без кадра доступно только открытие (avail.v)

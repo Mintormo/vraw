@@ -8,11 +8,11 @@ module main
 // «=» - снято). Сочетание пишется в поле shortcut пункта (меню его
 // показывает) в каноническом виде vgui.shortcut_normalize: «Ctrl+Shift+Alt+Клавиша».
 //
-// Нажатия разбирает KeyWatch (compare.v): имя сочетания строится по месту
-// клавиши (scancode, vgui.shortcut_from_event), а не по букве раскладки - в русской
-// раскладке SDL отдаёт в keycode «к» вместо R, и меню vgui такие сочетания
-// не узнаёт. Найденный пункт срабатывает как из меню (hk_fire), событие
-// дальше не идёт.
+// Нажатия разбирает само меню (vgui): сочетание пункта сравнивается и по
+// символу, и по месту клавиши, поэтому оно срабатывает в любой раскладке
+// (в русской SDL отдаёт в keycode «к» вместо R). Неактивный пункт не
+// срабатывает. Пока в фокусе поле ввода, однобуквенные сочетания не
+// срабатывают - буква его (ShortcutOverride в vgui).
 //
 // Клавиши навигации и окна (стрелки, Home/End, Enter, Esc, пробел,
 // Tab, удержание «\», Ctrl+Y) не настраиваются - hk_reserved.
@@ -32,7 +32,7 @@ struct HotItem {
 // Разделы окна - в порядке меню
 const hk_groups = ['Файл', 'Правка', 'Отбор', 'Вид']
 
-// Не настраиваются: заняты навигацией и окнами (bind_hotkey, KeyWatch)
+// Не настраиваются: заняты навигацией и окнами (bind_hotkey, bind_ba_hold)
 const hk_reserved = ['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Enter', 'Escape', 'Space',
 	'Tab', 'Backspace', 'Delete', '\\', 'Ctrl+Y']
 
@@ -108,34 +108,6 @@ fn hk_find(st &State, sc string) int {
 		}
 	}
 	return -1
-}
-
-// hk_fire - сработать как пункт меню: флажок переключается, затем
-// on_toggle; неактивный пункт - false (событие идёт дальше)
-fn hk_fire(mut item vgui.MenuItem) bool {
-	if !item.enabled {
-		return false
-	}
-	if item.kind == .checkbox {
-		item.checked = !item.checked
-		if !isnil(item.on_toggle) {
-			item.on_toggle(item.checked)
-		}
-	} else if !isnil(item.on_click) {
-		item.on_click()
-	}
-	return true
-}
-
-// hk_dispatch - нажатие в главном окне (KeyWatch): действие с таким
-// сочетанием срабатывает; true - событие забрано
-fn hk_dispatch(mut st State, ev &vgui.GuiEvent) bool {
-	i := hk_find(st, vgui.shortcut_from_event(ev))
-	if i < 0 {
-		return false
-	}
-	mut it := st.hk[i].item
-	return hk_fire(mut it)
 }
 
 // hk_set - назначить действию idx сочетание sc ('' - снять). Сочетание

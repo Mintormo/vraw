@@ -303,25 +303,25 @@ fn test_zoom_at_point() {
 	assert cv.auto_fit
 }
 
-// Клавиши: удержание «\» - «до» и обратно; сочетания действий - по месту
-// клавиши в любой раскладке (keycode «з» на месте P)
-fn test_key_watch() {
+// scancode клавиши «\» (USB HID)
+const test_sc_backslash = 49
+
+// Клавиши в живом окне (TestUi): удержание «\» - «до» и обратно, потеря
+// фокуса окном снимает «до»; сочетания действий ловит меню - по месту
+// клавиши в любой раскладке (keycode «з» на месте P); пока в фокусе поле
+// ввода, буква его, а не действие (ShortcutOverride в vgui)
+fn test_compare_and_action_keys() {
 	dir := rt_dir('keys')
 	mut st := rt_folder(dir, 2)
 	st.frame_idx = 0
 	st.side_path = sidecar_path(st.frames[0].path)
 	start_history(mut st)
-	mut k := &KeyWatch{
-		st: st
+	mut t := vgui.new_test_ui(width: 400, height: 200)!
+	defer {
+		t.close()
 	}
-	app := &vgui.App{}
-	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: `\\`, scancode: sc_backslash },
-		app)
-	assert st.ba_hold
-	assert k.handle_event(&vgui.GuiEvent{ typ: .key_up, keycode: `\\`, scancode: sc_backslash },
-		app)
-	assert !st.ba_hold
-	// Сочетания действий (hotkeys.v) - по месту клавиши: P «Отобран»
+	bind_ba_hold(mut t.win, mut st)
+	// Сочетания действий (hotkeys.v) - пункты меню: P «Отобран», X «Отклонён»
 	mut m_pick := vgui.menu_action('Отобран')
 	m_pick.shortcut = 'P'
 	m_pick.on_click = fn [mut st] () {
@@ -334,26 +334,38 @@ fn test_key_watch() {
 		set_flag(mut st, -1)
 	}
 	hk_add(mut st, 'pick.flag_reject', 'Отбор', mut m_rej)
+	mut bar := vgui.menu_bar()
+	bar.add_menu('Отбор', [m_pick, m_rej])
+	mut input := vgui.text_input('')
+	mut root := vgui.create_vbox_fill()
+	root.add(bar)
+	root.add(input)
+	t.add(root)
+
+	t.key_press(int(`\\`), test_sc_backslash, 0)
+	assert st.ba_hold
+	t.key_release(int(`\\`), test_sc_backslash, 0)
+	assert !st.ba_hold
 	// Русская раскладка: «з» на месте P
-	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: 0x437, scancode: 19 }, app)
+	t.key_sc(0x437, 19, 0)
 	assert st.frames[0].mark.flag == 1
 	// Латинская X - так же
-	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: `x`, scancode: 27 }, app)
+	t.key_sc(int(`x`), 27, 0)
 	assert st.frames[0].mark.flag == -1
-	assert k.handle_event(&vgui.GuiEvent{ typ: .key_down, keycode: `p`, scancode: 19 }, app)
+	t.key_sc(int(`p`), 19, 0)
 	assert st.frames[0].mark.flag == 1
 	// С Ctrl - другое сочетание, его нет
-	assert !k.handle_event(&vgui.GuiEvent{
-		typ:      .key_down
-		keycode:  0x447
-		scancode: 27
-		mod_keys: vgui.sdl_kmod_ctrl
-	}, app)
+	t.key_sc(0x447, 27, vgui.sdl_kmod_ctrl)
 	assert st.frames[0].mark.flag == 1
 	// Окно потеряло фокус при зажатой «\» - «до» снимается
-	k.handle_event(&vgui.GuiEvent{ typ: .key_down, scancode: sc_backslash }, app)
-	k.handle_event(&vgui.GuiEvent{ typ: .window_focus_lost }, app)
+	t.key_press(int(`\\`), test_sc_backslash, 0)
+	assert st.ba_hold
+	t.win.dispatch_event_with_app(&vgui.GuiEvent{ typ: .window_focus_lost }, t.app)
 	assert !st.ba_hold
+	// Поле ввода в фокусе: X - буква поля, не «Отклонён»
+	t.click_widget(input)
+	t.key_sc(int(`x`), 27, 0)
+	assert st.frames[0].mark.flag == 1
 }
 
 // Удаление отклонённых: какие кадры и куда перейти, если ушёл открытый

@@ -4,7 +4,7 @@ module main
 // каждого - поле сочетания vgui.ShortcutInput (щелчок - ждать нажатия:
 // новое сочетание, Esc - отмена, Backspace/Delete - снять, занятые
 // навигацией - отказ) и сброс к умолчанию. Сочетание поле пишет по месту
-// клавиши - в том же виде, что vgui.shortcut_from_event у KeyWatch.
+// клавиши - в том же виде, что vgui.shortcut_from_event (по месту клавиши).
 import vgui
 import i18n
 

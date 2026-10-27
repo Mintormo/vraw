@@ -51,22 +51,6 @@ fn test_hk_override_on_start() {
 	assert a.shortcut == 'Ctrl+K' && b.shortcut == '' && c.shortcut == 'G'
 }
 
-// Нажатие срабатывает как пункт меню: флажок переключается; неактивный
-// пункт события не берёт
-fn test_hk_dispatch() {
-	mut st := hk_state()
-	ev := vgui.GuiEvent{
-		typ:      .key_down
-		scancode: 9 // F
-		keycode:  int(`а`)
-	}
-	assert hk_dispatch(mut st, &ev)
-	assert st.hk[1].item.checked
-	mut it := st.hk[1].item
-	it.enabled = false
-	assert !hk_dispatch(mut st, &ev)
-}
-
 // Настройки переживают перезапуск
 fn test_hk_settings_roundtrip() {
 	mut s := Settings{}

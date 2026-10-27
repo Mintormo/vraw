@@ -12,7 +12,7 @@ module main
 // буфер (st.ba_before), пересчёт - только когда меняются сырьё, геометрия
 // или сама запись.
 // Три режима:
-// - удержание «\» - весь снимок «до», пока клавиша нажата (KeyWatch);
+// - удержание «\» - весь снимок «до», пока клавиша нажата (bind_ba_hold);
 // - шторка (Y, «Вид - До/после: шторка») - слева «до», справа «после»,
 //   вертикальную линию тянут мышью. «После» (st.ba_after) хранится,
 //   чтобы двигать линию без пересчёта пайплайна;
@@ -691,60 +691,17 @@ fn zoom_click(mut st State, mut cv vgui.Canvas, ev &vgui.CanvasInputEvent) bool 
 	return false
 }
 
-// KeyWatch - невидимый виджет окна для клавиш, которым мало горячей
-// клавиши: удержание «\» (нужно и отпускание - у горячих клавиш vgui
-// его нет) и все настраиваемые сочетания (hk_dispatch, hotkeys.v) - по
-// scancode, месту клавиши: в русской раскладке SDL отдаёт в keycode букву
-// раскладки («з» вместо P), и меню vgui их не узнаёт. Добавляется в окно после корня: события
-// получает раньше меню, но после виджета в фокусе (поле ввода свои
-// буквы заберёт само).
-@[heap]
-struct KeyWatch {
-mut:
-	st &State = unsafe { nil }
-}
-
-// Scancode SDL (USB HID): буквы с 4 (A), «\» - 49
-const sc_backslash = 49
-
-// printable_key - клавиша печатного символа (пробел, буквы любой
-// раскладки, цифры, знаки): не служебная (у стрелок и F-клавиш в
-// keycode бит 1 << 30), не Esc, Enter, Tab, Backspace, Delete
-fn printable_key(keycode int) bool {
-	return keycode >= 32 && keycode != 127 && keycode & (1 << 30) == 0
-}
-
-fn (mut k KeyWatch) draw(mut _ vgui.RenderContext) {}
-
-fn (mut k KeyWatch) handle_event(ev &vgui.GuiEvent, app &vgui.App) bool {
-	if isnil(k.st) {
-		return false
-	}
-	mut st := k.st
-	if ev.typ == .window_focus_lost {
-		set_ba_hold(mut st, false) // отпускание «\» в другом окне не придёт
-		return false
-	}
-	if ev.typ != .key_down && ev.typ != .key_up {
-		return false
-	}
-	// Поле ввода в фокусе: печатные клавиши - его. Буквы и цифры поле
-	// получает текстом, а key_down отдаёт дальше - и меню поставило бы
-	// звёзды (0..5) или флажок, пока набирают угол или пропорцию
-	ctx := app.get_active_ctx()
-	if ev.typ == .key_down && !isnil(ctx) && ctx.focus.wants_text()
-		&& ev.mod_keys & (vgui.sdl_kmod_ctrl | vgui.sdl_kmod_alt) == 0 && printable_key(ev.keycode) {
-		return true
-	}
-	mods := ev.mod_keys & (vgui.sdl_kmod_ctrl | vgui.sdl_kmod_alt | vgui.sdl_kmod_shift)
-	if ev.scancode == sc_backslash && mods == 0 {
-		set_ba_hold(mut st, ev.typ == .key_down)
-		return true
-	}
-	// Сочетания действий (hotkeys.v) - по месту клавиши, в любой
-	// раскладке; меню их уже не получает
-	if ev.typ != .key_down {
-		return false
-	}
-	return hk_dispatch(mut st, ev)
+// bind_ba_hold - удержание «\» в окне: нажали - «до», отпустили -
+// «после» (vgui bind_hold_hotkey). Автоповтор, отпускание и потерю
+// фокуса окном (отпускание придёт другому окну - «до» снимается сразу)
+// ведёт vgui. Пока в фокусе поле ввода, «\» - его символ: печатные
+// клавиши без Ctrl/Alt горячие клавиши в vgui не получают
+// (ShortcutOverride). Сочетания действий (hotkeys.v) ловит меню - по
+// месту клавиши, в любой раскладке.
+fn bind_ba_hold(mut win vgui.Window, mut st State) {
+	win.bind_hold_hotkey('\\', fn [mut st] () {
+		set_ba_hold(mut st, true)
+	}, fn [mut st] () {
+		set_ba_hold(mut st, false)
+	})
 }
