@@ -784,6 +784,15 @@ fn strip_info_text(mut st State) {
 		text += i18n.trf('  ·  выделено {0}', '${n}')
 	}
 	info.text = text
+	// Звёзды над лентой - оценка открытого кадра (set_value - без колбэка)
+	if !isnil(st.strip_rating) {
+		mut r := st.strip_rating
+		r.set_value(if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
+			st.frames[st.frame_idx].mark.rating
+		} else {
+			0
+		})
+	}
 }
 
 // select_all_frames - выделить все кадры ленты (Ctrl+A); текущим

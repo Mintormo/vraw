@@ -302,9 +302,7 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	temp_row.set_spacing(6)
 	temp_row.add(temp.lb, min: lbl_w)
 	temp_row.add(temp.sl, flex: 1)
-	t_cell, t_edit := value_cell(mut st, mut temp.sl, temp.vl, temp.conv)
-	temp_row.add(t_cell, min: val_w)
-	temp_row.add(t_edit)
+	temp_row.add(temp.vf, min: val_w)
 	temp_row.add(t_reset)
 	mut n_reset := reset_button(i18n.tr('Как снято'))
 	n_reset.on_click = fn [mut st] () {
@@ -314,9 +312,7 @@ fn build_wb_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	tint_row.set_spacing(6)
 	tint_row.add(tint.lb, min: lbl_w)
 	tint_row.add(tint.sl, flex: 1)
-	n_cell, n_edit := value_cell(mut st, mut tint.sl, tint.vl, tint.conv)
-	tint_row.add(n_cell, min: val_w)
-	tint_row.add(n_edit)
+	tint_row.add(tint.vf, min: val_w)
 	tint_row.add(n_reset)
 	mut hint := vgui.label(i18n.tr('Оттенок: минус - зеленее, плюс - пурпурнее'))
 	hint.font_size = 12

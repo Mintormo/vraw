@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "kon niet naar de prullenbak (code {0})",
  "Баланс белого сдвигом от «как снято»": "Witbalans als verschuiving vanaf «zoals opgenomen»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "De voorinstelling verschuift de witbalans van elke foto vanaf zijn «zoals opgenomen» evenveel als hij hier verschoven is. Zonder vinkje - zet dezelfde temperatuur en kleurtoon. Vereist de groep «Witbalans en kleur».",
- "Ввести значение: Enter - применить, Esc - отмена": "Waarde invoeren: Enter - toepassen, Esc - annuleren",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Beoordeling: klik - instellen, opnieuw klikken - wissen (toetsen 0..5)",
  "Гистограмма": "Histogram",
  "RAW: данные сенсора": "RAW: sensorgegevens",
  "Логарифмическая шкала": "Logaritmische schaal",

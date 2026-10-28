@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "tidak dapat dipindah ke tempat sampah (kode {0})",
  "Баланс белого сдвигом от «как снято»": "Keseimbangan putih sebagai pergeseran dari «sesuai pemotretan»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Preset menggeser keseimbangan putih setiap foto dari «sesuai pemotretan» miliknya sebanyak pergeseran di sini. Tanpa centang - memasang suhu dan rona yang sama. Memerlukan grup «Keseimbangan putih dan warna».",
- "Ввести значение: Enter - применить, Esc - отмена": "Masukkan nilai: Enter - terapkan, Esc - batal",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Rating: klik - atur, klik lagi - hapus (tombol 0..5)",
  "Гистограмма": "Histogram",
  "RAW: данные сенсора": "RAW: data sensor",
  "Логарифмическая шкала": "Skala logaritmik",

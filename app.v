@@ -100,6 +100,7 @@ mut:
 	strip         &vgui.ListBox  = unsafe { nil }
 	strip_bar     &vgui.HBox     = unsafe { nil }
 	strip_info    &vgui.Label    = unsafe { nil }
+	strip_rating  &vgui.Rating   = unsafe { nil } // звёзды открытого кадра над лентой (rating.v)
 	strip_toggle  &vgui.Button   = unsafe { nil }
 	strip_open    bool           = true
 	thumb_gen     int
@@ -888,25 +889,22 @@ fn reset_button(tip string) &vgui.Button {
 	return icon_button('rotate-ccw', tip)
 }
 
-// slider_row собирает стандартный ряд панели: подпись, ползунок, значение
-// справа от ползунка, кнопка ввода точного значения (numedit.v, conv -
-// перевод числа в поле в значение ползунка) и кнопка сброса этого
-// параметра. set_value сам вызывает on_change ползунка, поэтому кнопкам
+// slider_row собирает стандартный ряд панели: подпись, ползунок, поле
+// значения справа от ползунка (vgui.NumberField, value_field.v: щелчок -
+// ввод числа, протяжка - правка) и кнопка сброса этого параметра. set_value сам вызывает on_change ползунка, поэтому кнопкам
 // достаточно выставить значение. Ширины колонок подписи/значения общие на
 // всю панель - считаются в main через column_width, чтобы колонки рядов
 // были выровнены.
-fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vl &vgui.Label, def f32, lw f32, vw f32, conv NumConv) &vgui.HBox {
+fn slider_row(mut st State, lb &vgui.Label, mut sl vgui.Slider, vf &vgui.NumberField, def f32, lw f32, vw f32) &vgui.HBox {
 	mut b := reset_button(i18n.tr('Сбросить'))
 	b.on_click = fn [mut sl, def] () {
 		sl.set_value(def)
 	}
-	cell, eb := value_cell(mut st, mut sl, vl, conv)
 	mut row := vgui.create_hbox_fill()
 	row.set_spacing(6)
 	row.add(lb, min: lw)
 	row.add(sl, flex: 1)
-	row.add(cell, min: vw)
-	row.add(eb)
+	row.add(vf, min: vw) // значение: щелчок - ввод числа, протяжка - правка (value_field.v)
 	row.add(b)
 	st.slider_rows[voidptr(sl)] = row
 	return row
@@ -964,20 +962,20 @@ struct SliderCfg {
 	// live: пересчёт и по ходу перетаскивания (угол поворота - видно
 	// горизонт), запись в истории - по отпусканию
 	live bool
-	// Ввод числом (numedit.v): значение ползунка -> число в поле и
-	// обратно; nil - число и есть значение
+	// Число в поле значения (value_field.v): значение ползунка -> число
+	// в поле и обратно; nil - число и есть значение
 	to_num   fn (f32) f32 = unsafe { nil }
 	from_num fn (f32) f32 = unsafe { nil }
 }
 
-// EditSlider - собранный ползунок: подпись, ползунок, значение
+// EditSlider - собранный ползунок: подпись, ползунок, поле значения
 struct EditSlider {
 mut:
-	lb  &vgui.Label  = unsafe { nil }
-	sl  &vgui.Slider = unsafe { nil }
-	vl   &vgui.Label  = unsafe { nil }
+	lb   &vgui.Label       = unsafe { nil }
+	sl   &vgui.Slider      = unsafe { nil }
+	vf   &vgui.NumberField = unsafe { nil }
 	def  f32
-	conv NumConv // ввод точного значения (numedit.v)
+	conv NumConv // число в поле значения (value_field.v)
 }
 
 fn slider_text(cfg SliderCfg, v f32) string {
@@ -1003,18 +1001,26 @@ fn slider_hist_text(cfg SliderCfg, v f32) string {
 // Ползунок регистрируется в st.binds: откат выставит его по снимку.
 fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 	lb := vgui.label(cfg.label)
-	mut vl := value_label(slider_text(cfg, cfg.def))
 	mut sl := vgui.slider_horizontal(cfg.min, cfg.max, cfg.def)
 	if cfg.digits == 0 {
 		sl.step = 1
 	}
+	conv := NumConv{
+		digits: cfg.digits
+		to:     cfg.to_num
+		from:   cfg.from_num
+	}
+	text := fn [cfg] (v f32) string {
+		return slider_text(cfg, v)
+	}
+	mut vf := value_field(mut sl, conv, text)
 	// Колесо мыши - прокрутке панели: курсор, проезжая по ползунку, не
 	// должен менять настройку кадра
 	sl.wheel = false
 	key := if cfg.hname.len > 0 { cfg.hname } else { cfg.label }
-	sl.on_change = fn [mut st, mut vl, mut sl, cfg, key] (v f32) {
+	sl.on_change = fn [mut st, mut vf, mut sl, cfg, key, conv] (v f32) {
 		cfg.set(mut st.edit, v)
-		vl.text = slider_text(cfg, v)
+		show_value(mut vf, conv, v)
 		if sl.dragging && !st.suppress && cfg.drag_view != .off {
 			// Alt зажат - показ работы резкости сразу, по ходу драга
 			alt := vgui.key_mods() & vgui.sdl_kmod_alt != 0
@@ -1048,21 +1054,17 @@ fn edit_slider(mut st State, cfg SliderCfg) EditSlider {
 		get: cfg.get
 	}
 	return EditSlider{
-		lb:  lb
-		sl:  sl
-		vl:   vl
+		lb:   lb
+		sl:   sl
+		vf:   vf
 		def:  cfg.def
-		conv: NumConv{
-			digits: cfg.digits
-			to:     cfg.to_num
-			from:   cfg.from_num
-		}
+		conv: conv
 	}
 }
 
 // edit_row - стандартный ряд панели (slider_row) для ползунка edit_slider
 fn edit_row(mut st State, mut s EditSlider, lw f32, vw f32) &vgui.HBox {
-	return slider_row(mut st, s.lb, mut s.sl, s.vl, s.def, lw, vw, s.conv)
+	return slider_row(mut st, s.lb, mut s.sl, s.vf, s.def, lw, vw)
 }
 
 // Цвет холста до первого кадра (он скрыт заглушкой) и запасной фон
@@ -2491,9 +2493,22 @@ fn main() {
 		}
 	}
 	st.filter_cb = filter_cb
+	// Звёзды открытого кадра: щелчок ставит оценку (как клавиши 0..5 - на
+	// выделенные кадры или открытый), повторный по той же - снимает. Фокус
+	// звёзды не берут: стрелки листают кадры, цифры - пункты меню «Отбор»
+	mut strip_rating := vgui.rating()
+	strip_rating.star_size = 15
+	strip_rating.gap = 3
+	strip_rating.focusable = false
+	strip_rating.tooltip = i18n.tr('Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)')
+	strip_rating.on_change = fn [mut st] (v int) {
+		set_rating(mut st, v)
+	}
+	st.strip_rating = strip_rating
 	mut strip_bar := vgui.create_hbox_fill()
 	strip_bar.set_spacing(8)
 	strip_bar.add(strip_info, flex: 1)
+	strip_bar.add(strip_rating)
 	strip_bar.add(filter_cb)
 	strip_bar.add(strip_refresh)
 	strip_bar.add(strip_toggle)

@@ -665,18 +665,21 @@ fn build_spot_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	u.dust_cb = dust_cb
 	rows << SectionRow{dust_cb}
 	lb := vgui.label(i18n.tr('Контраст карты'))
-	mut vl := value_label('${int(st.dust_amt)}')
 	mut sl := vgui.slider_horizontal(0, 100, st.dust_amt)
 	sl.step = 1
 	sl.wheel = false
-	sl.on_change = fn [mut st, mut vl] (v f32) {
+	conv := NumConv{
+		digits: 0
+	}
+	mut vf := value_field(mut sl, conv, unsafe { nil })
+	sl.on_change = fn [mut st, mut vf, conv] (v f32) {
 		st.dust_amt = v
-		vl.text = '${int(v)}'
+		show_value(mut vf, conv, v)
 		if st.dust_show {
 			defer_fx(mut st, st.tone_fx)
 		}
 	}
-	rows << SectionRow{slider_row(mut st, lb, mut sl, vl, 50, lbl_w, val_w, NumConv{ digits: 0 })}
+	rows << SectionRow{slider_row(mut st, lb, mut sl, vf, 50, lbl_w, val_w)}
 
 	mut hint := vgui.label(i18n.tr('Щелчок по снимку - пятно, источник ищется сам'))
 	hint.font_size = 12

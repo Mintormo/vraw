@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "nu s-a putut muta în coș (cod {0})",
  "Баланс белого сдвигом от «как снято»": "Balans de alb ca deplasare de la «ca la fotografiere»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Presetarea deplasează balansul de alb al fiecărei fotografii de la propriul «ca la fotografiere» cu cât este deplasat aici. Nebifat - setează aceeași temperatură și nuanță. Necesită grupul «Balans de alb și culoare».",
- "Ввести значение: Enter - применить, Esc - отмена": "Introduceți valoarea: Enter - aplică, Esc - anulează",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Evaluare: clic - setează, alt clic - elimină (tastele 0..5)",
  "Гистограмма": "Histogramă",
  "RAW: данные сенсора": "RAW: datele senzorului",
  "Логарифмическая шкала": "Scară logaritmică",

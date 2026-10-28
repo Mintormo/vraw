@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "nelze přesunout do koše (kód {0})",
  "Баланс белого сдвигом от «как снято»": "Vyvážení bílé jako posun od «jak bylo vyfoceno»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Předvolba posune vyvážení bílé každého snímku od jeho «jak bylo vyfoceno» o tolik, o kolik je posunuto zde. Bez zaškrtnutí nastaví stejnou teplotu a odstín. Vyžaduje skupinu «Vyvážení bílé a barva».",
- "Ввести значение: Enter - применить, Esc - отмена": "Zadat hodnotu: Enter - použít, Esc - zrušit",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Hodnocení: kliknutí - nastavit, opakované - zrušit (klávesy 0..5)",
  "Гистограмма": "Histogram",
  "RAW: данные сенсора": "RAW: data senzoru",
  "Логарифмическая шкала": "Logaritmická stupnice",

@@ -1695,24 +1695,27 @@ fn brush_slider(mut st State, label string, which int, lbl_w f32, val_w f32) &vg
 	def := [f32(35), 50, 100][which]
 	cur := [st.brush_size, st.brush_feather, st.brush_flow][which]
 	lb := vgui.label(label)
-	mut vl := value_label('${int(cur)}')
 	mut sl := vgui.slider_horizontal(if which == 1 { f32(0) } else { f32(1) }, 100, cur)
 	sl.step = 1
 	sl.wheel = false
-	sl.on_change = fn [mut st, mut vl, which] (v f32) {
+	conv := NumConv{
+		digits: 0
+	}
+	mut vf := value_field(mut sl, conv, unsafe { nil })
+	sl.on_change = fn [mut st, mut vf, which, conv] (v f32) {
 		match which {
 			0 { st.brush_size = v }
 			1 { st.brush_feather = v }
 			else { st.brush_flow = v }
 		}
-		vl.text = '${int(v)}'
+		show_value(mut vf, conv, v)
 		mask_redraw(st) // круг кисти
 	}
 	if !isnil(st.mask_ui) {
 		mut u := st.mask_ui
 		u.brush_sl << sl
 	}
-	return slider_row(mut st, lb, mut sl, vl, def, lbl_w, val_w, NumConv{ digits: 0 })
+	return slider_row(mut st, lb, mut sl, vf, def, lbl_w, val_w)
 }
 
 struct MaskSliderSpec {

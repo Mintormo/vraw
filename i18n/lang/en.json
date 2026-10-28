@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "could not move to trash (code {0})",
  "Баланс белого сдвигом от «как снято»": "White balance as a shift from «as shot»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "The preset shifts each photo's white balance from its own «as shot» by the same amount as it is shifted here. Unchecked - it sets the same temperature and tint. Requires the «White balance and color» group.",
- "Ввести значение: Enter - применить, Esc - отмена": "Enter a value: Enter - apply, Esc - cancel",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Rating: click - set, click again - clear (keys 0..5)",
  "Гистограмма": "Histogram",
  "RAW: данные сенсора": "RAW: sensor data",
  "Логарифмическая шкала": "Logarithmic scale",

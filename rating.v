@@ -12,7 +12,6 @@ module main
 // кадры фильтра, st.shown - номера кадров по строкам. Индексы строк
 // ListBox и кадров st.frames поэтому различаются: row_of / frame_of_row.
 import os
-import math
 import vgui
 import i18n
 
@@ -212,24 +211,6 @@ fn mark_text(m Mark) string {
 	return parts.join(', ')
 }
 
-// fill_star - залитая пятиконечная звезда с центром (cx, cy) и внешним
-// радиусом r: десять треугольников от центра
-fn fill_star(mut ctx vgui.RenderContext, cx f32, cy f32, r f32, c vgui.Color) {
-	ri := r * 0.45
-	mut xs := []f32{len: 10}
-	mut ys := []f32{len: 10}
-	for k in 0 .. 10 {
-		a := f32(k) * f32(3.14159265) / 5 - f32(3.14159265) / 2
-		rr := if k % 2 == 0 { r } else { ri }
-		xs[k] = cx + rr * math.cosf(a)
-		ys[k] = cy + rr * math.sinf(a)
-	}
-	for k in 0 .. 10 {
-		n := (k + 1) % 10
-		ctx.fill_triangle(cx, cy, xs[k], ys[k], xs[n], ys[n], c)
-	}
-}
-
 // draw_thumb_marks - пометка поверх миниатюры (on_overlay её холста, в
 // экранных координатах): отклонённый кадр притушен, флажок - слева
 // вверху, звёзды - внизу по центру картинки
@@ -267,8 +248,9 @@ fn draw_thumb_marks(mut ctx vgui.RenderContext, cv &vgui.Canvas, m Mark) {
 		for k in 0 .. m.rating {
 			cx := bx + step * (f32(k) + 0.5)
 			cy := by + s * 1.15
-			fill_star(mut ctx, cx, cy, s * 0.95, star_ring)
-			fill_star(mut ctx, cx, cy, s * 0.8, star_color)
+			// Звезда - примитив vgui (RenderContext.fill_star): тёмная под светлой - обводка
+			ctx.fill_star(cx, cy, s * 0.95, star_ring)
+			ctx.fill_star(cx, cy, s * 0.8, star_color)
 		}
 	}
 }

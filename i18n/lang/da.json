@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "kunne ikke flyttes til papirkurven (kode {0})",
  "Баланс белого сдвигом от «как снято»": "Hvidbalance som forskydning fra «som optaget»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Forudindstillingen forskyder hvert billedes hvidbalance fra dets «som optaget» lige så meget, som den er forskudt her. Uden flueben - sætter samme temperatur og nuance. Kræver gruppen «Hvidbalance og farve».",
- "Ввести значение: Enter - применить, Esc - отмена": "Indtast værdi: Enter - anvend, Esc - annuller",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Bedømmelse: klik - sæt, klik igen - fjern (taster 0..5)",
  "Гистограмма": "Histogram",
  "RAW: данные сенсора": "RAW: sensordata",
  "Логарифмическая шкала": "Logaritmisk skala",

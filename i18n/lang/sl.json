@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "ni mogoče premakniti v koš (koda {0})",
  "Баланс белого сдвигом от «как снято»": "Ravnovesje beline kot zamik od «kot posneto»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Prednastavitev zamakne ravnovesje beline vsake fotografije od njenega «kot posneto» za toliko, kolikor je zamaknjeno tukaj. Brez kljukice - nastavi enako temperaturo in odtenek. Potrebna je skupina «Ravnovesje beline in barva».",
- "Ввести значение: Enter - применить, Esc - отмена": "Vnesi vrednost: Enter - uporabi, Esc - prekliči",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Ocena: klik - nastavi, ponovni klik - odstrani (tipke 0..5)",
  "Гистограмма": "Histogram",
  "RAW: данные сенсора": "RAW: podatki senzorja",
  "Логарифмическая шкала": "Logaritemska lestvica",

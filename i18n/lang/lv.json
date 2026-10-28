@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "neizdevās pārvietot uz atkritni (kods {0})",
  "Баланс белого сдвигом от «как снято»": "Baltā balanss kā nobīde no «kā uzņemts»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Sagatave nobīda katra kadra baltā balansu no tā «kā uzņemts» tikpat, cik tas ir nobīdīts šeit. Bez atzīmes - iestata to pašu temperatūru un nokrāsu. Nepieciešama grupa «Baltā balanss un krāsa».",
- "Ввести значение: Enter - применить, Esc - отмена": "Ievadīt vērtību: Enter - lietot, Esc - atcelt",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Vērtējums: klikšķis - iestatīt, atkārtots - noņemt (taustiņi 0..5)",
  "Гистограмма": "Histogramma",
  "RAW: данные сенсора": "RAW: sensora dati",
  "Логарифмическая шкала": "Logaritmiska skala",

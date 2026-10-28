@@ -660,7 +660,7 @@
  "не удалось переместить в корзину (код {0})": "konnte nicht in den Papierkorb verschoben werden (Code {0})",
  "Баланс белого сдвигом от «как снято»": "Weißabgleich als Verschiebung von «wie aufgenommen»",
  "Пресет сдвинет баланс белого каждого кадра от его «как снято» на столько же, на сколько он сдвинут здесь. Без флажка - ставит те же температуру и оттенок. Нужна группа «Баланс белого и цвет».": "Die Vorgabe verschiebt den Weißabgleich jedes Fotos von seinem «wie aufgenommen» um so viel, wie er hier verschoben ist. Ohne Häkchen - setzt dieselbe Temperatur und denselben Farbton. Erfordert die Gruppe «Weißabgleich und Farbe».",
- "Ввести значение: Enter - применить, Esc - отмена": "Wert eingeben: Enter - übernehmen, Esc - abbrechen",
+ "Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)": "Bewertung: Klick - setzen, erneuter Klick - entfernen (Tasten 0..5)",
  "Гистограмма": "Histogramm",
  "RAW: данные сенсора": "RAW: Sensordaten",
  "Логарифмическая шкала": "Logarithmische Skala",
