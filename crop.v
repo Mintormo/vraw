@@ -865,14 +865,21 @@ fn crop_overlay(mut st State, mut ctx vgui.RenderContext) {
 	}
 }
 
-// box_pixels - пиксели RGBA холста w x h внутри рамки (гистограмма в
-// режиме кадрирования)
-fn box_pixels(st &State, pix []u8, w int, h int) []u8 {
+// box_px - рамка в целых пикселях кадра w x h, прижатая к его краям
+// (x1 <= x0 или y1 <= y0 - пустая)
+fn box_px(st &State, w int, h int) (int, int, int, int) {
 	b := st.edit.geom.box_of(w, h)
 	x0 := int(math.max(0, math.min(f64(w), b.x0)))
 	x1 := int(math.max(0, math.min(f64(w), b.x1)))
 	y0 := int(math.max(0, math.min(f64(h), b.y0)))
 	y1 := int(math.max(0, math.min(f64(h), b.y1)))
+	return x0, y0, x1, y1
+}
+
+// box_pixels - пиксели RGBA холста w x h внутри рамки (гистограмма в
+// режиме кадрирования)
+fn box_pixels(st &State, pix []u8, w int, h int) []u8 {
+	x0, y0, x1, y1 := box_px(st, w, h)
 	if x1 <= x0 || y1 <= y0 || pix.len < w * h * 4 {
 		return pix
 	}

@@ -4,6 +4,8 @@ module main
 // результата и сырья, шкалы высоты, зоны эквалайзера, подсветка клипа
 // по сырью (clipping.v)
 
+import pipeline
+
 fn test_raw_col_lut() {
 	lut := raw_col_lut
 	assert lut[0] == 0
@@ -34,10 +36,31 @@ fn test_count_result() {
 fn test_count_raw() {
 	// два пикселя RGB u16, считается первый: R выбит, G на ступень ниже
 	lin := [u16(65535), u16(raw_clip_lvl / 2), 0, 1, 1, 1]
-	h := count_raw(lin)
+	h := count_raw(lin, 2, 0, 0, 2, 1)
 	assert h.r[255] == 1
 	assert h.b[0] == 1
 	assert h.g[raw_col_lut[raw_clip_lvl / 2]] == 1
+}
+
+// RAW-счётчики - по сырью превью после геометрии (glin) и в режиме
+// кадрирования только по рамке: выбитый пиксель вне рамки не считается,
+// треугольник пересветов в RAW не горит (кэш - по рамке)
+fn test_raw_bins_by_crop() {
+	mut st := &State{}
+	st.edit = neutral_edit()
+	st.gw = 4
+	st.gh = 2
+	st.glin = []u16{len: 4 * 2 * 3, init: 1000}
+	st.glin[(1 * 4 + 2) * 3] = 65535 // x = 2, y = 1: R выбит
+	assert ensure_raw_bins(mut st)
+	assert st.hv.raw.r[255] == 1
+	st.crop_mode = true
+	st.edit.geom = st.edit.geom.with_box(pipeline.CropBox{0, 0, 2, 2}, 4, 2)
+	assert ensure_raw_bins(mut st)
+	assert st.hv.raw.r[255] == 0
+	assert st.hv.raw.r[raw_col_lut[1000]] == 2 // по пикселю из строки
+	st.glin = []u16{}
+	assert !ensure_raw_bins(mut st)
 }
 
 fn test_hist_height() {

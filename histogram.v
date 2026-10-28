@@ -3,10 +3,11 @@ module main
 // Гистограмма правой панели: холст 256×100 (колонка = бин), растянутый на
 // виджет. Виды («Вид - Гистограмма», запоминаются в настройках):
 //   - по результату (по умолчанию): каналы R, G, B 8-битного превью;
-//   - RAW: по сырью прямо из LibRaw (dev_linear - до коррекции объектива,
-//     шумодава, баланса белого и тона), ось - ступени EV от уровня клипа:
-//     правая колонка - выбитые каналы (данных там нет, ползунками не
-//     вытянуть), слабые линии сетки - через 1 EV;
+//   - RAW: по сырью превью (glin - после объектива, шумодава и геометрии,
+//     до баланса белого и тона) в пределах кадра: обрезка и поворот
+//     учтены, в режиме кадрирования - только рамка; ось - ступени EV от
+//     уровня клипа: правая колонка - выбитые каналы (данных там нет,
+//     ползунками не вытянуть), слабые линии сетки - через 1 EV;
 //   - логарифмическая шкала по высоте: видны и редкие пиксели (несколько
 //     выбитых точек, глубокие тени);
 //   - линия яркости (люма BT.709) поверх каналов.
@@ -16,8 +17,8 @@ module main
 // перетаскивание вбок двигает этот ползунок эквалайзера (живой пересчёт,
 // запись в историю по отпусканию).
 // Треугольники клипа - clipping.v; в RAW правый - выбитые каналы сырья, и
-// подсветка пересветов на превью - по сырью (glin), левый - провалы
-// результата, как всегда.
+// подсветка пересветов на превью - по тому же сырью (glin), левый -
+// провалы результата, как всегда.
 
 import math
 import vgui
@@ -36,14 +37,24 @@ fn (h &HistBins) ok() bool {
 	return h.r.len == 256 && h.g.len == 256 && h.b.len == 256 && h.y.len == 256
 }
 
+// RawBinsKey - от чего зависят RAW-счётчики: сырьё превью после геометрии
+// (его ключ - GeomKey: номер сырья, геометрия, режим кадрирования) и
+// область счёта в нём
+struct RawBinsKey {
+	geom GeomKey
+	n    int
+	x0   int
+	y0   int
+	x1   int
+	y1   int
+}
+
 // HistView - состояние гистограммы на экране (State.hv)
 struct HistView {
 mut:
 	res   HistBins // по результату (последний render_histogram)
-	raw   HistBins // по сырью (кэш: пересчёт при смене dev_linear)
-	raw_k voidptr  // ключ кэша - данные dev_linear
-	raw_n int
-	raw_g int // и номер файла (адрес буфера может достаться новому кадру)
+	raw   HistBins   // по сырью превью (кэш: пересчёт при смене glin или рамки)
+	raw_k RawBinsKey // ключ кэша
 	marks bool // на холсте нарисованы треугольники клипа
 	zone  int = -1 // зона под курсором (-1 - нет)
 	// Перетаскивание зоны: ползунок эквалайзера, откуда начали (колонка
@@ -119,9 +130,10 @@ fn count_result(pixels []u8) HistBins {
 	return h
 }
 
-// count_raw - счётчики по линейному 16-битному RGB (3 канала), каждый
-// второй пиксель, колонки - raw_col_lut
-fn count_raw(lin []u16) HistBins {
+// count_raw - счётчики по линейному 16-битному RGB (3 канала) кадра
+// шириной w в области x0..x1, y0..y1, каждый второй пиксель строки,
+// колонки - raw_col_lut
+fn count_raw(lin []u16, w int, x0 int, y0 int, x1 int, y1 int) HistBins {
 	mut h := HistBins{
 		r: []u32{len: 256}
 		g: []u32{len: 256}
@@ -129,42 +141,54 @@ fn count_raw(lin []u16) HistBins {
 		y: []u32{len: 256}
 	}
 	lut := raw_col_lut
+	if x1 <= x0 || y1 <= y0 || lin.len < w * y1 * 3 {
+		return h
+	}
 	unsafe {
-		mut s := &u16(lin.data)
 		pr := &u32(h.r.data)
 		pg := &u32(h.g.data)
 		pb := &u32(h.b.data)
 		py := &u32(h.y.data)
 		pl := &u8(lut.data)
-		for _ in 0 .. lin.len / 6 {
-			r := int(s[0])
-			g := int(s[1])
-			b := int(s[2])
-			pr[pl[r]]++
-			pg[pl[g]]++
-			pb[pl[b]]++
-			py[pl[(54 * r + 183 * g + 19 * b) >> 8]]++
-			s += 6
+		for y in y0 .. y1 {
+			mut s := &u16(lin.data) + (y * w + x0) * 3
+			for _ in 0 .. (x1 - x0 + 1) / 2 {
+				r := int(s[0])
+				g := int(s[1])
+				b := int(s[2])
+				pr[pl[r]]++
+				pg[pl[g]]++
+				pb[pl[b]]++
+				py[pl[(54 * r + 183 * g + 19 * b) >> 8]]++
+				s += 6
+			}
 		}
 	}
 	return h
 }
 
-// ensure_raw_bins - RAW-счётчики открытого кадра (пересчёт, только если
-// сменилось сырьё); false - сырья нет
+// ensure_raw_bins - RAW-счётчики открытого кадра по сырью превью после
+// геометрии (glin: обрезка и поворот уже учтены; в режиме кадрирования
+// glin - весь кадр, счёт - по рамке, как у результата); пересчёт - только
+// при смене сырья, геометрии или рамки; false - сырья нет
 fn ensure_raw_bins(mut st State) bool {
-	if st.dev_linear.len < 3 {
+	if st.glin.len < 3 || st.glin.len != st.gw * st.gh * 3 {
 		return false
 	}
-	k := voidptr(st.dev_linear.data)
-	if st.hv.raw.ok() && st.hv.raw_k == k && st.hv.raw_n == st.dev_linear.len
-		&& st.hv.raw_g == st.file_gen {
+	x0, y0, x1, y1 := if st.crop_mode { box_px(st, st.gw, st.gh) } else { 0, 0, st.gw, st.gh }
+	key := RawBinsKey{
+		geom: st.geom_key
+		n:    st.glin.len
+		x0:   x0
+		y0:   y0
+		x1:   x1
+		y1:   y1
+	}
+	if st.hv.raw.ok() && st.hv.raw_k == key {
 		return true
 	}
-	st.hv.raw = count_raw(st.dev_linear)
-	st.hv.raw_k = k
-	st.hv.raw_n = st.dev_linear.len
-	st.hv.raw_g = st.file_gen
+	st.hv.raw = count_raw(st.glin, st.gw, x0, y0, x1, y1)
+	st.hv.raw_k = key
 	return true
 }
 
