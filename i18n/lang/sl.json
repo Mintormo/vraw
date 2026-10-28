@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Izenačevalnik: {0} {1} EV - povlecite levo ali desno",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Pojdite nad območje - njegov drsnik izenačevalnika, povlecite vstran - spreminjajte. Trikotniki: utopljeni deli (levo) in pregoreli (desno) - klik jih pokaže na posnetku, J - oboje",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: podatki senzorja, os - koraki EV do porezanja. Desni rob - pregoreli kanali: teh podatkov ni mogoče obnoviti. Desni trikotnik jih pokaže na posnetku",
- "Окно и полноэкранный режим": "Okno in celozaslonski način"
+ "Окно и полноэкранный режим": "Okno in celozaslonski način",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Pregoreli deli: {0} % kadra - klik jih prikaže na fotografiji",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Utopljeni deli: {0} % kadra - klik jih prikaže na fotografiji",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Porezano v surovih podatkih: {0} % kadra - klik prikaže na fotografiji"
 }

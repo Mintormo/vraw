@@ -47,7 +47,7 @@ fn test_clip_hit_and_marks() {
 	// Есть пересвет, показ провалов включён: правый - красный, левый -
 	// серый с белой обводкой
 	dp := make_palette(vgui.dark_theme())
-	draw_clip_marks(mut hist, true, false, false, true, dp)
+	draw_clip_marks(mut hist, 0.5, 0, false, true, dp)
 	at := fn [hist] (x int, y int) []u8 {
 		k := (y * 256 + x) * 4
 		return hist.pixels[k..k + 3]
@@ -59,6 +59,33 @@ fn test_clip_hit_and_marks() {
 	assert at(255 - clip_tri_pad, clip_tri_pad) == [clip_hi_color.r, clip_hi_color.g,
 		clip_hi_color.b]
 	assert at(128, 50) == [u8(16), 16, 18]
+}
+
+// Яркость треугольника по доле кадра: нет клипа - серый, несколько
+// пикселей - тусклый (clip_dim_mix цвета), от clip_full_frac - полный,
+// между - монотонно
+fn test_clip_tint() {
+	idle := vgui.Color{95, 95, 100, 255}
+	c := clip_hi_color
+	assert clip_tint(c, idle, 0) == idle
+	assert clip_tint(c, idle, clip_full_frac) == c
+	assert clip_tint(c, idle, 0.3) == c
+	dim := clip_tint(c, idle, 1e-7)
+	assert dim == clip_tint(c, idle, clip_dim_frac)
+	assert dim != idle && dim != c
+	assert dim.r == u8(95 + int(f64(255 - 95) * clip_dim_mix + 0.5))
+	mid := clip_tint(c, idle, 1e-3)
+	assert dim.r < mid.r && mid.r < c.r
+	assert dim.g > mid.g && mid.g > c.g
+}
+
+// Проценты в подсказке: значащие цифры, крошечная доля - «< 0.001»
+fn test_fmt_clip_pct() {
+	assert fmt_clip_pct(0) == '0'
+	assert fmt_clip_pct(1e-6) == '< 0.001'
+	assert fmt_clip_pct(1.2e-4) == '0.012'
+	assert fmt_clip_pct(0.0035) == '0.35'
+	assert fmt_clip_pct(0.125) == '12.5'
 }
 
 // Цвета гистограммы под тему: в тёмной - прежние (почти чёрный фон,

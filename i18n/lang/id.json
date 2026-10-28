@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekualiser: {0} {1} EV - seret ke kiri atau kanan",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Arahkan ke zona - penggeser ekualisernya, seret ke samping - ubah. Segitiga: bayangan tenggelam (kiri) dan sorotan terbakar (kanan) - klik untuk menampilkannya di foto, J - keduanya",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data sensor, sumbu - langkah EV hingga terpotong. Tepi kanan - kanal terpotong: data ini tidak dapat dipulihkan. Segitiga kanan menunjukkannya pada foto",
- "Окно и полноэкранный режим": "Jendela dan layar penuh"
+ "Окно и полноэкранный режим": "Jendela dan layar penuh",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Area terbakar: {0}% bingkai - klik untuk menampilkannya di foto",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Area tenggelam: {0}% bingkai - klik untuk menampilkannya di foto",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Terpotong di data RAW: {0}% bingkai - klik untuk menampilkan di foto"
 }

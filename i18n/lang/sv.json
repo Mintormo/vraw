@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Utjämnare: {0} {1} EV - dra åt vänster eller höger",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Håll över en zon - dess utjämnarreglage, dra åt sidan - ändra. Trianglar: urfrätta skuggor (vänster) och högdagrar (höger) - klick visar dem i fotot, J - båda",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensordata, axeln - EV-steg till klippning. Högerkanten - urfrätta kanaler: denna data går inte att återställa. Den högra triangeln visar dem på bilden",
- "Окно и полноэкранный режим": "Fönster och helskärm"
+ "Окно и полноэкранный режим": "Fönster och helskärm",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Urfrätta högdagrar: {0} % av bilden - klicka för att visa dem på fotot",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Igenslammade skuggor: {0} % av bilden - klicka för att visa dem på fotot",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Klippt i rådata: {0} % av bilden - klicka för att visa på fotot"
 }

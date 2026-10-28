@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Égaliseur : {0} {1} EV - faites glisser à gauche ou à droite",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Survolez une zone - son curseur d’égaliseur, faites glisser de côté - modifiez-le. Triangles : ombres bouchées (à gauche) et hautes lumières brûlées (à droite) - un clic les montre sur la photo, J - les deux",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW : données du capteur, axe - IL jusqu’à l’écrêtage. Bord droit - canaux écrêtés : ces données sont irrécupérables. Le triangle de droite les montre sur la photo",
- "Окно и полноэкранный режим": "Fenêtre et plein écran"
+ "Окно и полноэкранный режим": "Fenêtre et plein écran",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Hautes lumières écrêtées : {0} % du cadre - cliquez pour les afficher sur la photo",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Ombres écrêtées : {0} % du cadre - cliquez pour les afficher sur la photo",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Écrêté dans les données RAW : {0} % du cadre - cliquez pour afficher sur la photo"
 }

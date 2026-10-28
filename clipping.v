@@ -9,8 +9,12 @@ module main
 // треугольниками в верхних углах гистограммы: левый - провалы, правый -
 // пересветы. Треугольник горит цветом, когда в кадре есть клип этого края
 // (по гистограмме результата), и обведён (белым в тёмной теме, цветом
-// текста в светлой), когда показ включён. Серый «нет клипа» и обводка -
-// из палитры темы (Palette.clip_idle, clip_ring).
+// текста в светлой), когда показ включён. Яркость - по доле кадра на
+// краю (clip_tint): несколько пикселей (блик, лампа) - тусклый цвет, от
+// clip_full_frac кадра - полный; точная доля - в подсказке треугольника
+// (histogram.v). Серый «нет клипа» и обводка - из палитры темы
+// (Palette.clip_idle, clip_ring).
+import math
 import vgui
 
 const clip_hi_color = vgui.Color{255, 40, 40, 255}
@@ -21,6 +25,12 @@ const clip_tri_w = 14
 const clip_tri_h = 12
 const clip_tri_pad = 3
 const clip_hit = 24
+// Яркость треугольника: доля кадра на краю от clip_dim_frac и меньше -
+// clip_dim_mix цвета клипа (остальное - серый «нет клипа»), от
+// clip_full_frac (1 %) - полный цвет, между - по логарифму доли
+const clip_dim_frac = 1e-5
+const clip_full_frac = 1e-2
+const clip_dim_mix = 0.4
 
 // mark_clipping - подсветка клипа в RGBA-буфере результата: канал в 255 -
 // красный (пересвет), иначе канал в 0 - синий (провал)
@@ -77,13 +87,27 @@ fn mark_clipping_src(mut pix []u8, hi bool, lo bool, raw &u16) {
 }
 
 // draw_clip_marks - треугольники в углах гистограммы: цвет - есть клип
-// (hi_seen/lo_seen), обводка - показ включён
-fn draw_clip_marks(mut hist vgui.Canvas, hi_seen bool, lo_seen bool, hi_on bool, lo_on bool, p Palette) {
-	draw_clip_tri(mut hist, false, if lo_seen { clip_lo_color } else { p.clip_idle }, lo_on,
+// (hi/lo - доля кадра на краю, 0 - нет; яркость - clip_tint), обводка -
+// показ включён
+fn draw_clip_marks(mut hist vgui.Canvas, hi f64, lo f64, hi_on bool, lo_on bool, p Palette) {
+	draw_clip_tri(mut hist, false, clip_tint(clip_lo_color, p.clip_idle, lo), lo_on,
 		p.clip_ring)
-	draw_clip_tri(mut hist, true, if hi_seen { clip_hi_color } else { p.clip_idle }, hi_on,
+	draw_clip_tri(mut hist, true, clip_tint(clip_hi_color, p.clip_idle, hi), hi_on,
 		p.clip_ring)
 	hist.mark_dirty()
+}
+
+// clip_tint - цвет треугольника по доле кадра f на краю: 0 - idle, хоть
+// что-то - не меньше clip_dim_mix цвета c, от clip_full_frac - сам c
+fn clip_tint(c vgui.Color, idle vgui.Color, f f64) vgui.Color {
+	if f <= 0 {
+		return idle
+	}
+	t := math.clamp((math.log10(f) - math.log10(clip_dim_frac)) / (math.log10(clip_full_frac) -
+		math.log10(clip_dim_frac)), 0, 1)
+	k := clip_dim_mix + (1 - clip_dim_mix) * t
+	return vgui.Color{u8(math.round(f64(idle.r) + (f64(c.r) - f64(idle.r)) * k)), u8(math.round(
+		f64(idle.g) + (f64(c.g) - f64(idle.g)) * k)), u8(math.round(f64(idle.b) + (f64(c.b) - f64(idle.b)) * k)), 255}
 }
 
 // draw_clip_tri - прямоугольный треугольник прямым углом в верхний угол

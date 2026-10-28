@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Bộ cân bằng: {0} {1} EV - kéo sang trái hoặc phải",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Di chuột lên một vùng - thanh trượt bộ cân bằng của nó, kéo ngang - thay đổi. Tam giác: vùng tối mất chi tiết (trái) và vùng cháy sáng (phải) - nhấp để hiện trên ảnh, J - cả hai",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: dữ liệu cảm biến, trục - các bước EV tới ngưỡng cháy. Mép phải - kênh bị cháy: không thể khôi phục dữ liệu này. Tam giác bên phải hiển thị chúng trên ảnh",
- "Окно и полноэкранный режим": "Cửa sổ và toàn màn hình"
+ "Окно и полноэкранный режим": "Cửa sổ và toàn màn hình",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Vùng cháy sáng: {0}% khung hình - nhấp để hiện trên ảnh",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Vùng mất chi tiết tối: {0}% khung hình - nhấp để hiện trên ảnh",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Bị cắt trong dữ liệu RAW: {0}% khung hình - nhấp để hiện trên ảnh"
 }

@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalaizeris: {0} {1} EV - tempkite į kairę arba į dešinę",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Užveskite ant zonos - jos ekvalaizerio slankiklis, tempkite į šoną - keiskite. Trikampiai: užtamsėjusios vietos (kairėje) ir perdegusios (dešinėje) - spustelėjus jos parodomos nuotraukoje, J - abi",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: jutiklio duomenys, ašis - EV žingsniai iki nukirtimo. Dešinysis kraštas - perdegę kanalai: šių duomenų atkurti negalima. Dešinysis trikampis parodo juos nuotraukoje",
- "Окно и полноэкранный режим": "Langas ir visas ekranas"
+ "Окно и полноэкранный режим": "Langas ir visas ekranas",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Perdegusios vietos: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Užtamsėjusios vietos: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Nukirpta neapdorotuose duomenyse: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje"
 }

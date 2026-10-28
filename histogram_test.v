@@ -40,6 +40,24 @@ fn test_count_raw() {
 	assert h.r[255] == 1
 	assert h.b[0] == 1
 	assert h.g[raw_col_lut[raw_clip_lvl / 2]] == 1
+	assert h.n == 1 && h.hi == 1 && h.lo == 0
+	assert h.frac(h.hi) == 1.0
+}
+
+// Доли пересвета и провала результата - по пикселям (не по каналам):
+// пиксель с двумя выбитыми каналами - один; считается каждый второй
+fn test_count_result_clip() {
+	mut pix := []u8{}
+	for v in [[255, 255, 10], [7, 7, 7], [0, 50, 50], [7, 7, 7], [9, 9, 9], [255, 255, 255],
+		[1, 2, 3], [255, 0, 0]] {
+		pix << [u8(v[0]), u8(v[1]), u8(v[2]), 255]
+	}
+	h := count_result(pix)
+	assert h.n == 4
+	assert h.hi == 1 // [255, 255, 10]; [255, 255, 255] - нечётный, не считан
+	assert h.lo == 1 // [0, 50, 50]
+	assert h.frac(h.hi) == 0.25
+	assert HistBins{}.frac(0) == 0
 }
 
 // RAW-счётчики - по сырью превью после геометрии (glin) и в режиме

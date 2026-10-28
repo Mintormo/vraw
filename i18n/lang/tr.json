@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekolayzer: {0} {1} EV - sola veya sağa sürükleyin",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Bir bölgenin üzerine gelin - ekolayzer kaydırıcısı, yana sürükleyin - değiştirin. Üçgenler: gölge kırpması (solda) ve parlak alan kırpması (sağda) - tıklama bunları fotoğrafta gösterir, J - ikisi",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: sensör verisi, eksen - kırpmaya kadar EV adımları. Sağ kenar - kırpılmış kanallar: bu veri kurtarılamaz. Sağ üçgen onları fotoğrafta gösterir",
- "Окно и полноэкранный режим": "Pencere ve tam ekran"
+ "Окно и полноэкранный режим": "Pencere ve tam ekran",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Patlamalar: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Çökmeler: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Ham veride kırpılmış: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın"
 }

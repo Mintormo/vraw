@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ekvalizér: {0} {1} EV - táhněte doleva nebo doprava",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Najeďte na zónu - její posuvník ekvalizéru, táhněte do strany - měňte. Trojúhelníky: podexpozice (vlevo) a přepaly (vpravo) - klepnutí je ukáže na snímku, J - obojí",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: data senzoru, osa - stupně EV do ořezu. Pravý okraj - přepálené kanály: tato data nelze vytáhnout. Pravý trojúhelník je ukáže na snímku",
- "Окно и полноэкранный режим": "Okno a celá obrazovka"
+ "Окно и полноэкранный режим": "Okno a celá obrazovka",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Přepaly: {0} % snímku - kliknutím je zobrazíte na fotografii",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Podexpozice: {0} % snímku - kliknutím je zobrazíte na fotografii",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Ořezáno v surových datech: {0} % snímku - kliknutím zobrazíte na fotografii"
 }

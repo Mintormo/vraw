@@ -24,13 +24,23 @@ import math
 import vgui
 import i18n
 
-// HistBins - счётчики по 256 колонкам: каналы и люма. Пусто - нет кадра
+// HistBins - счётчики по 256 колонкам: каналы и люма; n - сколько
+// пикселей посчитано, hi/lo - из них с хоть одним каналом на краю
+// (пересвет / провал; у сырья lo не считается). Пусто - нет кадра
 struct HistBins {
 mut:
-	r []u32
-	g []u32
-	b []u32
-	y []u32
+	r  []u32
+	g  []u32
+	b  []u32
+	y  []u32
+	n  u32
+	hi u32
+	lo u32
+}
+
+// frac - доля посчитанных пикселей (0..1); 0 - нет пикселей
+fn (h &HistBins) frac(c u32) f64 {
+	return if h.n == 0 { 0 } else { f64(c) / f64(h.n) }
 }
 
 fn (h &HistBins) ok() bool {
@@ -124,9 +134,16 @@ fn count_result(pixels []u8) HistBins {
 			pg[s[1]]++
 			pb[s[2]]++
 			py[(54 * int(s[0]) + 183 * int(s[1]) + 19 * int(s[2])) >> 8]++
+			if s[0] == 255 || s[1] == 255 || s[2] == 255 {
+				h.hi++
+			}
+			if s[0] == 0 || s[1] == 0 || s[2] == 0 {
+				h.lo++
+			}
 			s += 8
 		}
 	}
+	h.n = u32(pixels.len / 8)
 	return h
 }
 
@@ -160,10 +177,14 @@ fn count_raw(lin []u16, w int, x0 int, y0 int, x1 int, y1 int) HistBins {
 				pg[pl[g]]++
 				pb[pl[b]]++
 				py[pl[(54 * r + 183 * g + 19 * b) >> 8]]++
+				if r >= raw_clip_lvl || g >= raw_clip_lvl || b >= raw_clip_lvl {
+					h.hi++
+				}
 				s += 6
 			}
 		}
 	}
+	h.n = u32((x1 - x0 + 1) / 2 * (y1 - y0))
 	return h
 }
 
@@ -346,20 +367,53 @@ fn clear_histogram(mut st State, mut hist vgui.Canvas) {
 }
 
 // show_clip_marks - треугольники клипа: правый - по показанному виду
-// (результат или сырьё), левый - провалы результата
+// (результат или сырьё), левый - провалы результата; яркость - по доле
+// кадра на краю (clip_fracs)
 fn show_clip_marks(mut st State, mut hist vgui.Canvas) {
 	if !st.hv.res.ok() {
 		return
 	}
-	res := st.hv.res
-	hi_seen := if hist_raw_on(mut st) {
-		st.hv.raw.r[255] + st.hv.raw.g[255] + st.hv.raw.b[255] > 0
-	} else {
-		res.r[255] + res.g[255] + res.b[255] > 0
-	}
-	lo_seen := res.r[0] + res.g[0] + res.b[0] > 0
-	draw_clip_marks(mut hist, hi_seen, lo_seen, st.clip_hi, st.clip_lo, st.pal)
+	hi, lo := clip_fracs(mut st)
+	draw_clip_marks(mut hist, hi, lo, st.clip_hi, st.clip_lo, st.pal)
 	st.hv.marks = true
+}
+
+// clip_fracs - доли кадра с пересветом (в RAW-виде - выбитое сырьё) и с
+// провалом (по результату)
+fn clip_fracs(mut st State) (f64, f64) {
+	res := st.hv.res
+	hi := if hist_raw_on(mut st) { st.hv.raw.frac(st.hv.raw.hi) } else { res.frac(res.hi) }
+	return hi, res.frac(res.lo)
+}
+
+// fmt_clip_pct - доля кадра в процентах для подсказки: «0», «< 0.001»,
+// «0.012», «0.35», «12.5» (значащие цифры, а не нули)
+fn fmt_clip_pct(f f64) string {
+	p := f * 100
+	return if p <= 0 {
+		'0'
+	} else if p < 0.001 {
+		'< 0.001'
+	} else if p < 0.1 {
+		'${p:.3f}'
+	} else if p < 10 {
+		'${p:.2f}'
+	} else {
+		'${p:.1f}'
+	}
+}
+
+// hist_clip_tip - подсказка треугольника (1 - правый, -1 - левый): какая
+// доля кадра на краю
+fn hist_clip_tip(mut st State, tri int) string {
+	hi, lo := clip_fracs(mut st)
+	return if tri < 0 {
+		i18n.trf('Провалы: {0} % кадра - щелчок показывает их на снимке', fmt_clip_pct(lo))
+	} else if hist_raw_on(mut st) {
+		i18n.trf('Выбито в сырье: {0} % кадра - щелчок показывает на снимке', fmt_clip_pct(hi))
+	} else {
+		i18n.trf('Пересветы: {0} % кадра - щелчок показывает их на снимке', fmt_clip_pct(hi))
+	}
 }
 
 // repaint_histogram - перерисовать показанную гистограмму без пересчёта
@@ -400,14 +454,18 @@ fn hist_zone_tip(st &State, z int) string {
 		fmt_signed(v, 2))
 }
 
-// set_hist_zone - зона под курсором (-1 - нет): подсветка и подсказка
-fn set_hist_zone(mut st State, z int) {
+// set_hist_zone - зона под курсором (-1 - нет): подсветка и подсказка;
+// tri - треугольник под курсором (clip_hit_test, 0 - нет): подсказка -
+// его доля кадра
+fn set_hist_zone(mut st State, z int, tri int) {
 	mut hist := st.hist_cv
 	if z != st.hv.zone {
 		st.hv.zone = z
 		repaint_histogram(mut st)
 	}
-	hist.tooltip = if hist_raw_on(mut st) {
+	hist.tooltip = if tri != 0 && st.hv.res.ok() {
+		hist_clip_tip(mut st, tri)
+	} else if hist_raw_on(mut st) {
 		hist_tip_raw()
 	} else if z >= 0 {
 		hist_zone_tip(st, z)
@@ -450,7 +508,7 @@ fn hist_input(mut st State, ev &vgui.CanvasInputEvent) {
 			st.hv.dx0 = ev.fx
 			st.hv.dv0 = sl.value
 			st.hv.moved = false
-			set_hist_zone(mut st, z)
+			set_hist_zone(mut st, z, 0)
 		}
 		.pointer_move {
 			if !st.hv.drag {
@@ -483,22 +541,19 @@ fn hist_input(mut st State, ev &vgui.CanvasInputEvent) {
 				}
 			}
 			z := if ev.in_image && frame && !raw { zone_of(ev.x) } else { -1 }
-			set_hist_zone(mut st, z)
+			set_hist_zone(mut st, z, 0)
 		}
 		.hover, .enter {
 			if st.hv.drag {
 				return
 			}
-			z := if frame && !raw && clip_hit_test(ev.x, ev.y, 256) == 0 {
-				zone_of(ev.x)
-			} else {
-				-1
-			}
-			set_hist_zone(mut st, z)
+			tri := clip_hit_test(ev.x, ev.y, 256)
+			z := if frame && !raw && tri == 0 { zone_of(ev.x) } else { -1 }
+			set_hist_zone(mut st, z, tri)
 		}
 		.leave {
 			if !st.hv.drag {
-				set_hist_zone(mut st, -1)
+				set_hist_zone(mut st, -1, 0)
 			}
 		}
 		else {}
@@ -515,7 +570,7 @@ fn set_hist_opt(mut st State, raw_changed bool) {
 		repaint_histogram(mut st)
 	}
 	if !isnil(st.hist_cv) {
-		set_hist_zone(mut st, -1)
+		set_hist_zone(mut st, -1, 0)
 	}
 }
 

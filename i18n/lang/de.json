@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Equalizer: {0} {1} EV - nach links oder rechts ziehen",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Über eine Zone fahren - ihr Equalizer-Regler, seitlich ziehen - ändern. Dreiecke: Tiefenbeschnitt (links) und Lichterbeschnitt (rechts) - Klick zeigt sie im Foto, J - beide",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: Sensordaten, Achse - EV-Stufen bis zum Beschnitt. Rechter Rand - ausgefressene Kanäle: diese Daten lassen sich nicht zurückholen. Das rechte Dreieck zeigt sie im Bild",
- "Окно и полноэкранный режим": "Fenster und Vollbild"
+ "Окно и полноэкранный режим": "Fenster und Vollbild",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Lichterbeschnitt: {0} % des Bildes - Klick zeigt sie im Foto",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Tiefenbeschnitt: {0} % des Bildes - Klick zeigt sie im Foto",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Beschnitten in den Rohdaten: {0} % des Bildes - Klick zeigt sie im Foto"
 }

@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Kiegyenlítő: {0} {1} EV - húzza balra vagy jobbra",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Vigye az egeret egy zónára - a kiegyenlítő csúszkája, húzza oldalra - módosítsa. Háromszögek: bebukott árnyékok (balra) és kiégett csúcsfények (jobbra) - kattintásra megjelennek a képen, J - mindkettő",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: szenzoradatok, a tengely - EV-lépések a levágásig. Jobb szél - kiégett csatornák: ezek az adatok nem hozhatók vissza. A jobb oldali háromszög megmutatja őket a képen",
- "Окно и полноэкранный режим": "Ablak és teljes képernyő"
+ "Окно и полноэкранный режим": "Ablak és teljes képernyő",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Kiégett részek: a képkocka {0} %-a - kattintással megjelennek a fotón",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Bebukott részek: a képkocka {0} %-a - kattintással megjelennek a fotón",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Levágva a nyers adatokban: a képkocka {0} %-a - kattintással megjelenik a fotón"
 }

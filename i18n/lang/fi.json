@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Taajuuskorjain: {0} {1} EV - vedä vasemmalle tai oikealle",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Vie osoitin alueelle - sen taajuuskorjaimen liukusäädin, vedä sivulle - muuta. Kolmiot: tukkeutuneet varjot (vasemmalla) ja puhki palaneet (oikealla) - napsautus näyttää ne kuvassa, J - molemmat",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: kennon data, akseli - EV-askeleet leikkautumiseen. Oikea reuna - puhki palaneet kanavat: tätä dataa ei voi palauttaa. Oikea kolmio näyttää ne kuvassa",
- "Окно и полноэкранный режим": "Ikkuna ja koko näyttö"
+ "Окно и полноэкранный режим": "Ikkuna ja koko näyttö",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Puhki palaneet: {0} % kuvasta - napsautus näyttää ne kuvassa",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Tukkeutuneet: {0} % kuvasta - napsautus näyttää ne kuvassa",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Leikkautunut raakadatassa: {0} % kuvasta - napsautus näyttää kuvassa"
 }

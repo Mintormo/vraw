@@ -668,5 +668,8 @@
  "Эквалайзер: {0} {1} EV - тяните влево или вправо": "Ecualizador: {0} {1} EV - arrastre a la izquierda o a la derecha",
  "Наведите на зону - её ползунок эквалайзера, тяните вбок - меняйте. Треугольники: провалы (слева) и пересветы (справа) - щелчок показывает их на снимке, J - оба": "Pase sobre una zona - su control del ecualizador, arrastre de lado - cámbielo. Triángulos: sombras recortadas (izquierda) e iluminaciones recortadas (derecha) - un clic las muestra en la foto, J - ambas",
  "RAW: данные сенсора, ось - ступени EV до клипа. Правый край - выбитые каналы: эти данные не вытянуть. Правый треугольник показывает их на снимке": "RAW: datos del sensor, eje - pasos EV hasta el recorte. Borde derecho - canales recortados: esos datos no se pueden recuperar. El triángulo derecho los muestra en la foto",
- "Окно и полноэкранный режим": "Ventana y pantalla completa"
+ "Окно и полноэкранный режим": "Ventana y pantalla completa",
+ "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Luces recortadas: {0} % del encuadre - haz clic para verlas en la foto",
+ "Провалы: {0} % кадра - щелчок показывает их на снимке": "Sombras recortadas: {0} % del encuadre - haz clic para verlas en la foto",
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Recortado en los datos RAW: {0} % del encuadre - haz clic para verlo en la foto"
 }
