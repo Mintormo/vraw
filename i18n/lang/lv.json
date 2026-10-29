@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Logs un pilnekrāns",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Pārgaismotas vietas: {0} % kadra - klikšķis tās parāda fotoattēlā",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Pārtumšotas vietas: {0} % kadra - klikšķis tās parāda fotoattēlā",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Nogriezts neapstrādātajos datos: {0} % kadra - klikšķis parāda fotoattēlā"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Nogriezts neapstrādātajos datos: {0} % kadra - klikšķis parāda fotoattēlā",
+ "Показывать кадры из подпапок": "Rādīt kadrus no apakšmapēm",
+ "Глубина подпапок": "Apakšmapju dziļums",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - tikai tiešās apakšmapes, 2 - arī to apakšmapes un tā tālāk"
 }

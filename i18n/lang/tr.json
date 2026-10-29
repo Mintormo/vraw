@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Pencere ve tam ekran",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Patlamalar: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Çökmeler: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Ham veride kırpılmış: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Ham veride kırpılmış: karenin %{0} kadarı - fotoğrafta göstermek için tıklayın",
+ "Показывать кадры из подпапок": "Alt klasörlerdeki kareleri göster",
+ "Глубина подпапок": "Alt klasör derinliği",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - yalnızca doğrudan alt klasörler, 2 - onların alt klasörleri de, vb."
 }

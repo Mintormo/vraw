@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Aken ja täisekraan",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Läbipõlenud: {0} % kaadrist - klõps näitab neid fotol",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Uppunud: {0} % kaadrist - klõps näitab neid fotol",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Toorandmetes kärbitud: {0} % kaadrist - klõps näitab fotol"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Toorandmetes kärbitud: {0} % kaadrist - klõps näitab fotol",
+ "Показывать кадры из подпапок": "Näita kaadreid alamkaustadest",
+ "Глубина подпапок": "Alamkaustade sügavus",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - ainult otsesed alamkaustad, 2 - ka nende alamkaustad jne"
 }

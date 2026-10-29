@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Fenêtre et plein écran",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Hautes lumières écrêtées : {0} % du cadre - cliquez pour les afficher sur la photo",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Ombres écrêtées : {0} % du cadre - cliquez pour les afficher sur la photo",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Écrêté dans les données RAW : {0} % du cadre - cliquez pour afficher sur la photo"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Écrêté dans les données RAW : {0} % du cadre - cliquez pour afficher sur la photo",
+ "Показывать кадры из подпапок": "Afficher les photos des sous-dossiers",
+ "Глубина подпапок": "Profondeur des sous-dossiers",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - sous-dossiers directs seulement, 2 - aussi leurs sous-dossiers, etc."
 }

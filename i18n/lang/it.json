@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Finestra e schermo intero",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Luci bruciate: {0}% dell'inquadratura - clic per mostrarle sulla foto",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Ombre chiuse: {0}% dell'inquadratura - clic per mostrarle sulla foto",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Tagliato nei dati RAW: {0}% dell'inquadratura - clic per mostrare sulla foto"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Tagliato nei dati RAW: {0}% dell'inquadratura - clic per mostrare sulla foto",
+ "Показывать кадры из подпапок": "Mostra le foto delle sottocartelle",
+ "Глубина подпапок": "Profondità sottocartelle",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - solo sottocartelle dirette, 2 - anche le loro sottocartelle, e così via"
 }

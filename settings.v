@@ -95,6 +95,10 @@ mut:
 	no_strip     bool
 	panel_left   bool
 	strip_top    bool // лента кадров над снимком
+	// лента кадров (browser.v): и кадры подпапок - до глубины subdir_depth
+	// (1 - только дочерние; 0 - старый файл без поля, subdir_depth_default)
+	strip_subdirs bool
+	subdir_depth  int
 	panel_order  []string = panel_default_order()
 	panel_hidden []string
 	// ширина панели инструментов, px (перетащенная; 0 - по умолчанию)
@@ -204,6 +208,8 @@ fn settings_from(s Settings) Settings {
 		no_strip:     s.no_strip
 		panel_left:   s.panel_left
 		strip_top:    s.strip_top
+		strip_subdirs: s.strip_subdirs
+		subdir_depth:  if s.subdir_depth > 0 { subdir_depth(s.subdir_depth) } else { 0 }
 		panel_order:  panel_order_from(s.panel_order)
 		panel_hidden: panel_keys_from(s.panel_hidden)
 		hotkeys:      s.hotkeys.filter(it.contains('='))
@@ -226,6 +232,22 @@ fn settings_from(s Settings) Settings {
 		} else {
 			jpeg_q_default
 		}
+	}
+}
+
+// Глубина подпапок в ленте кадров: 1 - только дочерние папки
+const subdir_depth_max = 9
+const subdir_depth_default = 1
+
+// subdir_depth - глубина из настроек в пределах 1..subdir_depth_max (0 -
+// по умолчанию)
+fn subdir_depth(n int) int {
+	return if n <= 0 {
+		subdir_depth_default
+	} else if n > subdir_depth_max {
+		subdir_depth_max
+	} else {
+		n
 	}
 }
 

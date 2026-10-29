@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Vindue og fuld skærm",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Udbrændte højlys: {0} % af billedet - klik for at vise dem på fotoet",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Druknede skygger: {0} % af billedet - klik for at vise dem på fotoet",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Klippet i rådata: {0} % af billedet - klik for at vise på fotoet"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Klippet i rådata: {0} % af billedet - klik for at vise på fotoet",
+ "Показывать кадры из подпапок": "Vis billeder fra undermapper",
+ "Глубина подпапок": "Dybde for undermapper",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - kun undermapper, 2 - også deres undermapper og så videre"
 }

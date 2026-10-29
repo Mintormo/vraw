@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Venster en volledig scherm",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Uitgebeten hoge lichten: {0}% van het beeld - klik om ze op de foto te tonen",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Dichtgelopen schaduwen: {0}% van het beeld - klik om ze op de foto te tonen",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Afgekapt in de RAW-gegevens: {0}% van het beeld - klik om op de foto te tonen"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Afgekapt in de RAW-gegevens: {0}% van het beeld - klik om op de foto te tonen",
+ "Показывать кадры из подпапок": "Foto's uit submappen tonen",
+ "Глубина подпапок": "Diepte submappen",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - alleen directe submappen, 2 - ook hun submappen, enzovoort"
 }

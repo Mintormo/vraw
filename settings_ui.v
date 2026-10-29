@@ -32,6 +32,9 @@ mut:
 	side_cb  &vgui.ComboBox = unsafe { nil }
 	strip_ck &vgui.CheckBox = unsafe { nil }
 	top_cb   &vgui.ComboBox = unsafe { nil }
+	// кадры подпапок в ленте и глубина (browser.v)
+	subdirs_ck &vgui.CheckBox = unsafe { nil }
+	depth_sp   &vgui.Spinbox  = unsafe { nil }
 	sec_box  &vgui.VBox     = unsafe { nil } // ряды разделов по порядку
 	sec_rows []SecRow // по индексу panel_sections
 	// Горячие клавиши (hotkeys_ui.v): ряды по индексу st.hk, ждущий
@@ -423,7 +426,25 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 		set_strip_top(mut st, i == 1)
 	}
 	u.top_cb = top_cb
-	side_col := column_width(mut dw, [i18n.tr('Расположение панели'), i18n.tr('Расположение ленты')], 8)
+	// Кадры подпапок: лента перечитывается сразу. Глубина - одной цифрой
+	// (1..9), поэтому on_change при наборе уже даёт итоговое число
+	mut subdirs_ck := vgui.checkbox(i18n.tr('Показывать кадры из подпапок'))
+	subdirs_ck.on_change = fn [mut st] (v bool) {
+		set_strip_subdirs(mut st, v, st.settings.subdir_depth)
+	}
+	u.subdirs_ck = subdirs_ck
+	mut depth_sp := vgui.spinbox()
+	depth_sp.set_range(1, subdir_depth_max)
+	mut depth_ti := depth_sp.text_input
+	depth_ti.max_len = 1
+	depth_sp.on_change = fn [mut st] (v int) {
+		if v >= 1 && v != subdir_depth(st.settings.subdir_depth) {
+			set_strip_subdirs(mut st, st.settings.strip_subdirs, v)
+		}
+	}
+	u.depth_sp = depth_sp
+	side_col := column_width(mut dw, [i18n.tr('Расположение панели'), i18n.tr('Расположение ленты'),
+		i18n.tr('Глубина подпапок')], 8)
 	mut side_items := i18n.tr_all(panel_side_names)
 	side_items << i18n.tr_all(strip_side_names)
 	side_w := column_width(mut dw, side_items, 0) + 2 * side_cb.pad + 24
@@ -485,6 +506,12 @@ fn build_iface_tab(mut st State, mut u SettingsUi, mut dw vgui.Window) (&vgui.VB
 	v.add(labeled(i18n.tr('Расположение панели'), side_cb, side_col, side_w))
 	v.add(strip_ck)
 	v.add(labeled(i18n.tr('Расположение ленты'), top_cb, side_col, side_w))
+	v.add(caption(i18n.tr('Лента кадров')))
+	v.add(subdirs_ck)
+	// Ширина поля - явно, как у масштаба: кнопки квадратные по высоте поля
+	v.add(labeled(i18n.tr('Глубина подпапок'), depth_sp, side_col, column_width(mut dw, ['9'], 0) +
+		2 * vgui.measure_pad_x + 2 * dw.ctx.control_h()))
+	v.add(note(mut u, i18n.tr('1 - только дочерние папки, 2 - и их подпапки, и так далее')))
 	mut secs := tab_page()
 	secs.add(caption(i18n.tr('Разделы панели инструментов')))
 	secs.add(note(mut u, i18n.tr('Гистограмма - всегда вверху. Скрытый раздел не показан, но его настройки действуют.')))
@@ -509,6 +536,13 @@ fn sync_iface(mut u SettingsUi, s &Settings) {
 	mut tcb := u.top_cb
 	tcb.set_selected(if s.strip_top { 1 } else { 0 })
 	tcb.enabled = !s.no_strip
+	mut dck := u.subdirs_ck
+	dck.checked = s.strip_subdirs
+	mut dsp := u.depth_sp
+	if !dsp.text_input.focused {
+		dsp.set_value(subdir_depth(s.subdir_depth))
+	}
+	dsp.enabled = s.strip_subdirs
 	order := panel_order_from(s.panel_order)
 	mut box := u.sec_box
 	box.clear()

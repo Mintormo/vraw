@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Langas ir visas ekranas",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Perdegusios vietos: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Užtamsėjusios vietos: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Nukirpta neapdorotuose duomenyse: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Nukirpta neapdorotuose duomenyse: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje",
+ "Показывать кадры из подпапок": "Rodyti kadrus iš poaplankių",
+ "Глубина подпапок": "Poaplankių gylis",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - tik tiesioginiai poaplankiai, 2 - ir jų poaplankiai ir t. t."
 }

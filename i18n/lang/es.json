@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Ventana y pantalla completa",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Luces recortadas: {0} % del encuadre - haz clic para verlas en la foto",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Sombras recortadas: {0} % del encuadre - haz clic para verlas en la foto",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Recortado en los datos RAW: {0} % del encuadre - haz clic para verlo en la foto"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Recortado en los datos RAW: {0} % del encuadre - haz clic para verlo en la foto",
+ "Показывать кадры из подпапок": "Mostrar fotos de subcarpetas",
+ "Глубина подпапок": "Profundidad de subcarpetas",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - solo subcarpetas directas, 2 - también sus subcarpetas, etc."
 }

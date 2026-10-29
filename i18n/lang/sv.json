@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Fönster och helskärm",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Urfrätta högdagrar: {0} % av bilden - klicka för att visa dem på fotot",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Igenslammade skuggor: {0} % av bilden - klicka för att visa dem på fotot",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Klippt i rådata: {0} % av bilden - klicka för att visa på fotot"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Klippt i rådata: {0} % av bilden - klicka för att visa på fotot",
+ "Показывать кадры из подпапок": "Visa bilder från undermappar",
+ "Глубина подпапок": "Djup för undermappar",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - bara direkta undermappar, 2 - även deras undermappar och så vidare"
 }

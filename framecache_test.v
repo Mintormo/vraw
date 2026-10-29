@@ -13,10 +13,13 @@ fn test_settings_roundtrip() {
 	s.hist_raw = true
 	s.hist_log = true
 	s.no_hist_luma = true
+	s.strip_subdirs = true
+	s.subdir_depth = 3
 	back := settings_from(json2.decode[Settings](json2.encode(s))!)
 	assert back.no_frame_cache
 	assert back.hist_raw && back.hist_log && back.no_hist_luma
 	assert back.preset_wb_shift
+	assert back.strip_subdirs && back.subdir_depth == 3
 	assert back.frame_cache_mb == 3072
 	assert back.lang == 'de'
 	// незнакомый язык - как в системе
@@ -27,6 +30,10 @@ fn test_settings_roundtrip() {
 	assert settings_from(s).frame_cache_mb == 0
 	old := settings_from(json2.decode[Settings]('{"theme": "dark"}')!)
 	assert !old.no_frame_cache && old.frame_cache_mb == 0
+	assert !old.strip_subdirs && strip_depth(old) == 0
+	// чужая глубина - в пределах
+	s.subdir_depth = 99
+	assert settings_from(s).subdir_depth == subdir_depth_max
 }
 
 // Размер записи кэша - по разным массивам: raw_linear бывает тем же

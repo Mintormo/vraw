@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Window and full screen",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Clipped highlights: {0}% of the frame - click to show them on the photo",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Clipped shadows: {0}% of the frame - click to show them on the photo",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Clipped in raw data: {0}% of the frame - click to show on the photo"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Clipped in raw data: {0}% of the frame - click to show on the photo",
+ "Показывать кадры из подпапок": "Show photos from subfolders",
+ "Глубина подпапок": "Subfolder depth",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - direct subfolders only, 2 - their subfolders too, and so on"
 }

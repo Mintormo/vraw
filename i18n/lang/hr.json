@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Prozor i cijeli zaslon",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Pregorjelo: {0} % kadra - klik ih prikazuje na snimci",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Propalo: {0} % kadra - klik ih prikazuje na snimci",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Pregorjelo u sirovim podacima: {0} % kadra - klik prikazuje na snimci"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Pregorjelo u sirovim podacima: {0} % kadra - klik prikazuje na snimci",
+ "Показывать кадры из подпапок": "Prikaži snimke iz podmapa",
+ "Глубина подпапок": "Dubina podmapa",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - samo izravne podmape, 2 - i njihove podmape i tako dalje"
 }

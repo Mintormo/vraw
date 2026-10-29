@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Okno i pełny ekran",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Prześwietlenia: {0}% kadru - kliknij, aby pokazać je na zdjęciu",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Niedoświetlenia: {0}% kadru - kliknij, aby pokazać je na zdjęciu",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Przycięte w danych RAW: {0}% kadru - kliknij, aby pokazać na zdjęciu"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Przycięte w danych RAW: {0}% kadru - kliknij, aby pokazać na zdjęciu",
+ "Показывать кадры из подпапок": "Pokazuj zdjęcia z podfolderów",
+ "Глубина подпапок": "Głębokość podfolderów",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - tylko bezpośrednie podfoldery, 2 - także ich podfoldery itd."
 }

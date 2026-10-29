@@ -298,8 +298,23 @@ fn test_scan_folder() {
 	for n in ['b.CR3', 'a.cr3', 'c.NEF', 'x.jpg', 'a.cr3.vraw.json'] {
 		os.write_file(os.join_path(dir, n), '')!
 	}
-	got := scan_folder(dir).map(os.file_name(it))
+	got := scan_folder(dir, 0).map(os.file_name(it))
 	assert got == ['a.cr3', 'b.CR3', 'c.NEF']
+	// Подпапки: сначала файлы самой папки, потом подпапки по имени; глубже
+	// заданной глубины и скрытые - нет
+	for n in ['sub.CR3/d.CR3', 'a_day/e.CR3', 'a_day/deep/f.CR3', '.hidden/g.CR3'] {
+		os.mkdir_all(os.dir(os.join_path(dir, n)))!
+		os.write_file(os.join_path(dir, n), '')!
+	}
+	rel := fn [dir] (paths []string) []string {
+		return paths.map(it[dir.len + 1..])
+	}
+	assert rel(scan_folder(dir, 1)) == ['a.cr3', 'b.CR3', 'c.NEF', 'a_day/e.CR3', 'sub.CR3/d.CR3']
+	assert rel(scan_folder(dir, 2)) == ['a.cr3', 'b.CR3', 'c.NEF', 'a_day/e.CR3',
+		'a_day/deep/f.CR3', 'sub.CR3/d.CR3']
+	assert frame_subdir(dir, os.join_path(dir, 'a_day', 'deep', 'f.CR3')) == 'a_day/deep'
+	assert frame_subdir(dir, os.join_path(dir, 'a.cr3')) == ''
+	assert frame_subdir(dir, '/elsewhere/x.CR3') == ''
 	os.rmdir_all(dir) or {}
 }
 

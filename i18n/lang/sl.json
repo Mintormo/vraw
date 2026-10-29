@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Okno in celozaslonski način",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Pregoreli deli: {0} % kadra - klik jih prikaže na fotografiji",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Utopljeni deli: {0} % kadra - klik jih prikaže na fotografiji",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Porezano v surovih podatkih: {0} % kadra - klik prikaže na fotografiji"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Porezano v surovih podatkih: {0} % kadra - klik prikaže na fotografiji",
+ "Показывать кадры из подпапок": "Prikaži posnetke iz podmap",
+ "Глубина подпапок": "Globina podmap",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - samo neposredne podmape, 2 - tudi njihove podmape in tako naprej"
 }

@@ -102,18 +102,45 @@ fn is_raw_file(name string) bool {
 	return os.file_ext(name).to_lower().trim_left('.') in raw_exts
 }
 
-// scan_folder - все RAW-файлы папки (полные пути), по имени
-fn scan_folder(dir string) []string {
+// scan_folder - все RAW-файлы папки (полные пути), по имени; depth > 0 -
+// и подпапок до этой глубины (1 - только дочерние): сначала файлы самой
+// папки, потом подпапки по имени, каждая так же. Скрытые папки (с точки)
+// и ссылки на папки пропускаются - ссылка может вести по кругу или в
+// уже просмотренное.
+fn scan_folder(dir string, depth int) []string {
 	names := os.ls(dir) or { return [] }
 	mut out := []string{}
+	mut subs := []string{}
 	for n in names {
 		p := os.join_path(dir, n)
-		if is_raw_file(n) && !os.is_dir(p) {
+		if os.is_dir(p) {
+			if depth > 0 && !n.starts_with('.') && !os.is_link(p) {
+				subs << p
+			}
+		} else if is_raw_file(n) {
 			out << p
 		}
 	}
 	out.sort()
+	subs.sort()
+	for d in subs {
+		out << scan_folder(d, depth - 1)
+	}
 	return out
+}
+
+// strip_depth - глубина подпапок в ленте по настройкам (0 - только папка)
+fn strip_depth(s &Settings) int {
+	return if s.strip_subdirs { subdir_depth(s.subdir_depth) } else { 0 }
+}
+
+// frame_subdir - подпапка кадра относительно папки ленты ('' - в ней самой)
+fn frame_subdir(folder string, path string) string {
+	d := os.dir(path)
+	if folder == '' || d == folder || !d.starts_with(folder + os.path_separator) {
+		return ''
+	}
+	return d[folder.len + 1..]
 }
 
 // thumb_order - порядок расчёта миниатюр: текущий кадр, затем соседи
@@ -532,7 +559,7 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	stop_thumbs(mut st)
 	st.thumb_gen++
 	st.folder = dir
-	paths := scan_folder(dir)
+	paths := scan_folder(dir, strip_depth(st.settings))
 	st.frames = []Frame{}
 	for p in paths {
 		// Ячейка ленты - из запаса (strip_cell): при смене папки не
@@ -540,8 +567,11 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 		sc := strip_cell(mut st, st.frames.len)
 		mut cv := sc.cv
 		mut name := sc.name
-		cell := sc.cell
+		mut cell := sc.cell
 		name.text = os.file_name(p)
+		// Кадр из подпапки - её путь в подсказке ячейки
+		sub := frame_subdir(dir, p)
+		cell.tooltip = if sub != '' { os.join_path(sub, os.file_name(p)) } else { '' }
 		name.font_style = .regular
 		name.color = st.pal.secondary
 		cv.fill(thumb_bg)
@@ -671,13 +701,14 @@ fn mark_edited(mut st State) {
 }
 
 // show_frame - после открытия файла: папка в ленте (новая - загрузить),
-// выделение и прокрутка к кадру, счётчик «N из M».
+// выделение и прокрутка к кадру, счётчик «N из M». Кадр уже в ленте (в
+// том числе из подпапки) - лента остаётся прежней.
 fn show_frame(mut st State, path string, mut app vgui.App) {
 	if isnil(st.strip) {
 		return
 	}
 	dir := os.dir(path)
-	if dir != st.folder {
+	if dir != st.folder && !st.frames.any(it.path == path) {
 		load_folder(mut st, dir, path, mut app)
 	}
 	st.frame_idx = -1
@@ -733,6 +764,26 @@ fn refresh_folder(mut st State) {
 	}
 }
 
+// set_strip_subdirs - кадры подпапок в ленте (вкл/выкл) и их глубина
+// (окно «Настройки»): запомнить и перечитать ленту
+fn set_strip_subdirs(mut st State, on bool, depth int) {
+	d := subdir_depth(depth)
+	if on == st.settings.strip_subdirs && d == subdir_depth(st.settings.subdir_depth) {
+		return
+	}
+	st.settings.strip_subdirs = on
+	st.settings.subdir_depth = d
+	save_settings(st.settings)
+	refresh_folder(mut st)
+	// Открытый кадр был из подпапки, а она в ленту больше не входит -
+	// лента его папки
+	if st.frame_idx < 0 && st.raw_path != '' && os.exists(st.raw_path) && !isnil(st.app) {
+		mut app := st.app
+		show_frame(mut st, st.raw_path, mut app)
+	}
+	sync_settings_ui(mut st)
+}
+
 // sync_strip - выделение ленты на текущем кадре, жирная подпись у него,
 // прокрутка - текущий по центру, подпись над лентой.
 fn sync_strip(mut st State) {
@@ -772,7 +823,15 @@ fn strip_info_text(mut st State) {
 	} else {
 		'${st.shown.len} ${i18n.pl(st.shown.len, 'кадр|кадра|кадров')}${total}'
 	}
-	mut text := '${os.file_name(st.folder)}  ·  ${pos}'
+	mut text := os.file_name(st.folder)
+	// Открытый кадр из подпапки - и она (папка/подпапка)
+	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
+		sub := frame_subdir(st.folder, st.frames[st.frame_idx].path)
+		if sub != '' {
+			text = os.join_path(text, sub)
+		}
+	}
+	text += '  ·  ${pos}'
 	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
 		mt := mark_text(st.frames[st.frame_idx].mark)
 		if mt.len > 0 {

@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Fenster und Vollbild",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Lichterbeschnitt: {0} % des Bildes - Klick zeigt sie im Foto",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Tiefenbeschnitt: {0} % des Bildes - Klick zeigt sie im Foto",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Beschnitten in den Rohdaten: {0} % des Bildes - Klick zeigt sie im Foto"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Beschnitten in den Rohdaten: {0} % des Bildes - Klick zeigt sie im Foto",
+ "Показывать кадры из подпапок": "Fotos aus Unterordnern anzeigen",
+ "Глубина подпапок": "Tiefe der Unterordner",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - nur direkte Unterordner, 2 - auch deren Unterordner usw."
 }

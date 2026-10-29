@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Janela e tela cheia",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Realces estourados: {0}% do enquadramento - clique para mostrá-los na foto",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Sombras estouradas: {0}% do enquadramento - clique para mostrá-las na foto",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Cortado nos dados RAW: {0}% do enquadramento - clique para mostrar na foto"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Cortado nos dados RAW: {0}% do enquadramento - clique para mostrar na foto",
+ "Показывать кадры из подпапок": "Mostrar fotos das subpastas",
+ "Глубина подпапок": "Profundidade das subpastas",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - só subpastas diretas, 2 - também as subpastas delas, e assim por diante"
 }

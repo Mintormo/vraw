@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Ikkuna ja koko näyttö",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Puhki palaneet: {0} % kuvasta - napsautus näyttää ne kuvassa",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Tukkeutuneet: {0} % kuvasta - napsautus näyttää ne kuvassa",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Leikkautunut raakadatassa: {0} % kuvasta - napsautus näyttää kuvassa"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Leikkautunut raakadatassa: {0} % kuvasta - napsautus näyttää kuvassa",
+ "Показывать кадры из подпапок": "Näytä kuvat alikansioista",
+ "Глубина подпапок": "Alikansioiden syvyys",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - vain suorat alikansiot, 2 - myös niiden alikansiot ja niin edelleen"
 }

@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Fereastră și ecran complet",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Zone arse: {0}% din cadru - clic pentru a le afișa pe fotografie",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Zone înecate: {0}% din cadru - clic pentru a le afișa pe fotografie",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Tăiat în datele RAW: {0}% din cadru - clic pentru a afișa pe fotografie"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Tăiat în datele RAW: {0}% din cadru - clic pentru a afișa pe fotografie",
+ "Показывать кадры из подпапок": "Afișează cadrele din subfoldere",
+ "Глубина подпапок": "Adâncimea subfolderelor",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - doar subfolderele directe, 2 - și subfolderele lor și așa mai departe"
 }

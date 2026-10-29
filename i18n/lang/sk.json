@@ -671,5 +671,8 @@
  "Окно и полноэкранный режим": "Okno a celá obrazovka",
  "Пересветы: {0} % кадра - щелчок показывает их на снимке": "Prepaly: {0} % snímky - kliknutím ich zobrazíte na fotografii",
  "Провалы: {0} % кадра - щелчок показывает их на снимке": "Podexponované miesta: {0} % snímky - kliknutím ich zobrazíte na fotografii",
- "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Orezané v surových dátach: {0} % snímky - kliknutím zobrazíte na fotografii"
+ "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Orezané v surových dátach: {0} % snímky - kliknutím zobrazíte na fotografii",
+ "Показывать кадры из подпапок": "Zobrazovať snímky z podpriečinkov",
+ "Глубина подпапок": "Hĺbka podpriečinkov",
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - len priame podpriečinky, 2 - aj ich podpriečinky a tak ďalej"
 }
