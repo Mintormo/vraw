@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Toorandmetes kärbitud: {0} % kaadrist - klõps näitab fotol",
  "Показывать кадры из подпапок": "Näita kaadreid alamkaustadest",
  "Глубина подпапок": "Alamkaustade sügavus",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - ainult otsesed alamkaustad, 2 - ka nende alamkaustad jne"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - ainult otsesed alamkaustad, 2 - ka nende alamkaustad jne",
+ "Показать в папке": "Näita kaustas",
+ "Не удалось открыть папку: {0}": "Kausta ei õnnestunud avada: {0}",
+ "Проводник не открылся (код {0})": "Explorer ei avanenud (kood {0})",
+ "не найден файловый менеджер (xdg-open)": "failihaldurit ei leitud (xdg-open)"
 }

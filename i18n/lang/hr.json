@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Pregorjelo u sirovim podacima: {0} % kadra - klik prikazuje na snimci",
  "Показывать кадры из подпапок": "Prikaži snimke iz podmapa",
  "Глубина подпапок": "Dubina podmapa",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - samo izravne podmape, 2 - i njihove podmape i tako dalje"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - samo izravne podmape, 2 - i njihove podmape i tako dalje",
+ "Показать в папке": "Prikaži u mapi",
+ "Не удалось открыть папку: {0}": "Mapu nije moguće otvoriti: {0}",
+ "Проводник не открылся (код {0})": "Explorer se nije otvorio (kôd {0})",
+ "не найден файловый менеджер (xdg-open)": "nije pronađen upravitelj datoteka (xdg-open)"
 }

@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Tagliato nei dati RAW: {0}% dell'inquadratura - clic per mostrare sulla foto",
  "Показывать кадры из подпапок": "Mostra le foto delle sottocartelle",
  "Глубина подпапок": "Profondità sottocartelle",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - solo sottocartelle dirette, 2 - anche le loro sottocartelle, e così via"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - solo sottocartelle dirette, 2 - anche le loro sottocartelle, e così via",
+ "Показать в папке": "Mostra nella cartella",
+ "Не удалось открыть папку: {0}": "Impossibile aprire la cartella: {0}",
+ "Проводник не открылся (код {0})": "Esplora file non si è aperto (codice {0})",
+ "не найден файловый менеджер (xdg-open)": "nessun file manager trovato (xdg-open)"
 }

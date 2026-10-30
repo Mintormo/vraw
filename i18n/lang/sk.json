@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Orezané v surových dátach: {0} % snímky - kliknutím zobrazíte na fotografii",
  "Показывать кадры из подпапок": "Zobrazovať snímky z podpriečinkov",
  "Глубина подпапок": "Hĺbka podpriečinkov",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - len priame podpriečinky, 2 - aj ich podpriečinky a tak ďalej"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - len priame podpriečinky, 2 - aj ich podpriečinky a tak ďalej",
+ "Показать в папке": "Zobraziť v priečinku",
+ "Не удалось открыть папку: {0}": "Priečinok sa nepodarilo otvoriť: {0}",
+ "Проводник не открылся (код {0})": "Prieskumník sa neotvoril (kód {0})",
+ "не найден файловый менеджер (xdg-open)": "nenašiel sa správca súborov (xdg-open)"
 }

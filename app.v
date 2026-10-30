@@ -2892,15 +2892,26 @@ fn main() {
 	st.open_path = open_file
 	st.open_dir = open_folder
 	rebuild_recent_menus(mut st)
+	// Показать в папке (reveal_*.c.v): файловый менеджер с выделенным
+	// кадром - Ctrl+R, как «Показать в Проводнике» в Lightroom
+	mut m_reveal := vgui.menu_action(i18n.tr('Показать в папке'))
+	m_reveal.shortcut = 'Ctrl+R'
+	m_reveal.on_click = fn [mut st, mut nm] () {
+		reveal_in_folder(reveal_paths(st)) or {
+			nm.show_error(i18n.trf('Не удалось открыть папку: {0}', err.msg()))
+		}
+	}
 	bar.add_menu(i18n.tr('Файл'), [m_open, m_open_dir, m_recent_files, m_recent_dirs,
-		vgui.menu_separator(), m_export, vgui.menu_separator(), m_quit])
+		vgui.menu_separator(), m_reveal, m_export, vgui.menu_separator(), m_quit])
 	// Горячие клавиши - настраиваемые (hotkeys.v): ключи постоянные, по
 	// умолчанию - сочетания, заданные пунктам выше
 	hk_add(mut st, 'file.open', 'Файл', mut m_open)
 	hk_add(mut st, 'file.open_dir', 'Файл', mut m_open_dir)
+	hk_add(mut st, 'file.reveal', 'Файл', mut m_reveal)
 	hk_add(mut st, 'file.export', 'Файл', mut m_export)
 	hk_add(mut st, 'file.quit', 'Файл', mut m_quit)
 	avail_add(mut st, .export, [m_export])
+	avail_add(mut st, .target, [m_reveal])
 
 	mut m_undo := vgui.menu_action(i18n.tr('Отменить'))
 	m_undo.shortcut = 'Ctrl+Z'

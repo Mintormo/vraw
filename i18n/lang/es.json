@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Recortado en los datos RAW: {0} % del encuadre - haz clic para verlo en la foto",
  "Показывать кадры из подпапок": "Mostrar fotos de subcarpetas",
  "Глубина подпапок": "Profundidad de subcarpetas",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - solo subcarpetas directas, 2 - también sus subcarpetas, etc."
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - solo subcarpetas directas, 2 - también sus subcarpetas, etc.",
+ "Показать в папке": "Mostrar en la carpeta",
+ "Не удалось открыть папку: {0}": "No se pudo abrir la carpeta: {0}",
+ "Проводник не открылся (код {0})": "El Explorador no se abrió (código {0})",
+ "не найден файловый менеджер (xdg-open)": "no se encontró un gestor de archivos (xdg-open)"
 }

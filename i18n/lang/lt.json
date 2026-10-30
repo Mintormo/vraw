@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Nukirpta neapdorotuose duomenyse: {0} % kadro - spustelėkite, kad parodytumėte nuotraukoje",
  "Показывать кадры из подпапок": "Rodyti kadrus iš poaplankių",
  "Глубина подпапок": "Poaplankių gylis",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - tik tiesioginiai poaplankiai, 2 - ir jų poaplankiai ir t. t."
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - tik tiesioginiai poaplankiai, 2 - ir jų poaplankiai ir t. t.",
+ "Показать в папке": "Rodyti aplanke",
+ "Не удалось открыть папку: {0}": "Nepavyko atverti aplanko: {0}",
+ "Проводник не открылся (код {0})": "Naršyklė neatsivėrė (kodas {0})",
+ "не найден файловый менеджер (xdg-open)": "nerasta failų tvarkytuvės (xdg-open)"
 }

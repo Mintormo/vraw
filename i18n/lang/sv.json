@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Klippt i rådata: {0} % av bilden - klicka för att visa på fotot",
  "Показывать кадры из подпапок": "Visa bilder från undermappar",
  "Глубина подпапок": "Djup för undermappar",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - bara direkta undermappar, 2 - även deras undermappar och så vidare"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - bara direkta undermappar, 2 - även deras undermappar och så vidare",
+ "Показать в папке": "Visa i mapp",
+ "Не удалось открыть папку: {0}": "Det gick inte att öppna mappen: {0}",
+ "Проводник не открылся (код {0})": "Utforskaren öppnades inte (kod {0})",
+ "не найден файловый менеджер (xdg-open)": "ingen filhanterare hittades (xdg-open)"
 }

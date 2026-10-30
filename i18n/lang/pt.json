@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Cortado nos dados RAW: {0}% do enquadramento - clique para mostrar na foto",
  "Показывать кадры из подпапок": "Mostrar fotos das subpastas",
  "Глубина подпапок": "Profundidade das subpastas",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - só subpastas diretas, 2 - também as subpastas delas, e assim por diante"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - só subpastas diretas, 2 - também as subpastas delas, e assim por diante",
+ "Показать в папке": "Mostrar na pasta",
+ "Не удалось открыть папку: {0}": "Não foi possível abrir a pasta: {0}",
+ "Проводник не открылся (код {0})": "O Explorador não abriu (código {0})",
+ "не найден файловый менеджер (xdg-open)": "nenhum gestor de ficheiros encontrado (xdg-open)"
 }

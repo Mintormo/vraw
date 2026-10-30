@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Terpotong di data RAW: {0}% bingkai - klik untuk menampilkan di foto",
  "Показывать кадры из подпапок": "Tampilkan foto dari subfolder",
  "Глубина подпапок": "Kedalaman subfolder",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - hanya subfolder langsung, 2 - juga subfoldernya, dan seterusnya"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - hanya subfolder langsung, 2 - juga subfoldernya, dan seterusnya",
+ "Показать в папке": "Tampilkan di folder",
+ "Не удалось открыть папку: {0}": "Gagal membuka folder: {0}",
+ "Проводник не открылся (код {0})": "Explorer tidak terbuka (kode {0})",
+ "не найден файловый менеджер (xdg-open)": "pengelola berkas tidak ditemukan (xdg-open)"
 }

@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Afgekapt in de RAW-gegevens: {0}% van het beeld - klik om op de foto te tonen",
  "Показывать кадры из подпапок": "Foto's uit submappen tonen",
  "Глубина подпапок": "Diepte submappen",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - alleen directe submappen, 2 - ook hun submappen, enzovoort"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - alleen directe submappen, 2 - ook hun submappen, enzovoort",
+ "Показать в папке": "Tonen in map",
+ "Не удалось открыть папку: {0}": "Kan de map niet openen: {0}",
+ "Проводник не открылся (код {0})": "Verkenner is niet geopend (code {0})",
+ "не найден файловый менеджер (xdg-open)": "geen bestandsbeheerder gevonden (xdg-open)"
 }

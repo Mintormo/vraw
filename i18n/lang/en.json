@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Clipped in raw data: {0}% of the frame - click to show on the photo",
  "Показывать кадры из подпапок": "Show photos from subfolders",
  "Глубина подпапок": "Subfolder depth",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - direct subfolders only, 2 - their subfolders too, and so on"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - direct subfolders only, 2 - their subfolders too, and so on",
+ "Показать в папке": "Show in folder",
+ "Не удалось открыть папку: {0}": "Could not open the folder: {0}",
+ "Проводник не открылся (код {0})": "Explorer did not open (code {0})",
+ "не найден файловый менеджер (xdg-open)": "no file manager found (xdg-open)"
 }

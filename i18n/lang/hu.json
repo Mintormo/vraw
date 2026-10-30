@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Levágva a nyers adatokban: a képkocka {0} %-a - kattintással megjelenik a fotón",
  "Показывать кадры из подпапок": "Almappák képeinek megjelenítése",
  "Глубина подпапок": "Almappák mélysége",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - csak a közvetlen almappák, 2 - azok almappái is, és így tovább"
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - csak a közvetlen almappák, 2 - azok almappái is, és így tovább",
+ "Показать в папке": "Megjelenítés a mappában",
+ "Не удалось открыть папку: {0}": "A mappa nem nyitható meg: {0}",
+ "Проводник не открылся (код {0})": "Az Intéző nem nyílt meg (kód: {0})",
+ "не найден файловый менеджер (xdg-open)": "nem található fájlkezelő (xdg-open)"
 }

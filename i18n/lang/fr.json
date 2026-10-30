@@ -674,5 +674,9 @@
  "Выбито в сырье: {0} % кадра - щелчок показывает на снимке": "Écrêté dans les données RAW : {0} % du cadre - cliquez pour afficher sur la photo",
  "Показывать кадры из подпапок": "Afficher les photos des sous-dossiers",
  "Глубина подпапок": "Profondeur des sous-dossiers",
- "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - sous-dossiers directs seulement, 2 - aussi leurs sous-dossiers, etc."
+ "1 - только дочерние папки, 2 - и их подпапки, и так далее": "1 - sous-dossiers directs seulement, 2 - aussi leurs sous-dossiers, etc.",
+ "Показать в папке": "Afficher dans le dossier",
+ "Не удалось открыть папку: {0}": "Impossible d'ouvrir le dossier : {0}",
+ "Проводник не открылся (код {0})": "L'Explorateur ne s'est pas ouvert (code {0})",
+ "не найден файловый менеджер (xdg-open)": "aucun gestionnaire de fichiers trouvé (xdg-open)"
 }

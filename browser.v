@@ -764,6 +764,36 @@ fn refresh_folder(mut st State) {
 	}
 }
 
+// reveal_paths - что показать в файловом менеджере («Файл - Показать в
+// папке»): кадр под курсором выделения ленты (без выделения - открытый) и
+// остальные выделенные из той же папки - менеджер открывает одну папку
+fn reveal_paths(st &State) []string {
+	sel := strip_selection(st)
+	mut head := -1
+	if !isnil(st.strip) {
+		f := frame_of_row(st, st.strip.selected)
+		if f >= 0 && f in sel {
+			head = f
+		}
+	}
+	if head < 0 {
+		head = if sel.len > 0 { sel.last() } else { st.frame_idx }
+	}
+	if head < 0 || head >= st.frames.len {
+		// Кадр открыт, но не в ленте (пропал из папки) - сам файл
+		return if st.raw_path != '' { [st.raw_path] } else { []string{} }
+	}
+	dir := os.dir(st.frames[head].path)
+	mut out := [st.frames[head].path]
+	for i in sel {
+		p := st.frames[i].path
+		if i != head && os.dir(p) == dir {
+			out << p
+		}
+	}
+	return out
+}
+
 // set_strip_subdirs - кадры подпапок в ленте (вкл/выкл) и их глубина
 // (окно «Настройки»): запомнить и перечитать ленту
 fn set_strip_subdirs(mut st State, on bool, depth int) {
