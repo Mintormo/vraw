@@ -58,6 +58,8 @@ lic="$out/licenses"
 own="$root/tools/licenses"
 mkdir -p "$lic/common"
 cp "$root/LICENSE" "$out/LICENSE"
+# Значок для ярлыка/.desktop (окно берёт вшитую в бинарник копию)
+cp "$root/assets/icon/vraw-256.png" "$out/vraw.png"
 # LICENSE - в корне репозитория vgui: модуль - он сам или его подпапка
 vgui_dir="$(readlink -f "$HOME/.vmodules/vgui")"
 vgui_lic="$vgui_dir/LICENSE"

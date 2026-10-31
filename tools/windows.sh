@@ -33,9 +33,13 @@ mkdir -p "$out"
 # V не старее 14.10.2026: раньше трамплин замыканий портил xmm15, на
 # Windows x64 он сохраняемый (vlang/v#29822, исправлено #29831) - пустое
 # окно, пустое превью после кадрирования.
+# Иконка exe (Проводник, ярлыки) - ресурс из assets/icon/vraw.ico,
+# объектный файл идёт линковщику вместе с библиотеками
+res="$(mktemp -d)/vraw_res.o"
+x86_64-w64-mingw32-windres -O coff -I "$root/assets/icon" -o "$res" "$root/assets/icon/vraw.rc"
 echo "Сборка..."
 "$v" -prod -os windows -cc "$cc" -subsystem windows \
-	-cflags "-I$pfx/include" -ldflags "-L$pfx/lib" \
+	-cflags "-I$pfx/include" -ldflags "-L$pfx/lib $res" \
 	-o "$out/vraw.exe" "$root"
 
 # DLL: обход зависимостей от vraw.exe; берутся те, что есть в $pfx/bin,

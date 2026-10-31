@@ -1,0 +1,3 @@
+// Ресурс Windows: иконка vraw.exe (Проводник, ярлыки). Собирает
+// tools/windows.sh через windres; иконку окна задаёт сама программа.
+1 ICON "vraw.ico"

@@ -1366,6 +1366,9 @@ fn main() {
 	// Тема приложения: окно без своей темы получит её в add_window
 	// Размер по умолчанию - золотое сечение: 1440 / 890 ~ 1.618
 	mut win := vgui.create_window(title: 'vraw', width: 1440, height: 890)!
+	// Иконка окна (панель задач, Alt+Tab) вшита в бинарник - файл рядом
+	// не нужен; исходники и все размеры - assets/icon/
+	win.set_icon_data($embed_file('assets/icon/vraw-256.png').to_bytes())
 	// Масштаб интерфейса прошлого запуска (uiscale.v): окно на экране
 	// того же размера, внутри - крупнее или мельче
 	ui_k := f32(ui_scale_pct(settings.ui_scale)) / 100
