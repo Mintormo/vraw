@@ -8,6 +8,7 @@ import vgui
 import math
 import pipeline
 import lens
+import json2
 
 // new_state - State с двумя ползунками (экспозиция, яркостный шумодав)
 // и списком истории, как в main; открыт «файл» (запись «Открыт файл»).
@@ -191,6 +192,26 @@ fn side_tmp(name string) string {
 	return path
 }
 
+// side_v1_text - история в формате сайдкара версии 1 (до 01.11.2026: все
+// поля, отступ на каждое значение) - для проверки чтения старых файлов
+fn side_v1_text(history []HistEntry, pos int, mark Mark) string {
+	mut f := SideFile{
+		version: 1
+		rating:  mark.rating
+		flag:    mark.flag
+		current: pos
+		state:   side_state(history[pos].state)
+	}
+	for h in history {
+		f.history << SideEntry{
+			name:  h.name
+			key:   h.key
+			state: side_state(h.state)
+		}
+	}
+	return json2.encode(f, prettify: true, indent_string: '  ')
+}
+
 fn test_no_file_without_edits() {
 	mut st, _, _ := new_state()
 	st.side_path = side_tmp('noedit')
@@ -274,10 +295,67 @@ fn test_broken_files() {
 	os.rm(path)!
 	drag(mut exp, 0.5)
 	text := os.read_file(path)!
-	os.write_file(path, text.replace('"nr": [', '"nr": [1, '))!
+	assert text.contains('"state": {}')
+	os.write_file(path, text.replace('"state": {}', '"state": {"nr": [1, 0, 0, 0, 0]}'))!
 	if _ := load_sidecar(path) {
 		assert false, 'неверный размер nr принят'
 	}
+	// То же в файле версии 1
+	os.write_file(path, side_v1_text(st.history, st.hist_pos, Mark{}).replace('"nr": [',
+		'"nr": [1, '))!
+	if _ := load_sidecar(path) {
+		assert false, 'неверный размер nr принят'
+	}
+}
+
+// Формат версии 2: умолчания - нейтральный снимок (нетронутый - «{}»), в
+// файле только изменённые поля, запись истории - одной строкой, числа без
+// шума f32, кривые парами; версия 1 читается так же
+fn test_sidecar_v2_compact() {
+	assert json2.encode(side_defaults()) == json2.encode(side_state(neutral_edit()))
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('v2')
+	drag(mut exp, 0.75)
+	st.edit.curve_pts[0] = [vgui.CurvePoint{0, 0}, vgui.CurvePoint{0.5, 0.6}, vgui.CurvePoint{1, 1}]
+	st.edit.params.eq[1] = f32(1.5500001)
+	curves_to_params(mut st)
+	record(mut st, 'mix', 'Разное', false)
+	text := os.read_file(st.side_path)!
+	lines := text.split_into_lines()
+	assert lines.len == 9
+	assert lines[1] == '  "app": "vraw", "version": 2, "rating": 0, "flag": 0, "current": 2,'
+	assert lines[4] == '    {"name": "Открыт файл", "state": {}},'
+	assert lines[2].starts_with('  "state": {"exposure": 0.75, "eq": [0, 1.55, 0, 0, 0], "curves": [[[0, 0], [0.5, 0.6], [1, 1]], [[0, 0], [1, 1]],')
+	assert lines[6] == '    {"name": "Разное", "key": "mix", ' + lines[2][2..lines[2].len - 1] + '}'
+	assert !text.contains('"saturation"')
+	loaded := decode_sidecar(text)!
+	assert loaded.current == 2 && loaded.history.map(it.name) == st.history.map(it.name)
+	for i in 0 .. 2 {
+		assert with_derived(loaded.history[i].state, st.look, st.cam) == st.history[i].state
+	}
+	last := loaded.history[2].state
+	assert last.params.eq[1] == f32(1.55) && last.params.exposure == 0.75
+	assert last.curve_pts[0] == st.edit.curve_pts[0] && last.curve_pts[1].len == 2
+	// Нет поля (и всего state) - по умолчанию
+	min := decode_sidecar('{"app": "vraw", "version": 2, "current": 0, "history": [{"name": "x"}]}')!
+	assert with_derived(min.history[0].state, st.look, st.cam) == with_derived(neutral_edit(),
+		st.look, st.cam)
+	// Новая версия, испорченная запись, неверная позиция - отказ
+	for bad in [text.replace('"version": 2', '"version": 3'),
+		text.replace('"state": {}', '"state": 5'), text.replace('"current": 2', '"current": 3'),
+		text.replace('"history": [', '"history": [7, ')] {
+		if _ := decode_sidecar(bad) {
+			assert false, bad
+		}
+	}
+	// Версия 1 - тот же результат, файл в разы больше
+	v1 := side_v1_text(st.history, st.hist_pos, st.mark)
+	old := decode_sidecar(v1)!
+	assert old.current == 2 && old.history.len == 3
+	for i, h in old.history {
+		assert with_derived(h.state, st.look, st.cam) == st.history[i].state
+	}
+	assert text.len * 10 < v1.len
 }
 
 // ── Браузер папки ──
@@ -423,7 +501,7 @@ fn test_sidecar_legacy_camera_curve() {
 	mut st, mut exp, _ := new_state()
 	st.side_path = side_tmp('legacy')
 	drag(mut exp, 0.3)
-	text := os.read_file(st.side_path)!
+	text := side_v1_text(st.history, st.hist_pos, st.mark)
 	assert !text.contains('camera_curve')
 	legacy := text.replace('"current":', '"camera_curve": [0, 1, 2],\n  "current":')
 	assert legacy.contains('camera_curve')
@@ -438,7 +516,7 @@ fn test_sidecar_legacy_highlight() {
 	mut st, mut exp, _ := new_state()
 	st.side_path = side_tmp('legacy_hl')
 	drag(mut exp, 0.4)
-	text := os.read_file(st.side_path)!
+	text := side_v1_text(st.history, st.hist_pos, st.mark)
 	assert !text.contains('"highlight"')
 	legacy := text.replace('"lens_corr":', '"highlight": 5,\n      "lens_corr":')
 	assert legacy.contains('"highlight": 5')
@@ -453,7 +531,7 @@ fn test_sidecar_old_ai_field() {
 	mut st, mut exp, _ := new_state()
 	st.side_path = side_tmp('ai')
 	drag(mut exp, 0.3)
-	text := os.read_file(st.side_path)!
+	text := side_v1_text(st.history, st.hist_pos, st.mark)
 	assert !text.contains('"ai"')
 	old := text.replace('"lens_corr":', '"ai": 70,\n      "ai_model": "scunet_real_psnr",\n      "lens_corr":')
 	assert old.contains('"ai_model"')
@@ -479,7 +557,8 @@ fn test_sidecar_manual_lens() {
 	assert text.contains('"man_dist": -12')
 	loaded := decode_sidecar(text)!
 	assert loaded.history[1].state.lman == st.edit.lman
-	old := decode_sidecar(text.replace('"man_vign_mid"', '"x_mid"').replace('"man_vign": 35', '"x_v": 35'))!
+	old := decode_sidecar(side_v1_text(st.history, st.hist_pos, st.mark).replace('"man_vign_mid"',
+		'"x_mid"').replace('"man_vign": 35', '"x_v": 35'))!
 	assert old.history[1].state.lman.vign == 0
 	assert old.history[1].state.lman.vign_mid == 50
 }
@@ -543,8 +622,8 @@ fn test_sidecar_wb_sharp_fields() {
 	assert e.profile == 'landscape'
 	assert e.params.sharp.rgb && e.params.sharp.dc_amount == 70
 	assert e.params.sharp.dc_radius == f32(1.1) && e.params.sharp.dc_contrast == 0
-	// Старый файл: полей нет (чужие ключи json2 пропускает)
-	mut old := text
+	// Старый файл (версия 1): полей нет (чужие ключи json2 пропускает)
+	mut old := side_v1_text(st.history, st.hist_pos, st.mark)
 	for key in ['wb_mode', 'wb_temp', 'wb_tint', 'sharp_amount', 'sharp_radius', 'sharp_detail',
 		'sharp_masking', 'haze', 'haze_depth', 'vibrance', 'clarity', 'texture', 'vig_amount', 'vig_mid', 'vig_round', 'vig_feather', 'grain',
 		'grain_size', 'grain_rough', 'sharp_rgb', 'dc_amount', 'dc_radius',

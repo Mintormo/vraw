@@ -90,6 +90,9 @@ pub mut:
 	hsl_hue [8]f32
 	hsl_sat [8]f32
 	hsl_lum [8]f32
+	// Точечный цвет (pcolor.v): цвета, взятые пипеткой, и правки для них
+	// (до pcolor_max); после HSL, в Ч/Б не действует
+	pcolor []PointColor
 	// Стиль проявки (style.v) - производное, по профилю кадра: базовый
 	// слой под контрастом, насыщенностью, сочностью и HSL
 	style Style
@@ -974,6 +977,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 	}
 	use_hsl := hsl_active(&p) && !p.bw // в Ч/Б HSL не действует (bw.v)
 	hsl := if use_hsl { build_hsl(&p) } else { HslLut{} }
+	use_pc := pcolor_on(&p)
+	pc := if use_pc { build_pcolor(p.pcolor) } else { PcLut{} }
 	use_grade := p.grade.active()
 	bwt := if p.bw && bw_active_mix(&p) { build_bw(&p) } else { []f32{} }
 	grade := if use_grade { build_grade(&p.grade) } else { GradeLut{} }
@@ -1022,6 +1027,8 @@ fn render_ex(src &u16, mask &u16, haze &HazeMap, npix int, p Params, mut dst []u
 		hsm:        unsafe { &f32(hsl.sm.data) }
 		hlm:        unsafe { &f32(hsl.lm.data) }
 		hact:       unsafe { &u8(hsl.act.data) }
+		use_pc:     use_pc
+		pc:         pc
 		use_grade:  use_grade
 		bw:         p.bw
 		bwt:        if bwt.len > 0 { unsafe { &f32(bwt.data) } } else { unsafe { nil } }
@@ -1091,6 +1098,8 @@ struct RenderCtx {
 	hsm        &f32 = unsafe { nil }
 	hlm        &f32 = unsafe { nil }
 	hact       &u8  = unsafe { nil }
+	use_pc     bool // точечный цвет (pcolor.v)
+	pc         PcLut
 	use_grade  bool
 	bw         bool // чёрно-белое: bwt - микшер (nil - чистая люма)
 	bwt        &f32 = unsafe { nil }
@@ -1132,6 +1141,7 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 	use_cl := rc.use_cl
 	pcl := rc.pcl
 	use_hsl := rc.use_hsl
+	use_pc := rc.use_pc
 	use_grade := rc.use_grade
 	bw := rc.bw
 	bwt := rc.bwt
@@ -1378,6 +1388,9 @@ fn render_rows(rc &RenderCtx, i0 int, i1 int) {
 				}
 				if use_hsl {
 					vr, vg, vb = hsl_pixel(vr, vg, vb, hdh, hsm, hlm, hact, cdh, csk)
+				}
+				if use_pc {
+					vr, vg, vb = pcolor_pixel(vr, vg, vb, &rc.pc)
 				}
 			}
 			if use_grade {

@@ -276,6 +276,14 @@ mut:
 	brush_hover   bool
 	brush_hx      f32
 	brush_hy      f32
+	// Многоугольник фильтра (masks.v): контур рисуется (щелчки ставят
+	// вершины), курсор над холстом (буфер) - резинка к нему, выделенная
+	// вершина (Delete удаляет; -1 - нет)
+	poly_open  bool
+	poly_hover bool
+	poly_hx    f32
+	poly_hy    f32
+	poly_vsel  int = -1
 	mask_ui    &MaskUi = unsafe { nil }
 	// Удаление пятен (spots_ui.v): режим инструмента, выделенное пятно (-1 -
 	// нет; не правка), перетаскивание, курсор над холстом (буфер холста);
@@ -292,6 +300,10 @@ mut:
 	spot_opacity f32 = 100
 	spot_kind    pipeline.SpotMode
 	spot_ui      &SpotUi = unsafe { nil }
+	// Точечный цвет (pcolor_ui.v): пипетка, выделенная точка, раздел
+	pc_pick bool
+	pc_sel  int = -1
+	pc_ui   &PcUi = unsafe { nil }
 	dust_show    bool
 	dust_amt     f32 = 50
 	// Копирование настроек и пресеты (presets.v): буфер настроек и его
@@ -322,6 +334,13 @@ mut:
 	clip_hi    bool
 	clip_lo    bool
 	m_clipwarn &vgui.MenuItem = unsafe { nil }
+	// Маска фокуса (focus.v) - вид, не правка; буферы превью, фрагмента 1:1
+	// и левого кадра сравнения (свои размеры - без перевыделения)
+	focus_show bool
+	focus_pv   FocusBufs
+	focus_dt   FocusBufs
+	focus_pair FocusBufs
+	m_focus    &vgui.MenuItem = unsafe { nil }
 	// До/после (compare.v) - вид, не правка: удержание «\», шторка и её
 	// положение (доля ширины), перетаскивание линии; буферы «до» (кэш по
 	// ba_key) и «после» (для шторки без пересчёта); пункт меню шторки.
@@ -543,6 +562,9 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		st.hist_r, st.hist_g, st.hist_b = render_histogram(mut st, mut hist, cv.pixels)
 		update_curve_histogram(mut st)
 		show_clip_marks(mut st, mut hist)
+		if st.focus_show {
+			mark_focus(mut cv.pixels, cv.width, cv.height, 1, mut st.focus_pv)
+		}
 		cv.mark_dirty()
 		detail_refresh(mut st)
 		return
@@ -567,6 +589,9 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 		// в RAW-виде пересветы - по сырью (histogram.v)
 		mark_clipping_src(mut cv.pixels, st.clip_hi, st.clip_lo, raw_clip_src(mut st,
 			npix))
+		if st.focus_show { // маска фокуса (focus.v) - поверх, как клип
+			mark_focus(mut cv.pixels, st.gw, st.gh, 1, mut st.focus_pv)
+		}
 		mask_paint(st, mut cv.pixels) // заливка маски фильтра (masks.v)
 	}
 	sync_crop_total(mut st)
@@ -1518,6 +1543,11 @@ fn main() {
 			wb_pick_at(mut st, ev.x, ev.y)
 			return
 		}
+		// Пипетка точечного цвета (pcolor_ui.v): щелчок - новая точка
+		if st.pc_pick && ev.kind == .pointer_down && ev.button == 1 && ev.in_image {
+			pc_pick_at(mut st, ev.x, ev.y)
+			return
+		}
 		// Линия шторки до/после, иначе щелчок - 100% / вписать (compare.v)
 		if ba_input(mut st, ev) {
 			return
@@ -2188,6 +2218,8 @@ fn main() {
 	mask_rows := build_mask_section(mut st, lbl_w, val_w)
 	// Удаление пятен (spots_ui.v)
 	spot_rows := build_spot_section(mut st, lbl_w, val_w)
+	// Точечный цвет (pcolor_ui.v)
+	pc_rows := build_pc_section(mut st, lbl_w, val_w)
 
 	// ── История правок: список, текущая запись выделена ──
 	// Щелчок (или стрелки в списке) - откат к записи, более поздняя -
@@ -2312,9 +2344,12 @@ fn main() {
 		drop(mut st.gmask)
 		crop_leave(mut st)
 		spot_leave(mut st)
+		pc_leave(mut st)
 		st.mask_sel = -1
 		st.mask_part = -1
 		st.mask_drag = MaskDrag{}
+		st.poly_open = false
+		st.poly_vsel = -1
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
 		drop(mut st.cam_view)
@@ -2520,7 +2555,9 @@ fn main() {
 	// ползунка: его стрелки двигают значение)
 	// Кадрирование: Enter - применить, Esc - отменить правки режима
 	win.bind_hotkey('Enter', fn [mut st] () {
-		if st.crop_mode {
+		if st.poly_open {
+			poly_finish(mut st) // многоугольник фильтра: замкнуть
+		} else if st.crop_mode {
 			set_crop_mode(mut st, false)
 		} else if st.spot_mode {
 			set_spot_mode(mut st, false)
@@ -2532,6 +2569,8 @@ fn main() {
 		win.bind_hotkey(k, fn [mut st] () {
 			if st.spot_mode && spot_valid(st) {
 				delete_spot(mut st)
+			} else if poly_vertex_valid(st) {
+				delete_poly_vertex(mut st) // вершина многоугольника
 			}
 		})
 	}
@@ -2549,6 +2588,8 @@ fn main() {
 			} else {
 				set_spot_mode(mut st, false)
 			}
+		} else if st.poly_open {
+			poly_finish(mut st) // многоугольник: замкнуть (меньше 3 точек - убрать)
 		} else if st.mask_pick {
 			set_mask_pick(mut st, false) // пипетка цвета фильтра - отмена
 		} else if st.mask_sel >= 0 {
@@ -2613,9 +2654,12 @@ fn main() {
 		drop(mut st.gmask)
 		crop_leave(mut st)
 		spot_leave(mut st)
+		pc_leave(mut st)
 		st.mask_sel = -1
 		st.mask_part = -1
 		st.mask_drag = MaskDrag{}
+		st.poly_open = false
+		st.poly_vsel = -1
 		st.haze = pipeline.HazeMap{}
 		st.look = CamLook{}
 		drop(mut st.cam_view)
@@ -3107,6 +3151,13 @@ fn main() {
 		set_clip_warn(mut st, v, v)
 	}
 	st.m_clipwarn = m_clipwarn
+	// Маска фокуса (focus.v): резкие места зелёным, как в Capture One
+	mut m_focus := vgui.menu_checkbox(i18n.tr('Маска фокуса'), false)
+	m_focus.shortcut = 'Shift+F'
+	m_focus.on_toggle = fn [mut st] (v bool) {
+		set_focus_show(mut st, v)
+	}
+	st.m_focus = m_focus
 	// Заливка маски выделенного градиентного фильтра (masks.v)
 	mut m_mask := vgui.menu_checkbox(i18n.tr('Маска фильтра'), st.mask_show)
 	m_mask.shortcut = 'O'
@@ -3154,12 +3205,12 @@ fn main() {
 	// Вид гистограммы (histogram.v)
 	m_hist, hist_items := hist_menu(mut st)
 	bar.add_menu(i18n.tr('Вид'), [m_fit, m_z50, m_z100, m_z200, m_zoom, vgui.menu_separator(), m_split,
-		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_hist, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_refresh, m_top, m_panel, m_left, m_bg, m_themes])
+		m_sbs, m_pair, m_swap, m_jpeg, m_clipwarn, m_focus, m_hist, m_mask, m_info, m_nav, vgui.menu_separator(), m_full, m_strip, m_refresh, m_top, m_panel, m_left, m_bg, m_themes])
 	view_ids := ['view.fit', 'view.z50', 'view.z100', 'view.z200', 'view.zoom', 'view.split',
-		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.mask', 'view.info', 'view.nav', 'view.full',
+		'view.sbs', 'view.pair', 'view.swap', 'view.jpeg', 'view.clipwarn', 'view.focus', 'view.mask', 'view.info', 'view.nav', 'view.full',
 		'view.strip', 'view.refresh', 'view.top', 'view.panel', 'view.left']
 	view_items := [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_pair, m_swap, m_jpeg,
-		m_clipwarn, m_mask, m_info, m_nav, m_full, m_strip, m_refresh, m_top, m_panel, m_left]
+		m_clipwarn, m_focus, m_mask, m_info, m_nav, m_full, m_strip, m_refresh, m_top, m_panel, m_left]
 	for i, id in view_ids {
 		mut it := view_items[i]
 		hk_add(mut st, id, 'Вид', mut it)
@@ -3169,7 +3220,7 @@ fn main() {
 		hk_add(mut st, id, 'Вид', mut it)
 	}
 	avail_add(mut st, .frame, [m_fit, m_z50, m_z100, m_z200, m_zoom, m_split, m_sbs, m_jpeg,
-		m_clipwarn])
+		m_clipwarn, m_focus])
 
 	// «Отбор» (rating.v): звёзды и флажки - клавишами, как в Lightroom;
 	// действуют на выделенные в ленте кадры, без выделения - на открытый
@@ -3399,6 +3450,7 @@ fn main() {
 	panel_add(mut st, 'hsl', section([
 		SectionRow{hsl_tabs},
 	]))
+	panel_add(mut st, 'pcolor', section(pc_rows))
 	panel_add(mut st, 'bw', bw_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'grade', grade_section(mut st, lbl_w, val_w))
 	panel_add(mut st, 'masks', section(mask_rows))

@@ -5,6 +5,7 @@ module main
 // (поля вида задаются руками).
 import os
 import vgui
+import json2
 
 fn rt_dir(name string) string {
 	dir := os.join_path(os.temp_dir(), 'vraw_rating_test', name)
@@ -85,8 +86,8 @@ fn test_side_mark_roundtrip() {
 	assert l2.mark == Mark{5, 0} && l2.current == 1 && l2.history.len == 2
 	assert l2.history[1].state.params.exposure == 1
 	// Старый файл: «current» далеко - полный разбор; без пометки - нули
-	old := os.read_file(side)!.replace('"rating": 5,', '').replace('"flag": 0,', '').replace('"current": 1,',
-		'')
+	old := side_v1_text(l2.history, l2.current, Mark{}).replace('"rating": 0,', '').replace('"flag": 0,',
+		'').replace('"current": 1,', '')
 	os.write_file(side, old.replace('"history":', '"current": 1,\n  "history":'))!
 	h3 := read_side_head(raw_path)
 	assert h3.mark == Mark{} && h3.edited
@@ -396,4 +397,24 @@ fn test_rejected_and_after_trash() {
 	assert after_trash(fr[..3], 2, gone) == 'a'
 	// Ушли все
 	assert after_trash(fr[1..3], 0, gone) == ''
+}
+
+// side_v1_text - история в формате сайдкара версии 1 (до 01.11.2026: все
+// поля, отступ на каждое значение) - для проверки чтения старых файлов
+fn side_v1_text(history []HistEntry, pos int, mark Mark) string {
+	mut f := SideFile{
+		version: 1
+		rating:  mark.rating
+		flag:    mark.flag
+		current: pos
+		state:   side_state(history[pos].state)
+	}
+	for h in history {
+		f.history << SideEntry{
+			name:  h.name
+			key:   h.key
+			state: side_state(h.state)
+		}
+	}
+	return json2.encode(f, prettify: true, indent_string: '  ')
 }

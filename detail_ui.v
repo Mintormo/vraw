@@ -570,7 +570,7 @@ fn detail_show(mut st State) {
 		mut cb := st.cv_b
 		if ba && st.ba_sbs && !st.ba_hold && frag_usable(st, side_before) {
 			mut pb := render_side(st, side_before, view)
-			mark_clipping(mut pb, st.clip_hi, st.clip_lo)
+			frag_marks(mut st, mut pb, side_before)
 			set_frag_layer(st, mut cb, side_before, pb)
 		} else {
 			clear_layer(mut cb)
@@ -579,7 +579,7 @@ fn detail_show(mut st State) {
 	if ba && st.ba_hold {
 		if frag_usable(st, side_before) {
 			mut pb := render_side(st, side_before, view)
-			mark_clipping(mut pb, st.clip_hi, st.clip_lo)
+			frag_marks(mut st, mut pb, side_before)
 			set_frag_layer(st, mut cv, side_before, pb)
 		} else {
 			clear_layer(mut cv)
@@ -592,7 +592,7 @@ fn detail_show(mut st State) {
 	}
 	mut pix := render_side(st, side_after, view)
 	if view == .off {
-		mark_clipping(mut pix, st.clip_hi, st.clip_lo)
+		frag_marks(mut st, mut pix, side_after)
 		frag_mask_paint(st, mut pix) // заливка маски фильтра, как у превью
 	}
 	if ba && st.ba_split {
@@ -605,7 +605,7 @@ fn detail_show(mut st State) {
 			return
 		}
 		mut pb := render_side(st, side_before, view)
-		mark_clipping(mut pb, st.clip_hi, st.clip_lo)
+		frag_marks(mut st, mut pb, side_before)
 		mut dt := st.dt
 		dt.split_a = pix
 		dt.split_b = pb

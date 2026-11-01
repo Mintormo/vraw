@@ -110,6 +110,9 @@ fn set_spot_mode(mut st State, on bool) {
 			set_crop_mode(mut st, false)
 		}
 		set_wb_pick(mut st, false)
+		if st.pc_pick {
+			set_pc_pick(mut st, false)
+		}
 		if st.mask_sel >= 0 {
 			select_mask(mut st, -1)
 		}

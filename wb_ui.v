@@ -117,6 +117,9 @@ fn sync_wb_mode(mut st State) {
 // пятна; щелчок левой кнопкой по нейтрали задаёт ББ
 fn set_wb_pick(mut st State, on bool) {
 	st.wb_pick = on
+	if on && st.pc_pick {
+		set_pc_pick(mut st, false)
+	}
 	if !isnil(st.wb_pick_btn) {
 		mut b := st.wb_pick_btn
 		b.style = if on { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.flat }

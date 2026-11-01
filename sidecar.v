@@ -6,11 +6,27 @@ module main
 // по истории (sync_sidecar), читается при открытии файла - настройки и
 // история восстанавливаются.
 //
-// Формат - JSON (json2, отступ 2 пробела): SideFile с настройками кадра
-// в «файловом» виде (SideState - только исходные значения, массивы
-// списками); здесь же перевод SideState <-> EditState.
+// Формат - JSON. Настройки кадра в «файловом» виде - SideState (только
+// исходные значения, массивы списками); здесь же перевод SideState <->
+// EditState. Версия 2 (с 01.11.2026) - компактная и читаемая:
+//   {
+//     "app": "vraw", "version": 2, "rating": 0, "flag": 0, "current": 2,
+//     "state": {"exposure": -0.28},
+//     "history": [
+//       {"name": "Открыт файл", "state": {}},
+//       {"name": "Экспозиция -0.28", "key": "exposure", "state": {"exposure": -0.28}}
+//     ]
+//   }
+// В настройках - только поля, отличные от side_defaults (отсутствует -
+// значит по умолчанию), числа - до 6 значащих цифр, точки кривых - парами
+// [x, y], запись истории - одной строкой. Каждая запись хранит свои
+// настройки целиком (не разницу с предыдущей): испорченная запись не
+// тянет за собой остальные. Версия 1 (до 01.11.2026: все поля, отступ на
+// каждое значение - в 15-30 раз больше) читается (SideFile), при первой
+// правке файл перезаписывается версией 2.
 import os
 import math
+import strings
 import json2
 import vgui
 import pipeline
@@ -18,8 +34,7 @@ import lens
 import i18n
 
 const sidecar_ext = '.vraw.json'
-const sidecar_version = 1
-
+const sidecar_version = 2
 fn sidecar_path(raw_path string) string {
 	return raw_path + sidecar_ext
 }
@@ -27,8 +42,8 @@ fn sidecar_path(raw_path string) string {
 // SideState - настройки кадра в файле: только исходные значения (точки
 // кривых, а не таблицы - они производные), массивы - списками. Имена
 // полей - это ключи JSON, менять нельзя (старые сайдкары). Значений по
-// умолчанию нет: в файл пишется всё, а `[][]T{len: 4, init: ...}` в поле
-// ломает C-кодоген V внутри json2.
+// умолчанию в структуре нет (`[][]T{len: 4, init: ...}` в поле ломает
+// C-кодоген V внутри json2) - они в side_defaults.
 struct SideState {
 	exposure      f32
 	shadows       f32
@@ -117,6 +132,37 @@ struct SideState {
 	man_vign_mid f32
 	man_ca_r     f32
 	man_ca_b     f32
+	// Точечный цвет (pipeline.PointColor; в старых файлах нет - пусто)
+	pcolor []SidePColor
+}
+
+// SidePColor - точка точечного цвета в файле: центр (оттенок в градусах,
+// насыщенность и яркость 0..1) и правки
+struct SidePColor {
+	hue   f32
+	sat   f32
+	val   f32
+	dhue  f32
+	dsat  f32
+	dlum  f32
+	range f32
+}
+
+fn side_pcolor(c pipeline.PointColor) SidePColor {
+	return SidePColor{c.hue, c.sat, c.val, c.dhue, c.dsat, c.dlum, c.range}
+}
+
+// pcolor_of - точка из файла, значения - в пределах ползунков
+fn pcolor_of(s SidePColor) pipeline.PointColor {
+	return pipeline.PointColor{
+		hue:   if s.hue >= 0 && s.hue < 360 { s.hue } else { f32(0) }
+		sat:   clamp01f(s.sat)
+		val:   clamp01f(s.val)
+		dhue:  clampf(s.dhue, -100, 100)
+		dsat:  clampf(s.dsat, -100, 100)
+		dlum:  clampf(s.dlum, -100, 100)
+		range: clamp_pct(s.range)
+	}
 }
 
 // SideSpot - пятно в файле (pipeline.Spot): режим строкой ('heal' /
@@ -173,6 +219,8 @@ struct SideMask {
 	// Расширить / сузить и имя (в старых файлах нет - 0 и по виду)
 	grow f32
 	name string
+	// Многоугольник: вершины (в старых файлах нет - пусто)
+	pts []f32
 }
 
 // SidePart - часть фильтра в файле (pipeline.MaskPart)
@@ -190,6 +238,7 @@ struct SidePart {
 	invert  bool
 	strokes []SideStroke
 	auto    bool
+	pts     []f32 // многоугольник: вершины (в старых файлах нет - пусто)
 }
 
 fn side_part(p pipeline.MaskPart) SidePart {
@@ -211,6 +260,7 @@ fn side_part(p pipeline.MaskPart) SidePart {
 		invert:  p.invert
 		strokes: p.strokes.map(side_stroke(it))
 		auto:    p.auto
+		pts:     p.pts.clone()
 	}
 }
 
@@ -237,7 +287,15 @@ fn part_of(s SidePart) pipeline.MaskPart {
 		invert:  s.invert
 		strokes: s.strokes.map(stroke_of(it))
 		auto:    s.auto
+		pts:     poly_pts_of(s.pts)
 	}
+}
+
+// poly_pts_of - вершины многоугольника из файла: пары, в пределах кадра с
+// запасом (ручку можно вынести за край), нечётная - отбрасывается
+fn poly_pts_of(p []f32) []f32 {
+	n := p.len / 2 * 2
+	return p[..n].map(clampf(it, -1, 2))
 }
 
 // kind_str / kind_of - вид формы строкой (неизвестный - линейный)
@@ -246,6 +304,7 @@ fn kind_str(k pipeline.MaskKind) string {
 		.linear { 'linear' }
 		.radial { 'radial' }
 		.brush { 'brush' }
+		.polygon { 'polygon' }
 	}
 }
 
@@ -253,6 +312,7 @@ fn kind_of(s string) pipeline.MaskKind {
 	return match s {
 		'radial' { pipeline.MaskKind.radial }
 		'brush' { pipeline.MaskKind.brush }
+		'polygon' { pipeline.MaskKind.polygon }
 		else { pipeline.MaskKind.linear }
 	}
 }
@@ -328,6 +388,7 @@ fn side_mask(m pipeline.Mask) SideMask {
 		auto:       m.auto
 		grow:       m.grow
 		name:       m.name
+		pts:        m.pts.clone()
 	}
 }
 
@@ -406,6 +467,7 @@ fn mask_of(s SideMask) pipeline.Mask {
 		auto:       s.auto
 		grow:       c(s.grow, 100)
 		name:       clean_mask_name(s.name)
+		pts:        poly_pts_of(s.pts)
 	}
 }
 
@@ -436,17 +498,18 @@ struct SideEntry {
 	state SideState
 }
 
-// SideFile - документ сайдкара. state (= history[current].state) -
-// отдельно, чтобы будущей пакетной обработке и копированию настроек не
-// разбирать историю. Поле camera_curve из старых сайдкаров (его читал
-// убранный консольный vraw) json2 при чтении пропускает.
-// Рейтинг, флажок и позиция - в начале документа (json2 пишет поля по
-// порядку): ленте при открытии папки хватает первых строк файла
-// (read_side_head), разбирать историю не нужно.
+// SideFile - документ сайдкара версии 1 (только чтение старых файлов,
+// decode_sidecar_v1): все поля настроек в каждой записи. state (=
+// history[current].state) - и в версии 2 отдельно, чтобы пакетной
+// обработке и копированию настроек не разбирать историю. Поле
+// camera_curve из старых сайдкаров (его читал убранный консольный vraw)
+// json2 при чтении пропускает. Рейтинг, флажок и позиция - в начале
+// документа (с 03.10.2026): ленте при открытии папки хватает первых строк
+// файла (read_side_head), разбирать историю не нужно.
 struct SideFile {
 mut:
 	app     string = 'vraw'
-	version int    = sidecar_version
+	version int    = 1
 	rating  int // звёзды 0..5 (отбор, вне истории правок)
 	flag    int // 1 - отобран, -1 - отклонён, 0 - нет
 	current int
@@ -526,6 +589,7 @@ fn side_state(e EditState) SideState {
 		man_vign_mid:  e.lman.vign_mid
 		man_ca_r:      e.lman.ca_r
 		man_ca_b:      e.lman.ca_b
+		pcolor:        p.pcolor.map(side_pcolor(it))
 	}
 }
 
@@ -615,6 +679,7 @@ fn edit_state(s SideState) !EditState {
 					f32(10)
 				}
 			}
+			pcolor:        s.pcolor#[..pipeline.pcolor_max].map(pcolor_of(it))
 		}
 		lens_corr: s.lens_corr
 		use_curve: s.use_curve
@@ -673,22 +738,185 @@ fn encode_sidecar(st &State) string {
 }
 
 // encode_history - история и текущая позиция как JSON-документ сайдкара
-// (и для кадра, который не открыт: вставка настроек, presets.v)
+// версии 2 (и для кадра, который не открыт: вставка настроек, presets.v).
+// Рейтинг, флажок и позиция - во второй строке: ленте хватает начала
+// файла (read_side_head).
 fn encode_history(history []HistEntry, pos int, mark Mark) string {
-	mut f := SideFile{
-		rating:  mark.rating
-		flag:    mark.flag
-		state:   side_state(history[pos].state)
-		current: pos
+	defs := side_obj(side_defaults())
+	mut entries := []string{cap: history.len}
+	mut cur := ''
+	for i, h in history {
+		state := any_line(json2.Any(side_sparse(side_state(h.state), defs)))
+		if i == pos {
+			cur = state
+		}
+		mut e := '{"name": ${json2.encode(h.name)}'
+		if h.key != '' {
+			e += ', "key": ${json2.encode(h.key)}'
+		}
+		entries << e + ', "state": ${state}}'
 	}
-	for h in history {
-		f.history << SideEntry{
-			name:  h.name
-			key:   h.key
-			state: side_state(h.state)
+	mut b := strings.new_builder(256 + 128 * history.len)
+	b.write_string('{\n  "app": "vraw", "version": ${sidecar_version}, "rating": ${mark.rating}, ')
+	b.write_string('"flag": ${mark.flag}, "current": ${pos},\n')
+	b.write_string('  "state": ${cur},\n  "history": [\n    ')
+	b.write_string(entries.join(',\n    '))
+	b.write_string('\n  ]\n}\n')
+	return b.str()
+}
+
+// side_defaults - настройки по умолчанию ФОРМАТА версии 2: поля, равные
+// им, в файл не пишутся, отсутствующие читаются так. Менять нельзя -
+// записанные файлы прочитались бы иначе (новое поле добавлять можно - со
+// значением, которое старые файлы и так подразумевают). Сейчас совпадает
+// с side_state(neutral_edit()) (тест test_sidecar_defaults_neutral), так что
+// у нетронутого снимка настройки пустые - «{}».
+fn side_defaults() SideState {
+	return SideState{
+		saturation:   1
+		eq:           []f32{len: 5}
+		hsl_hue:      []f32{len: 8}
+		hsl_sat:      []f32{len: 8}
+		hsl_lum:      []f32{len: 8}
+		curves:       [][]vgui.CurvePoint{len: 4, init: identity_curve()}
+		lens_corr:    true
+		use_curve:    true
+		nr:           []f32{len: 4}
+		sharp_radius: 1
+		haze_depth:   25
+		dc_radius:    0.75
+		dc_contrast:  10
+		crop:         [f32(0), 0, 1, 1]
+		crop_aw:      3
+		crop_ah:      2
+		vig_mid:      50
+		vig_feather:  50
+		grain_size:   25
+		grain_rough:  50
+		grade_blend:  50
+		bw_mix:       []f32{len: 8}
+		man_vign_mid: 50
+	}
+}
+
+// side_obj - настройки объектом JSON в виде файла v2: числа округлены до
+// 6 значащих цифр, точки кривых - парами [x, y]
+fn side_obj(s SideState) map[string]json2.Any {
+	a := json2.decode[json2.Any](json2.encode(s)) or { return map[string]json2.Any{} }
+	mut m := round_any(a).as_map()
+	if c := m['curves'] {
+		mut cs := []json2.Any{}
+		for pts in c.as_array() {
+			cs << json2.Any(pts.as_array().map(pt_pair(it)))
+		}
+		m['curves'] = json2.Any(cs)
+	}
+	return m
+}
+
+// pt_pair - точка кривой {"x": .., "y": ..} парой [x, y]
+fn pt_pair(p json2.Any) json2.Any {
+	m := p.as_map()
+	return json2.Any([m['x'] or { json2.Any(0) }, m['y'] or { json2.Any(0) }])
+}
+
+// pair_pt - обратно: пара [x, y] - точкой {"x": .., "y": ..} (не пара -
+// как есть: разбор SideState отвергнет)
+fn pair_pt(p json2.Any) json2.Any {
+	if p is []json2.Any && p.len == 2 {
+		return json2.Any({
+			'x': p[0]
+			'y': p[1]
+		})
+	}
+	return p
+}
+
+// side_sparse - настройки без полей, равных умолчанию (defs - side_obj
+// от side_defaults)
+fn side_sparse(s SideState, defs map[string]json2.Any) map[string]json2.Any {
+	mut r := map[string]json2.Any{}
+	for k, v in side_obj(s) {
+		if d := defs[k] {
+			if d.json_str() == v.json_str() {
+				continue
+			}
+		}
+		r[k] = v
+	}
+	return r
+}
+
+// side_from_obj - SideState из настроек файла v2: умолчания, поверх -
+// поля файла (чужие ключи разбор пропускает, неверные типы - ошибка)
+fn side_from_obj(obj json2.Any, defs map[string]json2.Any) !SideState {
+	if obj !is map[string]json2.Any {
+		return error(i18n.tr('пустая или испорченная история'))
+	}
+	mut m := defs.clone()
+	for k, v in obj.as_map() {
+		m[k] = v
+	}
+	if c := m['curves'] {
+		mut cs := []json2.Any{}
+		for pts in c.as_array() {
+			cs << json2.Any(pts.as_array().map(pair_pt(it)))
+		}
+		m['curves'] = json2.Any(cs)
+	}
+	return json2.decode[SideState](json2.encode(json2.Any(m)))!
+}
+
+// round_any - числа до 6 значащих цифр (вглубь массивов и
+// объектов); json2 читает все числа как f64
+fn round_any(a json2.Any) json2.Any {
+	return match a {
+		f64 {
+			json2.Any(round_sig(a))
+		}
+		[]json2.Any {
+			json2.Any(a.map(round_any(it)))
+		}
+		map[string]json2.Any {
+			mut r := map[string]json2.Any{}
+			for k, v in a {
+				r[k] = round_any(v)
+			}
+			json2.Any(r)
+		}
+		else {
+			a
 		}
 	}
-	return json2.encode(f, prettify: true, indent_string: '  ')
+}
+
+// round_sig - 6 значащих цифр: убирает шум f32 (1.5500001 -> 1.55);
+// точность 1e-6 - ниже любой видимой разницы
+fn round_sig(v f64) f64 {
+	if v == 0 || math.is_nan(v) || math.is_inf(v, 0) {
+		return v
+	}
+	return '${v:.6g}'.f64()
+}
+
+// any_line - JSON одной строкой с пробелами после «,» и «:» (как пишет
+// человек; json2.encode без prettify пробелов не ставит)
+fn any_line(a json2.Any) string {
+	match a {
+		map[string]json2.Any {
+			mut parts := []string{cap: a.len}
+			for k, v in a {
+				parts << '${json2.encode(k)}: ${any_line(v)}'
+			}
+			return '{' + parts.join(', ') + '}'
+		}
+		[]json2.Any {
+			return '[' + a.map(any_line(it)).join(', ') + ']'
+		}
+		else {
+			return a.json_str()
+		}
+	}
 }
 
 // LoadedSidecar - прочитанный сайдкар: снимки ещё без производных полей
@@ -699,15 +927,57 @@ struct LoadedSidecar {
 }
 
 // decode_sidecar - сайдкар из JSON с проверкой: чужой файл, новая
-// версия, испорченная история или массивы - ошибка
+// версия, испорченная история или массивы - ошибка. Версия 1 - полным
+// разбором SideFile, 2 - через json2.Any с умолчаниями (side_from_obj).
 fn decode_sidecar(text string) !LoadedSidecar {
-	f := json2.decode[SideFile](text) or { return error(i18n.tr('не JSON сайдкара vraw')) }
-	if f.app != 'vraw' {
+	root := json2.decode[json2.Any](text) or { return error(i18n.tr('не JSON сайдкара vraw')) }
+	if root !is map[string]json2.Any {
+		return error(i18n.tr('не JSON сайдкара vraw'))
+	}
+	m := root.as_map()
+	app := m['app'] or { json2.Any('') }
+	if app !is string || app.str() != 'vraw' {
 		return error(i18n.tr('не сайдкар vraw'))
 	}
-	if f.version > sidecar_version {
-		return error(i18n.trf('версия {0} новее программы', '${f.version}'))
+	version := (m['version'] or { json2.Any(0) }).int()
+	if version > sidecar_version {
+		return error(i18n.trf('версия {0} новее программы', '${version}'))
 	}
+	if version < 2 {
+		return decode_sidecar_v1(text)
+	}
+	hist := m['history'] or { json2.Any(0) }
+	current := (m['current'] or { json2.Any(-1) }).int()
+	if hist !is []json2.Any || hist.as_array().len == 0 || current < 0
+		|| current >= hist.as_array().len {
+		return error(i18n.tr('пустая или испорченная история'))
+	}
+	defs := side_obj(side_defaults())
+	mut hs := []HistEntry{}
+	for h in hist.as_array() {
+		if h !is map[string]json2.Any {
+			return error(i18n.tr('пустая или испорченная история'))
+		}
+		hm := h.as_map()
+		hs << HistEntry{
+			name:  (hm['name'] or { json2.Any('') }).str()
+			key:   (hm['key'] or { json2.Any('') }).str()
+			state: edit_state(side_from_obj(hm['state'] or { json2.Any(map[string]json2.Any{}) },
+				defs)!)!
+		}
+	}
+	return LoadedSidecar{
+		history: hs
+		current: current
+		mark:    clamp_mark((m['rating'] or { json2.Any(0) }).int(), (m['flag'] or { json2.Any(0) }).int())
+	}
+}
+
+// decode_sidecar_v1 - сайдкар версии 1 (до 01.11.2026): SideFile, все
+// поля; отсутствующие поля - нули (их читает edit_state, как в старых
+// файлах)
+fn decode_sidecar_v1(text string) !LoadedSidecar {
+	f := json2.decode[SideFile](text) or { return error(i18n.tr('не JSON сайдкара vraw')) }
 	if f.history.len == 0 || f.current < 0 || f.current >= f.history.len {
 		return error(i18n.tr('пустая или испорченная история'))
 	}

@@ -8,7 +8,11 @@ module main
 // «приклеен» к снимку. Выделенный фильтр (st.mask_sel, не правка) - его
 // ползунки в секции и ручки на холсте: линейный - точки начала (полное
 // действие) и конца перехода, середина - перенос; радиальный - центр
-// (перенос) и концы полуосей (размер и поворот). Каждое отпускание ручки -
+// (перенос) и концы полуосей (размер и поворот); многоугольник - вершины
+// (перетаскивание, щелчок по стороне - новая вершина, Delete - удалить) и
+// центр (перенос). Новый многоугольник рисуется щелчками: вершина за
+// вершиной, замыкает щелчок по первой, двойной щелчок, Enter или Esc.
+// Каждое отпускание ручки -
 // запись в истории. Esc - снять выделение (ручки исчезают). Заливка маски
 // (O, «Вид - Маска фильтра») - красным поверх снимка, вес выделенного.
 //
@@ -37,6 +41,7 @@ enum MaskDragKind {
 	b    // линейный: конец перехода
 	move // перенос: середина линейного, центр радиального
 	axis // радиальный: конец полуоси (sign - какой конец, ry - вторая ось)
+	vertex // многоугольник: вершина idx
 }
 
 struct MaskDrag {
@@ -48,6 +53,8 @@ mut:
 	px    f64 // точка нажатия в единицах кадра (view_map)
 	py    f64
 	moved bool
+	idx   int  // многоугольник: вершина
+	added bool // многоугольник: вершина добавлена щелчком по стороне
 }
 
 // MaskUi - виджеты секции (sync_mask_ui выставляет их из st.edit)
@@ -89,7 +96,8 @@ mut:
 	shape_box   &vgui.VBox = unsafe { nil }
 	brush_rows  []&vgui.Widget
 	radial_rows []&vgui.Widget
-	shape_shown int = -2 // показанный набор: -1 - пусто, 0 - кисть, 1 - радиальная
+	poly_rows   []&vgui.Widget // многоугольник: растушёвка, снаружи
+	shape_shown int = -2 // показанный набор: -1 - пусто, 0 - кисть, 1 - радиальная, 2 - многоугольник
 }
 
 // ── Отображение холст <-> кадр ──
@@ -199,6 +207,7 @@ fn kind_name(k pipeline.MaskKind) string {
 	return match k {
 		.radial { i18n.tr('Радиальный') }
 		.brush { i18n.tr('Кисть') }
+		.polygon { i18n.tr('Многоугольник') }
 		.linear { i18n.tr('Линейный') }
 	}
 }
@@ -214,6 +223,10 @@ fn mask_name(m pipeline.Mask, i int) string {
 
 // select_mask - выделить фильтр idx (-1 - снять выделение)
 fn select_mask(mut st State, idx int) {
+	if st.poly_open {
+		poly_finish(mut st)
+	}
+	st.poly_vsel = -1
 	st.mask_sel = if idx >= 0 && idx < st.edit.params.masks.len { idx } else { -1 }
 	if st.mask_sel >= 0 && st.spot_mode {
 		set_spot_mode(mut st, false)
@@ -297,9 +310,10 @@ fn add_mask(mut st State, kind pipeline.MaskKind) {
 		set_crop_mode(mut st, false)
 	}
 	mut m := pipeline.Mask{
-		kind: kind
+		kind:    kind
+		feather: if kind == .polygon { f32(poly_feather_def) } else { f32(50) }
 	}
-	if kind != .brush {
+	if kind != .brush && kind != .polygon {
 		m.set_shape(-1, default_shape(st, kind, false))
 	}
 	if st.spot_mode {
@@ -308,9 +322,12 @@ fn add_mask(mut st State, kind pipeline.MaskKind) {
 	st.edit.params.masks << m
 	st.mask_sel = st.edit.params.masks.len - 1
 	st.mask_part = -1
+	st.poly_open = kind == .polygon // контур рисуется щелчками
+	st.poly_vsel = -1
 	name := match kind {
 		.radial { i18n.tr('радиальный') }
 		.brush { i18n.tr('кисть') }
+		.polygon { i18n.tr('многоугольник') }
 		.linear { i18n.tr('линейный') }
 	}
 	mask_changed(mut st, 'mask_add', i18n.trf('Фильтр: добавлен {0}', '${name}'))
@@ -338,6 +355,9 @@ const part_adds = [
 	PartAdd{'Добавить: кистью', .brush, .add},
 	PartAdd{'Пересечь: радиальной', .radial, .intersect},
 	PartAdd{'Пересечь: линейной', .linear, .intersect},
+	PartAdd{'Добавить: многоугольник', .polygon, .add},
+	PartAdd{'Вычесть: многоугольник', .polygon, .subtract},
+	PartAdd{'Пересечь: многоугольником', .polygon, .intersect},
 ]
 
 fn op_index(op pipeline.MaskOp) int {
@@ -360,6 +380,7 @@ fn kind_word(k pipeline.MaskKind) string {
 	return match k {
 		.radial { i18n.tr('радиальная') }
 		.brush { i18n.tr('кисть') }
+		.polygon { i18n.tr('многоугольник') }
 		.linear { i18n.tr('линейная') }
 	}
 }
@@ -387,6 +408,10 @@ fn select_part(mut st State, idx int) {
 	if !mask_valid(st) {
 		return
 	}
+	if st.poly_open {
+		poly_finish(mut st)
+	}
+	st.poly_vsel = -1
 	n := st.edit.params.masks[st.mask_sel].parts.len
 	st.mask_part = if idx >= 0 && idx < n { idx } else { -1 }
 	st.mask_drag = MaskDrag{}
@@ -399,9 +424,10 @@ fn add_part(mut st State, kind pipeline.MaskKind, op pipeline.MaskOp) {
 	if !mask_valid(st) || st.gw <= 0 {
 		return
 	}
-	mut s := if kind == .brush {
+	mut s := if kind == .brush || kind == .polygon {
 		pipeline.MaskPart{
-			kind: .brush
+			kind:    kind
+			feather: if kind == .polygon { f32(poly_feather_def) } else { f32(50) }
 		}
 	} else {
 		default_shape(st, kind, true)
@@ -411,6 +437,8 @@ fn add_part(mut st State, kind pipeline.MaskKind, op pipeline.MaskOp) {
 	m.parts << s
 	st.edit.params.masks[st.mask_sel] = m
 	st.mask_part = m.parts.len - 1
+	st.poly_open = kind == .polygon
+	st.poly_vsel = -1
 	mask_changed(mut st, 'mask_part', '${shape_label(st)}: ${i18n.tr(mask_ops[op_index(op)]).to_lower()} ${kind_word(kind)}')
 }
 
@@ -547,6 +575,7 @@ struct MaskHandle {
 	sign f64
 	x    f32
 	y    f32
+	idx  int // многоугольник: вершина
 }
 
 // m_to_screen - точка кадра -> экран холста
@@ -561,23 +590,46 @@ fn mask_handles(st &State, mm pipeline.MaskMap) []MaskHandle {
 	if m.kind == .brush {
 		return hs // кисть рисуется, ручек нет
 	}
+	if m.kind == .polygon {
+		// Вершины; у замкнутого - ещё центр (перенос). Пока рисуется -
+		// только первая вершина (щелчок по ней замыкает)
+		n := m.pts.len / 2
+		for k in 0 .. n {
+			if st.poly_open && k > 0 {
+				break
+			}
+			vx, vy := m_to_screen(st, mm, f64(m.pts[2 * k]) * mm.ar, f64(m.pts[2 * k + 1]))
+			hs << MaskHandle{
+				kind: .vertex
+				x:    vx
+				y:    vy
+				idx:  k
+			}
+		}
+		if !st.poly_open && n >= 3 {
+			cx, cy := poly_center(m.pts, mm.ar)
+			qx, qy := m_to_screen(st, mm, cx, cy)
+			hs << MaskHandle{.move, false, 0, qx, qy, 0}
+		}
+		return hs
+	}
 	p := mask_pts(m, mm.ar)
 	if m.kind == .linear {
 		ax, ay := m_to_screen(st, mm, p.ax, p.ay)
 		bx, by := m_to_screen(st, mm, p.bx, p.by)
-		hs << MaskHandle{.a, false, 0, ax, ay}
-		hs << MaskHandle{.b, false, 0, bx, by}
-		hs << MaskHandle{.move, false, 0, (ax + bx) / 2, (ay + by) / 2}
+		hs << MaskHandle{.a, false, 0, ax, ay, 0}
+		hs << MaskHandle{.b, false, 0, bx, by, 0}
+		hs << MaskHandle{.move, false, 0, (ax + bx) / 2, (ay + by) / 2, 0}
 		return hs
 	}
 	for s in [1.0, -1.0] {
 		ux, uy := m_to_screen(st, mm, p.ax + s * p.ux, p.ay + s * p.uy)
-		hs << MaskHandle{.axis, false, s, ux, uy}
+		hs << MaskHandle{.axis, false, s, ux, uy, 0}
 		vx, vy := m_to_screen(st, mm, p.ax + s * p.vx, p.ay + s * p.vy)
-		hs << MaskHandle{.axis, true, s, vx, vy}
+		hs << MaskHandle{.axis, true, s, vx, vy, 0}
 	}
 	cx, cy := m_to_screen(st, mm, p.ax, p.ay)
-	hs << MaskHandle{.move, false, 0, cx, cy}
+	hs << MaskHandle{.move, false, 0, cx, cy, 0}
 	return hs
 }
 
@@ -599,6 +651,12 @@ fn shape_anchor(o pipeline.MaskPart, ar f64) (f64, f64, bool) {
 			return 0, 0, false
 		}
 		return f64(o.strokes[0].pts[0]) * ar, f64(o.strokes[0].pts[1]), true
+	}
+	if o.kind == .polygon {
+		if o.pts.len < 2 {
+			return 0, 0, false
+		}
+		return f64(o.pts[0]) * ar, f64(o.pts[1]), true
 	}
 	return f64(o.ax) * ar, f64(o.ay), true
 }
@@ -662,6 +720,17 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			if st.mask_pick {
 				return false
 			}
+			if poly_selected(st) {
+				// Резинка от последней вершины к курсору (mask_overlay)
+				st.poly_hover = true
+				st.poly_hx = ev.fx
+				st.poly_hy = ev.fy
+				if poly_drawing(st) {
+					mask_redraw(st)
+					vgui.set_cursor(vgui.sdl_system_cursor_crosshair)
+					return true
+				}
+			}
 			brush := brush_selected(st)
 			if brush {
 				// Круг кисти под курсором (mask_overlay)
@@ -692,8 +761,9 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 		.leave {
 			// Курсор фильтра за холстом не остаётся
 			vgui.set_cursor(vgui.sdl_system_cursor_default)
-			if st.brush_hover {
+			if st.brush_hover || st.poly_hover {
 				st.brush_hover = false
+				st.poly_hover = false
 				mask_redraw(st)
 			}
 			return false
@@ -708,8 +778,24 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				}
 				return true
 			}
+			// Многоугольник рисуется: щелчок - вершина (или замкнуть)
+			if poly_drawing(st) {
+				poly_click(mut st, mm, ev, sx, sy)
+				return true
+			}
 			h := mask_hit(st, mm, sx, sy)
 			if h.kind == .none {
+				// Щелчок по стороне многоугольника - новая вершина (и сразу
+				// тянется)
+				if poly_selected(st) {
+					k := poly_edge_hit(st, mm, sx, sy)
+					if k >= 0 {
+						poly_insert(mut st, mm, k, ev.fx, ev.fy)
+						return true
+					}
+					st.poly_vsel = -1
+					mask_redraw(st)
+				}
 				sp := shape_pin_hit(st, mm, sx, sy)
 				if sp > -2 {
 					select_part(mut st, sp)
@@ -734,7 +820,10 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 				start: st.edit.params.masks[st.mask_sel].shape(st.mask_part)
 				px:    qx
 				py:    qy
+				idx:   h.idx
 			}
+			st.poly_vsel = if h.kind == .vertex { h.idx } else { -1 }
+			mask_redraw(st)
 			return true
 		}
 		.pointer_move {
@@ -765,10 +854,11 @@ fn mask_input(mut st State, ev &vgui.CanvasInputEvent) bool {
 			if d.kind == .none {
 				return false
 			}
-			if d.moved {
+			if d.moved || d.added {
 				name := match d.kind {
 					.move { i18n.tr('перенос') }
 					.axis { i18n.tr('размер') }
+					.vertex { if d.added { i18n.tr('точка добавлена') } else { i18n.tr('точка') } }
 					else { i18n.tr('переход') }
 				}
 				mask_changed(mut st, 'mask_shape', '${shape_label(st)}: ${name}')
@@ -926,6 +1016,23 @@ fn drag_mask(d MaskDrag, x f64, y f64, ar f64) pipeline.MaskPart {
 			m.ay = f32(f64(d.start.ay) + dy)
 			m.bx = f32(f64(d.start.bx) + dx)
 			m.by = f32(f64(d.start.by) + dy)
+			if m.kind == .polygon {
+				// Свой массив: исходный делит снимок истории
+				mut p := d.start.pts.clone()
+				for k := 0; k + 1 < p.len; k += 2 {
+					p[k] = f32(f64(p[k]) + dx)
+					p[k + 1] = f32(f64(p[k + 1]) + dy)
+				}
+				m.pts = p
+			}
+		}
+		.vertex {
+			mut p := d.start.pts.clone()
+			if 2 * d.idx + 1 < p.len {
+				p[2 * d.idx] = f32(x / ar)
+				p[2 * d.idx + 1] = f32(y)
+			}
+			m.pts = p
 		}
 		.axis {
 			// Конец полуоси: длина - до курсора, поворот - по направлению
@@ -1000,6 +1107,28 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 				ctx.draw_circle(cx, cy, ri, mask_soft)
 			}
 		}
+	} else if m.kind == .polygon {
+		draw_poly(mut ctx, st, mm, m.pts, !st.poly_open, mask_line, true)
+		n := m.pts.len / 2
+		if st.poly_open && n > 0 {
+			// Вершины рисуемого контура и резинка к курсору (над снимком)
+			for k in 1 .. n {
+				vx, vy := m_to_screen(st, mm, f64(m.pts[2 * k]) * mm.ar, f64(m.pts[2 * k + 1]))
+				ctx.fill_circle(vx, vy, 4.5, mask_dark)
+				ctx.fill_circle(vx, vy, 3, mask_line)
+			}
+			mx := ctx.mouse_x
+			my := ctx.mouse_y
+			if st.poly_hover && cv.hovered && mx >= ix0 && mx < ix1 && my >= iy0 && my < iy1 {
+				lx, ly := m_to_screen(st, mm, f64(m.pts[2 * n - 2]) * mm.ar, f64(m.pts[2 * n - 1]))
+				hx, hy := cv.buf_to_screen(st.poly_hx, st.poly_hy)
+				ctx.draw_line_thick(lx, ly, hx, hy, 1, mask_line)
+				if n >= 2 {
+					fx, fy := m_to_screen(st, mm, f64(m.pts[0]) * mm.ar, f64(m.pts[1]))
+					ctx.draw_line(hx, hy, fx, fy, mask_soft)
+				}
+			}
+		}
 	} else if m.kind == .linear {
 		ax, ay := m_to_screen(st, mm, p.ax, p.ay)
 		bx, by := m_to_screen(st, mm, p.bx, p.by)
@@ -1033,9 +1162,12 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 		}
 	}
 	for h in mask_handles(st, mm) {
-		r := if h.kind == .move { f32(6) } else { f32(5) }
+		// Вершины многоугольника - помельче; выделенная (Delete) и первая у
+		// рисуемого (щелчок замыкает) - цветом ручки переноса
+		r := if h.kind == .move { f32(6) } else if h.kind == .vertex { f32(4.5) } else { f32(5) }
+		pin := h.kind == .move || (h.kind == .vertex && (h.idx == st.poly_vsel || st.poly_open))
 		ctx.fill_circle(h.x, h.y, r + 1.5, mask_dark)
-		ctx.fill_circle(h.x, h.y, r, if h.kind == .move { mask_pin } else { mask_line })
+		ctx.fill_circle(h.x, h.y, r, if pin { mask_pin } else { mask_line })
 	}
 	// Остальные формы выделенного фильтра - тонкий контур и метка цвета
 	// операции (основа - белая); щелчок по метке выделяет форму
@@ -1052,6 +1184,9 @@ fn mask_overlay(mut st State, mut ctx vgui.RenderContext) {
 				draw_ellipse(mut ctx, st, mm, op, 1.0, ca, false)
 			}
 			.brush {} // только метка
+			.polygon {
+				draw_poly(mut ctx, st, mm, o.pts, true, ca, false)
+			}
 			.linear {
 				ax, ay := m_to_screen(st, mm, op.ax, op.ay)
 				bx, by := m_to_screen(st, mm, op.bx, op.by)
@@ -1090,6 +1225,219 @@ fn draw_ellipse(mut ctx vgui.RenderContext, st &State, mm pipeline.MaskMap, p Ma
 		qx = sx
 		qy = sy
 	}
+}
+
+// draw_poly - контур многоугольника (вершины - доли кадра) на экране:
+// closed - со стороной от последней к первой; outline - толще и с тенью
+fn draw_poly(mut ctx vgui.RenderContext, st &State, mm pipeline.MaskMap, pts []f32, closed bool, c vgui.Color, outline bool) {
+	n := pts.len / 2
+	if n < 2 {
+		return
+	}
+	last := if closed && n >= 3 { n } else { n - 1 }
+	for k in 0 .. last {
+		k2 := (k + 1) % n
+		ax, ay := m_to_screen(st, mm, f64(pts[2 * k]) * mm.ar, f64(pts[2 * k + 1]))
+		bx, by := m_to_screen(st, mm, f64(pts[2 * k2]) * mm.ar, f64(pts[2 * k2 + 1]))
+		if outline {
+			ctx.draw_line(ax, ay + 1, bx, by + 1, mask_dark)
+		}
+		ctx.draw_line_thick(ax, ay, bx, by, if outline { 2 } else { 1 }, c)
+	}
+}
+
+// ── Многоугольник ──
+
+// Растушёвка нового многоугольника (у радиального - 50): край контура
+// обычно обводят по предмету - мягкость небольшая
+const poly_feather_def = 20
+
+// poly_selected - выделенная форма - многоугольник
+fn poly_selected(st &State) bool {
+	return mask_active(st)
+		&& st.edit.params.masks[st.mask_sel].shape(st.mask_part).kind == .polygon
+}
+
+// poly_drawing - щелчки по снимку ставят вершины: контур рисуется или в
+// форме меньше трёх вершин (пустой многоугольник - как пустая кисть)
+fn poly_drawing(st &State) bool {
+	return poly_selected(st) && (st.poly_open
+		|| st.edit.params.masks[st.mask_sel].shape(st.mask_part).pts.len < 6)
+}
+
+// poly_center - центр многоугольника (среднее вершин) в единицах кадра
+fn poly_center(pts []f32, ar f64) (f64, f64) {
+	n := pts.len / 2
+	if n == 0 {
+		return 0, 0
+	}
+	mut x := 0.0
+	mut y := 0.0
+	for k in 0 .. n {
+		x += f64(pts[2 * k])
+		y += f64(pts[2 * k + 1])
+	}
+	return x / f64(n) * ar, y / f64(n)
+}
+
+// poly_set_pts - вершины выделенной формы (фильтр - копией: снимок истории
+// делит массивы с живым состоянием)
+fn poly_set_pts(mut st State, pts []f32) {
+	mut m := st.edit.params.masks[st.mask_sel].copy()
+	mut sh := m.shape(st.mask_part)
+	sh.pts = pts
+	m.set_shape(st.mask_part, sh)
+	st.edit.params.masks[st.mask_sel] = m
+}
+
+// poly_click - щелчок при рисовании: по первой вершине или двойной (от
+// трёх вершин) - замкнуть, иначе - новая вершина
+fn poly_click(mut st State, mm pipeline.MaskMap, ev &vgui.CanvasInputEvent, sx f32, sy f32) {
+	pts := st.edit.params.masks[st.mask_sel].shape(st.mask_part).pts
+	n := pts.len / 2
+	if n >= 3 {
+		fx, fy := m_to_screen(st, mm, f64(pts[0]) * mm.ar, f64(pts[1]))
+		if ev.clicks >= 2 || (math.abs(fx - sx) <= mask_handle_px
+			&& math.abs(fy - sy) <= mask_handle_px) {
+			st.poly_open = true
+			poly_finish(mut st)
+			return
+		}
+	}
+	if ev.clicks >= 2 {
+		return // вершина первого щелчка уже стоит
+	}
+	x, y := buf_to_m(mm, ev.fx, ev.fy)
+	mut np := pts.clone()
+	np << f32(x / mm.ar)
+	np << f32(y)
+	poly_set_pts(mut st, np)
+	st.poly_open = true
+	st.poly_vsel = -1
+	defer_fx(mut st, st.tone_fx)
+	mask_redraw(st)
+}
+
+// poly_finish - конец рисования: от трёх вершин - контур замкнут (запись
+// в истории), меньше - вершины убираются (форма снова пустая)
+fn poly_finish(mut st State) {
+	if !st.poly_open {
+		return
+	}
+	st.poly_open = false
+	if !mask_valid(st) {
+		return
+	}
+	sh := st.edit.params.masks[st.mask_sel].shape(st.mask_part)
+	if sh.kind != .polygon {
+		return
+	}
+	n := sh.pts.len / 2
+	if n < 3 {
+		if n > 0 {
+			poly_set_pts(mut st, []f32{})
+			if !isnil(st.tone_fx) {
+				st.tone_fx()
+			}
+		}
+		mask_redraw(st)
+		return
+	}
+	mask_changed(mut st, 'mask_poly', i18n.trf('{0}: контур, точек {1}', shape_label(st), '${n}'))
+}
+
+// poly_edge_hit - сторона замкнутого многоугольника под курсором (экран):
+// номер вершины начала стороны, -1 - мимо
+fn poly_edge_hit(st &State, mm pipeline.MaskMap, sx f32, sy f32) int {
+	pts := st.edit.params.masks[st.mask_sel].shape(st.mask_part).pts
+	n := pts.len / 2
+	if n < 3 {
+		return -1
+	}
+	for k in 0 .. n {
+		k2 := (k + 1) % n
+		ax, ay := m_to_screen(st, mm, f64(pts[2 * k]) * mm.ar, f64(pts[2 * k + 1]))
+		bx, by := m_to_screen(st, mm, f64(pts[2 * k2]) * mm.ar, f64(pts[2 * k2 + 1]))
+		dx := bx - ax
+		dy := by - ay
+		l2 := dx * dx + dy * dy
+		mut t := if l2 > 1e-6 { ((sx - ax) * dx + (sy - ay) * dy) / l2 } else { f32(0) }
+		t = if t < 0 { f32(0) } else if t > 1 { f32(1) } else { t }
+		ex := sx - (ax + t * dx)
+		ey := sy - (ay + t * dy)
+		if ex * ex + ey * ey <= mask_handle_px * mask_handle_px / 2 {
+			return k
+		}
+	}
+	return -1
+}
+
+// poly_insert - новая вершина на стороне k в точке (fx, fy) буфера; она
+// выделяется и сразу тянется (отпускание - запись «точка добавлена»)
+fn poly_insert(mut st State, mm pipeline.MaskMap, k int, fx f32, fy f32) {
+	x, y := buf_to_m(mm, fx, fy)
+	old := st.edit.params.masks[st.mask_sel].shape(st.mask_part).pts
+	mut np := []f32{cap: old.len + 2}
+	np << old[..2 * k + 2]
+	np << f32(x / mm.ar)
+	np << f32(y)
+	np << old[2 * k + 2..]
+	poly_set_pts(mut st, np)
+	st.poly_vsel = k + 1
+	st.mask_drag = MaskDrag{
+		kind:  .vertex
+		start: st.edit.params.masks[st.mask_sel].shape(st.mask_part)
+		px:    x
+		py:    y
+		idx:   k + 1
+		added: true
+	}
+	defer_fx(mut st, st.tone_fx)
+	mask_redraw(st)
+}
+
+// poly_vertex_valid - Delete / Backspace есть что удалить: последнюю
+// вершину рисуемого контура или выделенную вершину замкнутого
+fn poly_vertex_valid(st &State) bool {
+	if !poly_selected(st) {
+		return false
+	}
+	n := st.edit.params.masks[st.mask_sel].shape(st.mask_part).pts.len / 2
+	if st.poly_open {
+		return n > 0
+	}
+	return st.poly_vsel >= 0 && st.poly_vsel < n
+}
+
+// delete_poly_vertex - удалить вершину: у рисуемого контура - последнюю
+// (без записи - контур ещё не готов), у замкнутого - выделенную (меньше
+// трёх не остаётся)
+fn delete_poly_vertex(mut st State) {
+	if !poly_vertex_valid(st) {
+		return
+	}
+	pts := st.edit.params.masks[st.mask_sel].shape(st.mask_part).pts
+	n := pts.len / 2
+	if st.poly_open {
+		poly_set_pts(mut st, pts[..pts.len - 2].clone())
+		defer_fx(mut st, st.tone_fx)
+		mask_redraw(st)
+		return
+	}
+	if n <= 3 {
+		if !isnil(st.nm) {
+			mut nm := st.nm
+			nm.show_warning(i18n.tr('У многоугольника не меньше трёх точек'))
+		}
+		return
+	}
+	k := st.poly_vsel
+	mut np := []f32{cap: pts.len - 2}
+	np << pts[..2 * k]
+	np << pts[2 * k + 2..]
+	poly_set_pts(mut st, np)
+	st.poly_vsel = -1
+	mask_changed(mut st, 'mask_poly_del', i18n.trf('{0}: точка удалена', shape_label(st)))
 }
 
 // ── Секция панели ──
@@ -1211,6 +1559,7 @@ fn sync_mask_ui(mut st State) {
 		match st.edit.params.masks[st.mask_sel].shape(st.mask_part).kind {
 			.brush { 0 }
 			.radial { 1 }
+			.polygon { 2 }
 			.linear { -1 }
 		}
 	}
@@ -1221,6 +1570,8 @@ fn sync_mask_ui(mut st State) {
 			u.brush_rows
 		} else if want == 1 {
 			u.radial_rows
+		} else if want == 2 {
+			u.poly_rows
 		} else {
 			[]&vgui.Widget{}
 		}
@@ -1231,13 +1582,18 @@ fn sync_mask_ui(mut st State) {
 	}
 	// Растушёвка и действие снаружи - у выделенной формы (радиальной)
 	sh := if valid { st.edit.params.masks[st.mask_sel].shape(st.mask_part) } else { pipeline.MaskPart{} }
-	radial := valid && sh.kind == .radial
+	radial := valid && (sh.kind == .radial || sh.kind == .polygon)
 	if !isnil(u.feather) {
 		u.feather.enabled = radial
 	}
 	if !isnil(u.inv_cb) {
 		u.inv_cb.enabled = radial
 		u.inv_cb.set_checked(radial && sh.invert)
+		u.inv_cb.text = if sh.kind == .polygon {
+			i18n.tr('Действие снаружи контура')
+		} else {
+			i18n.tr('Действие снаружи эллипса')
+		}
 	}
 	if !isnil(u.on_btn) {
 		u.on_btn.enabled = valid
@@ -1437,11 +1793,22 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	add_b.on_click = fn [mut st] () {
 		add_mask(mut st, .brush)
 	}
+	mut add_p := vgui.button(i18n.tr('Контур'))
+	add_p.icon_name = 'lasso-select'
+	add_p.style = .outline
+	add_p.tooltip = i18n.tr('Многоугольник: щелчками по снимку обведите область')
+	add_p.on_click = fn [mut st] () {
+		add_mask(mut st, .polygon)
+	}
 	mut add_row := vgui.create_hbox_fill()
 	add_row.set_spacing(6)
 	add_row.add(add_l, flex: 1)
 	add_row.add(add_r, flex: 1)
-	add_row.add(add_b, flex: 1)
+	// Четыре кнопки в ряд не помещаются (подписи обрезались) - по две
+	mut add_row2 := vgui.create_hbox_fill()
+	add_row2.set_spacing(6)
+	add_row2.add(add_b, flex: 1)
+	add_row2.add(add_p, flex: 1)
 
 	mut on_b := icon_button('eye', i18n.tr('Включить / выключить фильтр'))
 	on_b.on_click = fn [mut st] () {
@@ -1546,7 +1913,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	part_row.add(padd_cb, flex: 3)
 	part_row.add(op_cb, flex: 2)
 
-	mut rows := [SectionRow{add_row}, SectionRow{sel_row}, SectionRow{name_row}, SectionRow{form_row},
+	mut rows := [SectionRow{add_row}, SectionRow{add_row2}, SectionRow{sel_row}, SectionRow{name_row}, SectionRow{form_row},
 		SectionRow{part_row}, SectionRow{tools}]
 	// Настройки выделенной формы (shape_box, ряды - по её виду). Кисть:
 	// размер, растушёвка, сила - для новых мазков (не правка)
@@ -1652,7 +2019,9 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 		def:    50
 		signed: false
 	})
-	u.radial_rows << edit_row(mut st, mut fe, lbl_w, val_w)
+	fe_row := edit_row(mut st, mut fe, lbl_w, val_w)
+	u.radial_rows << fe_row
+	u.poly_rows << fe_row
 	mut inv_cb := vgui.checkbox(i18n.tr('Действие снаружи эллипса'))
 	// (растушёвка и «снаружи» - у выделенной формы: основы или части)
 	inv_cb.on_change = fn [mut st] (v bool) {
@@ -1671,6 +2040,7 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	}
 	u.inv_cb = inv_cb
 	u.radial_rows << inv_cb
+	u.poly_rows << inv_cb
 	rows << SectionRow{vgui.separator()}
 	rows << build_range_rows(mut st, lbl_w, val_w)
 	mut hint := vgui.label(i18n.tr('Точки на снимке: перенос, переход, размер и поворот'))
@@ -1681,6 +2051,10 @@ fn build_mask_section(mut st State, lbl_w f32, val_w f32) []SectionRow {
 	hint3.font_size = 12
 	st.hint_labels << hint3
 	rows << SectionRow{hint3}
+	mut hint4 := vgui.label(i18n.tr('Контур: щелчки - точки, первая точка или Enter - замкнуть'))
+	hint4.font_size = 12
+	st.hint_labels << hint4
+	rows << SectionRow{hint4}
 	mut hint2 := vgui.label(i18n.tr('Метки частей: зелёная добавляет, красная вычитает, синяя пересекает'))
 	hint2.font_size = 12
 	st.hint_labels << hint2
@@ -1846,6 +2220,9 @@ fn build_range_rows(mut st State, lbl_w f32, val_w f32) []SectionRow {
 // снимке - кружок)
 fn set_mask_pick(mut st State, on bool) {
 	st.mask_pick = on
+	if on && st.pc_pick {
+		set_pc_pick(mut st, false)
+	}
 	if !isnil(st.mask_ui) && !isnil(st.mask_ui.pick_btn) {
 		mut b := st.mask_ui.pick_btn
 		b.style = if on { vgui.ButtonStyle.accent } else { vgui.ButtonStyle.flat }

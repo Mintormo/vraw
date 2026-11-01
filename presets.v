@@ -49,7 +49,7 @@ const default_copy_groups = copy_groups.filter(it !in ['crop', 'masks', 'spots']
 //            «Тени/Света», профиль (камерная кривая и стиль)
 //   color  - баланс белого, сочность, насыщенность
 //   curves - точки тональных кривых RGB, R, G, B
-//   hsl    - HSL-эквалайзер
+//   hsl    - HSL-эквалайзер и точечный цвет
 //   bw     - чёрно-белое и микшер
 //   grade  - цветокоррекция (тонирование теней, средних, светов)
 //   nr     - шумодав и ореолы
@@ -92,6 +92,7 @@ fn merge_groups(dst EditState, src EditState, groups []string) EditState {
 				e.params.hsl_hue = s.params.hsl_hue
 				e.params.hsl_sat = s.params.hsl_sat
 				e.params.hsl_lum = s.params.hsl_lum
+				e.params.pcolor = s.params.pcolor.clone()
 			}
 			'bw' {
 				e.params.bw = s.params.bw

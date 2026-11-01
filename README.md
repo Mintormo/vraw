@@ -44,14 +44,16 @@ instantly.
   are saved automatically in a sidecar file next to the photo.
 - Exposure, contrast, shadows/highlights, black and white points, tone
   equalizer, texture, clarity, dehaze, vibrance and saturation.
-- White balance, RGB/R/G/B curves, HSL equalizer, black and white
-  conversion, color grading.
+- White balance, RGB/R/G/B curves, HSL equalizer, point color (pick a
+  color in the photo and change only it), black and white conversion,
+  color grading.
 - "Like camera JPEG": tone and saturation are matched to the JPEG
   embedded in the same shot.
 - Auto tone (Ctrl+U).
 - Lens correction from the lensfun database: vignetting, distortion,
   chromatic aberration.
-- Crop and straighten, upright correction, spot removal, masks.
+- Crop and straighten, upright correction, spot removal, masks
+  (linear, radial, brush, polygon outline).
 - Noise reduction, sharpening, vignette and film grain.
 
 **Viewing and culling**
@@ -63,6 +65,8 @@ instantly.
 - Compare two shots side by side (C) with shared zoom.
 - Clipping warnings, RGB histogram, shot info (ISO, shutter, aperture,
   lens), minimap at 100%.
+- Focus mask (Shift+F): sharp areas are painted green, so you see where
+  the focus landed without zooming in.
 - Full screen mode, 15 themes (including macOS and Mac OS 9 Platinum).
 
 **Batch work and export**

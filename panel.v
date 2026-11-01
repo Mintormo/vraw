@@ -31,6 +31,7 @@ const panel_sections = [
 	PanelSection{'eq', 'Тон-эквалайзер (EV)'},
 	PanelSection{'curves', 'Кривые'},
 	PanelSection{'hsl', 'HSL'},
+	PanelSection{'pcolor', 'Точечный цвет'},
 	PanelSection{'bw', 'Чёрно-белое'},
 	PanelSection{'grade', 'Цветокоррекция'},
 	PanelSection{'masks', 'Градиентные фильтры'},

@@ -272,3 +272,41 @@ fn test_mask_size_angle() {
 	assert m.angle == 30
 	assert ellipse_angle(-90) == 90 && ellipse_angle(270) == 90 && ellipse_angle(-100) == 80
 }
+
+// Многоугольник в сайдкаре: основа и часть туда и обратно (через формат
+// версии 2), вершины - в пределах, нечётная координата отбрасывается
+fn test_sidecar_polygon() {
+	mut e := neutral_edit()
+	e.params.masks << pipeline.Mask{
+		kind:     .polygon
+		pts:      [f32(0.1), 0.2, 0.8, 0.25, 0.5, 0.9]
+		feather:  15
+		exposure: -0.5
+		parts:    [
+			pipeline.MaskPart{
+				kind: .polygon
+				op:   .subtract
+				pts:  [f32(0.4), 0.4, 0.6, 0.4, 0.5, 0.6]
+			},
+		]
+	}
+	text := encode_history([HistEntry{
+		name:  'Открыт файл'
+		state: neutral_edit()
+	}, HistEntry{
+		name:  'Многоугольник'
+		state: e
+	}], 1, Mark{})
+	assert text.contains('"kind": "polygon"')
+	l := decode_sidecar(text)!
+	m := l.history[1].state.params.masks[0]
+	assert m.kind == .polygon && m.pts == e.params.masks[0].pts && m.feather == 15
+	assert m.parts[0].kind == .polygon && m.parts[0].op == .subtract
+	assert m.parts[0].pts == e.params.masks[0].parts[0].pts
+	// Чужие вершины: за пределами - к -1..2, нечётная - отброшена
+	bad := mask_of(SideMask{
+		kind: 'polygon'
+		pts:  [f32(5), -9, 0.5, 0.5, 0.7]
+	})
+	assert bad.pts == [f32(2), -1, 0.5, 0.5]
+}

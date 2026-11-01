@@ -13,6 +13,7 @@ fn bw_section(mut st State, lbl_w f32, val_w f32) &vgui.VBox {
 	cb.on_change = fn [mut st, tone_fx] (v bool) {
 		st.edit.params.bw = v
 		tone_fx()
+		sync_pc_ui(mut st) // точечный цвет в Ч/Б не действует
 		record(mut st, 'bw', i18n.trf('Чёрно-белое: {0}', '${on_off(v)}'), false)
 	}
 	st.bw_cb = cb

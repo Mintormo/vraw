@@ -81,6 +81,7 @@ fn (e EditState) clone() EditState {
 	c.params.tc_g = e.params.tc_g.clone()
 	c.params.tc_b = e.params.tc_b.clone()
 	c.params.masks = e.params.masks.map(it.copy())
+	c.params.pcolor = e.params.pcolor.clone()
 	c.spots = e.spots.clone()
 	c.curve_pts = [][]vgui.CurvePoint{}
 	for pts in e.curve_pts {
@@ -238,6 +239,7 @@ fn set_edit(mut st State, e EditState) {
 	sync_crop_ui(mut st)
 	sync_mask_ui(mut st)
 	sync_spot_ui(mut st)
+	sync_pc_ui(mut st)
 	sync_grade_ui(mut st)
 	sync_bw_ui(mut st)
 }

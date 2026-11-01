@@ -31,6 +31,9 @@ pub enum MaskKind {
 	linear
 	radial
 	brush // кисть: мазки (Stroke), растеризуются под отображение
+	// многоугольник: замкнутый контур по вершинам pts, растушёвка - внутрь
+	// от контура (на контуре действие кончается), растеризуется как кисть
+	polygon
 }
 
 // Stroke - мазок кисти: путь - пары x, y в долях кадра S (до ориентации,
@@ -79,6 +82,9 @@ pub mut:
 	// Кисть: мазки (kind == .brush); auto - автомаска всех мазков формы
 	strokes []Stroke
 	auto    bool
+	// Многоугольник (kind == .polygon): вершины парами x, y в долях кадра
+	// S (как пути мазков); меньше трёх вершин - формы нет
+	pts []f32
 	// Части фильтра (сложение масок): формы с операцией над весом -
 	// добавить, вычесть, пересечь; применяются по порядку после основы
 	parts []MaskPart
@@ -138,6 +144,7 @@ pub mut:
 	invert  bool
 	strokes []Stroke
 	auto    bool // кисть: автомаска всех мазков
+	pts     []f32 // многоугольник: вершины x, y (доли кадра S)
 }
 
 // copy - глубокая копия мазков
@@ -154,6 +161,7 @@ pub fn (p MaskPart) copy() MaskPart {
 	return MaskPart{
 		...p
 		strokes: p.strokes.map(it.copy())
+		pts:     p.pts.clone()
 	}
 }
 
@@ -175,6 +183,7 @@ pub fn (m Mask) shape(i int) MaskPart {
 		invert:  m.invert
 		strokes: m.strokes
 		auto:    m.auto
+		pts:     m.pts
 	}
 }
 
@@ -196,6 +205,7 @@ pub fn (mut m Mask) set_shape(i int, s MaskPart) {
 	m.invert = s.invert
 	m.strokes = s.strokes
 	m.auto = s.auto
+	m.pts = s.pts
 }
 
 // copy - глубокая копия (части - свой массив: снимки истории не должны
@@ -204,6 +214,7 @@ pub fn (m Mask) copy() Mask {
 	return Mask{
 		...m
 		strokes: m.strokes.map(it.copy())
+		pts:     m.pts.clone()
 		parts:   m.parts.map(it.copy())
 	}
 }
@@ -392,6 +403,14 @@ struct ImgRef {
 // compile_shape - форма к рендеру под отображение mm; none - вырождена.
 // img - снимок для автомаски кисти (или nil)
 fn compile_shape(m MaskPart, mm MaskMap, img &ImgRef) ?LocalShape {
+	if m.kind == .polygon {
+		if m.pts.len < 6 {
+			return none
+		}
+		gw, gh := brush_dims(mm.ar)
+		return grid_shape(raster_polygon(m.pts, m.feather, m.invert, gw, gh), gw, gh,
+			mm)
+	}
 	if m.kind == .brush {
 		if m.strokes.len == 0 {
 			return none
@@ -1644,4 +1663,111 @@ fn u8_max(a u8, b u8) u8 {
 @[inline]
 fn u8_min(a u8, b u8) u8 {
 	return if a < b { a } else { b }
+}
+
+// ── Многоугольник ──
+
+// poly_feather_max - растушёвка 100 у многоугольника: ширина мягкого края
+// в долях высоты кадра (как у кисти размер - от высоты)
+const poly_feather_max = 0.1
+
+// raster_polygon - вес многоугольника (0..255) на сетке gw x gh (bigbuf,
+// освобождает вызывающий). Вершины - доли кадра; заливка по правилу
+// чёт-нечёт (самопересечения - «дырки»), по центрам клеток строк. Мягкий
+// край - внутрь контура: клетка ближе fd = растушёвка·poly_feather_max
+// высоты (не меньше клетки - сглаживание края) к стороне получает гладкий
+// спад до 0 на контуре. invert - действие снаружи
+fn raster_polygon(pts []f32, feather f32, invert bool, gw int, gh int) []u8 {
+	mut g := bigbuf.new_u8(gw * gh)
+	n := pts.len / 2
+	if n < 3 {
+		if invert {
+			unsafe { vmemset(g.data, 255, g.len) }
+		}
+		return g
+	}
+	mut xs := []f64{len: n}
+	mut ys := []f64{len: n}
+	for k in 0 .. n {
+		xs[k] = f64(pts[2 * k]) * f64(gw)
+		ys[k] = f64(pts[2 * k + 1]) * f64(gh)
+	}
+	// Заливка: пересечения строки (центр клетки) со сторонами
+	mut cross := []f64{cap: 16}
+	for j in 0 .. gh {
+		yc := f64(j) + 0.5
+		cross.clear()
+		for k in 0 .. n {
+			k2 := (k + 1) % n
+			y0 := ys[k]
+			y1 := ys[k2]
+			if (y0 <= yc) != (y1 <= yc) {
+				cross << xs[k] + (yc - y0) * (xs[k2] - xs[k]) / (y1 - y0)
+			}
+		}
+		if cross.len < 2 {
+			continue
+		}
+		cross.sort()
+		row := j * gw
+		for c := 0; c + 1 < cross.len; c += 2 {
+			i0 := imax(0, int(math.ceil(cross[c] - 0.5)))
+			i1 := imin(gw, int(math.ceil(cross[c + 1] - 0.5)))
+			for i in i0 .. i1 {
+				g[row + i] = 255
+			}
+		}
+	}
+	// Мягкий край: расстояние клеток внутри до ближайшей стороны (только в
+	// полосе fd вокруг сторон)
+	mut fd := f64(feather) / 100 * poly_feather_max * f64(gh)
+	if fd < 1 {
+		fd = 1
+	}
+	fd2 := fd * fd
+	mut dist := bigbuf.new_f32(gw * gh)
+	for i in 0 .. dist.len {
+		dist[i] = f32(fd2)
+	}
+	for k in 0 .. n {
+		k2 := (k + 1) % n
+		ax := xs[k]
+		ay := ys[k]
+		dx := xs[k2] - ax
+		dy := ys[k2] - ay
+		l2 := dx * dx + dy * dy
+		x0 := imax(0, int(math.floor(math.min(ax, xs[k2]) - fd)))
+		y0 := imax(0, int(math.floor(math.min(ay, ys[k2]) - fd)))
+		x1 := imin(gw, int(math.ceil(math.max(ax, xs[k2]) + fd)) + 1)
+		y1 := imin(gh, int(math.ceil(math.max(ay, ys[k2]) + fd)) + 1)
+		for j in y0 .. y1 {
+			py := f64(j) + 0.5 - ay
+			row := j * gw
+			for i in x0 .. x1 {
+				if g[row + i] == 0 {
+					continue
+				}
+				px := f64(i) + 0.5 - ax
+				mut t := if l2 > 1e-12 { (px * dx + py * dy) / l2 } else { 0.0 }
+				t = if t < 0 { 0.0 } else if t > 1 { 1.0 } else { t }
+				ex := px - t * dx
+				ey := py - t * dy
+				d2 := f32(ex * ex + ey * ey)
+				if d2 < dist[row + i] {
+					dist[row + i] = d2
+				}
+			}
+		}
+	}
+	for i in 0 .. g.len {
+		if g[i] != 0 && dist[i] < fd2 {
+			s := f32(math.sqrt(f64(dist[i])) / fd)
+			g[i] = u8(255 * s * s * (3 - 2 * s) + 0.5)
+		}
+		if invert {
+			g[i] = 255 - g[i]
+		}
+	}
+	bigbuf.free(mut dist)
+	return g
 }

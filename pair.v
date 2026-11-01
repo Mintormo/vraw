@@ -257,6 +257,9 @@ fn pair_show(mut st State) {
 	}
 	unsafe { vmemcpy(cb.pixels.data, st.pair_img.data, n) }
 	mark_clipping(mut cb.pixels, st.clip_hi, st.clip_lo)
+	if st.focus_show {
+		mark_focus(mut cb.pixels, st.pair_w, st.pair_h, 1, mut st.focus_pair)
+	}
 	if resized && !isnil(st.cv) {
 		cv := st.cv
 		cb.auto_fit = false // вписать заново под новый размер
@@ -281,7 +284,8 @@ fn pair_before_open(mut st State, new_path string) {
 		return
 	}
 	old := st.raw_path
-	if !isnil(st.cv) && !st.loading && !st.clip_hi && !st.clip_lo && !ba_active(st) {
+	if !isnil(st.cv) && !st.loading && !st.clip_hi && !st.clip_lo && !st.focus_show
+		&& !ba_active(st) {
 		cv := st.cv
 		n := st.gw * st.gh * 4
 		if n > 0 && cv.pixels.len == n {
