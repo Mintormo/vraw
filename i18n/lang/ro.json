@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Un poligon are cel puțin trei puncte",
  "многоугольник": "poligon",
  "точка": "punct",
- "точка добавлена": "punct adăugat"
+ "точка добавлена": "punct adăugat",
+ "Очистить": "Golește",
+ "Очистить историю": "Golește istoricul",
+ "Очистить историю: удалить все правки кадра": "Golește istoricul: șterge toate ajustările fotografiei",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Ștergeți toate ajustările fotografiei și istoricul? Fotografia revine la aspectul original; ajustările nu vor mai putea fi restaurate."
 }

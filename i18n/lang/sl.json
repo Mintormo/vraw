@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Mnogokotnik ima vsaj tri točke",
  "многоугольник": "mnogokotnik",
  "точка": "točka",
- "точка добавлена": "točka dodana"
+ "точка добавлена": "točka dodana",
+ "Очистить": "Počisti",
+ "Очистить историю": "Počisti zgodovino",
+ "Очистить историю: удалить все правки кадра": "Počisti zgodovino: izbriši vse popravke posnetka",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Izbrišem vse popravke posnetka in zgodovino? Posnetek se vrne v izvirno obliko, popravkov ne bo mogoče obnoviti."
 }

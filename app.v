@@ -79,6 +79,7 @@ mut:
 	lens_cb &vgui.CheckBox = unsafe { nil }
 	prof_cb &vgui.ComboBox = unsafe { nil } // «Профиль» (profile.v)
 	hist_lb &vgui.ListBox  = unsafe { nil }
+	hist_clear &vgui.Button = unsafe { nil } // «Очистить историю» (history.v)
 	nm      &vgui.NotificationManager = unsafe { nil }
 	// Сайдкар правок (sidecar.v): путь (пусто - не писать), ошибка записи
 	// уже показана (не повторять на каждую правку)
@@ -2268,11 +2269,32 @@ fn main() {
 	b_ba0.on_click = fn [mut st] () {
 		set_ba_ref(mut st, 0)
 	}
+	// Очистка истории: все правки удаляются, кадр - исходный (history.v), с
+	// вопросом - вернуть нельзя
+	mut b_clr := icon_button('eraser', i18n.tr('Очистить историю: удалить все правки кадра'))
+	b_clr.on_click = fn [mut st, win, mut cv, mut hist, mut app] () {
+		if !history_clearable(st) {
+			return
+		}
+		answer := vgui.message_box(win, mut app, vgui.MessageBoxConfig{
+			title:          i18n.tr('Очистить историю')
+			message:        i18n.tr('Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.')
+			kind:           .warning
+			buttons:        [i18n.tr('Очистить'), i18n.tr('Отмена')]
+			default_button: 1
+			cancel_button:  1
+		})
+		if answer == 0 {
+			clear_history(mut st, mut cv, mut hist, mut app)
+		}
+	}
+	st.hist_clear = b_clr
 	mut ba_row := vgui.create_hbox_fill()
 	ba_row.set_spacing(6)
 	ba_row.add(ba_lb, flex: 1)
 	ba_row.add(b_ba)
 	ba_row.add(b_ba0)
+	ba_row.add(b_clr)
 	mut hist_hint := vgui.label(i18n.tr('Двойной щелчок - перейти'))
 	st.hint_labels << hist_hint
 	hist_hint.font_size = 12

@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "En polygon har mindst tre punkter",
  "многоугольник": "polygon",
  "точка": "punkt",
- "точка добавлена": "punkt tilføjet"
+ "точка добавлена": "punkt tilføjet",
+ "Очистить": "Ryd",
+ "Очистить историю": "Ryd historik",
+ "Очистить историю: удалить все правки кадра": "Ryd historik: slet alle redigeringer af fotoet",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Slette alle redigeringer af fotoet og historikken? Fotoet vender tilbage til originalen; redigeringerne kan ikke gendannes."
 }

@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Monikulmiossa on vähintään kolme pistettä",
  "многоугольник": "monikulmio",
  "точка": "piste",
- "точка добавлена": "piste lisätty"
+ "точка добавлена": "piste lisätty",
+ "Очистить": "Tyhjennä",
+ "Очистить историю": "Tyhjennä historia",
+ "Очистить историю: удалить все правки кадра": "Tyhjennä historia: poista kaikki kuvan muokkaukset",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Poistetaanko kaikki kuvan muokkaukset ja historia? Kuva palaa alkuperäiseksi; muokkauksia ei voi palauttaa."
 }

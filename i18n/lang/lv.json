@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Daudzstūrim ir vismaz trīs punkti",
  "многоугольник": "daudzstūris",
  "точка": "punkts",
- "точка добавлена": "punkts pievienots"
+ "точка добавлена": "punkts pievienots",
+ "Очистить": "Notīrīt",
+ "Очистить историю": "Notīrīt vēsturi",
+ "Очистить историю: удалить все правки кадра": "Notīrīt vēsturi: dzēst visus attēla labojumus",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Dzēst visus attēla labojumus un vēsturi? Attēls atgriezīsies sākotnējā izskatā, labojumus nevarēs atjaunot."
 }

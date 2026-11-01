@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Een veelhoek heeft minstens drie punten",
  "многоугольник": "veelhoek",
  "точка": "punt",
- "точка добавлена": "punt toegevoegd"
+ "точка добавлена": "punt toegevoegd",
+ "Очистить": "Wissen",
+ "Очистить историю": "Geschiedenis wissen",
+ "Очистить историю: удалить все правки кадра": "Geschiedenis wissen: alle bewerkingen van de foto verwijderen",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Alle bewerkingen van de foto en de geschiedenis verwijderen? De foto keert terug naar het origineel; de bewerkingen zijn niet terug te halen."
 }

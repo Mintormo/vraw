@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Daugiakampis turi bent tris taškus",
  "многоугольник": "daugiakampis",
  "точка": "taškas",
- "точка добавлена": "taškas pridėtas"
+ "точка добавлена": "taškas pridėtas",
+ "Очистить": "Išvalyti",
+ "Очистить историю": "Išvalyti istoriją",
+ "Очистить историю: удалить все правки кадра": "Išvalyti istoriją: ištrinti visus nuotraukos pakeitimus",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Ištrinti visus nuotraukos pakeitimus ir istoriją? Nuotrauka grįš į pradinę išvaizdą, pakeitimų atkurti nebus galima."
 }

@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Çokgenin en az üç noktası olur",
  "многоугольник": "çokgen",
  "точка": "nokta",
- "точка добавлена": "nokta eklendi"
+ "точка добавлена": "nokta eklendi",
+ "Очистить": "Temizle",
+ "Очистить историю": "Geçmişi temizle",
+ "Очистить историю: удалить все правки кадра": "Geçmişi temizle: fotoğrafın tüm düzenlemelerini sil",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Fotoğrafın tüm düzenlemeleri ve geçmişi silinsin mi? Fotoğraf özgün görünümüne döner; düzenlemeler geri getirilemez."
 }

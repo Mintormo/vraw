@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Wielokąt ma co najmniej trzy punkty",
  "многоугольник": "wielokąt",
  "точка": "punkt",
- "точка добавлена": "punkt dodany"
+ "точка добавлена": "punkt dodany",
+ "Очистить": "Wyczyść",
+ "Очистить историю": "Wyczyść historię",
+ "Очистить историю: удалить все правки кадра": "Wyczyść historię: usuń wszystkie zmiany zdjęcia",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Usunąć wszystkie zmiany zdjęcia i historię? Zdjęcie wróci do oryginalnego wyglądu, zmian nie da się przywrócić."
 }

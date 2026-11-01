@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Hulknurgal on vähemalt kolm punkti",
  "многоугольник": "hulknurk",
  "точка": "punkt",
- "точка добавлена": "punkt lisatud"
+ "точка добавлена": "punkt lisatud",
+ "Очистить": "Tühjenda",
+ "Очистить историю": "Tühjenda ajalugu",
+ "Очистить историю: удалить все правки кадра": "Tühjenda ajalugu: kustuta kõik foto muudatused",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Kas kustutada kõik foto muudatused ja ajalugu? Foto taastub algsel kujul, muudatusi ei saa tagasi."
 }

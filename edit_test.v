@@ -689,3 +689,30 @@ fn test_select_all_frames() {
 	assert st.strip.selected == 1
 	assert export_target_paths(st, 'sel').len == 4
 }
+
+// Очистка истории (history.v): все правки удаляются - в истории только
+// «Открыт файл», кадр исходный, сайдкар без правок (лента - не «изменён»)
+fn test_clear_history() {
+	mut st, mut exp, _ := new_state()
+	st.side_path = side_tmp('clear')
+	assert !history_clearable(st)
+	drag(mut exp, 0.5)
+	drag(mut exp, 1.0)
+	drag(mut exp, 1.5)
+	jump(mut st, 2) // и с отменённым «будущим»
+	assert history_clearable(st)
+	mut cv := vgui.canvas(4, 3)
+	mut hist := vgui.canvas(4, 3)
+	mut app := &vgui.App{}
+	clear_history(mut st, mut cv, mut hist, mut app)
+	assert st.history.len == 1 && st.hist_pos == 0
+	assert st.history[0].name == 'Открыт файл'
+	assert st.edit.params.exposure == 0 && exp.value == 0
+	assert !history_clearable(st)
+	text := os.read_file(st.side_path)!
+	l := decode_sidecar(text)!
+	assert l.history.len == 1 && l.current == 0
+	assert l.history[0].state.params.exposure == 0
+	assert head_int(text, 'current')? == 0
+	assert text.contains('{"name": "Открыт файл", "state": {}}')
+}

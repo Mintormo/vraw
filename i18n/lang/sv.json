@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "En polygon har minst tre punkter",
  "многоугольник": "polygon",
  "точка": "punkt",
- "точка добавлена": "punkt tillagd"
+ "точка добавлена": "punkt tillagd",
+ "Очистить": "Rensa",
+ "Очистить историю": "Rensa historik",
+ "Очистить историю: удалить все правки кадра": "Rensa historik: ta bort alla redigeringar av fotot",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Ta bort alla redigeringar av fotot och historiken? Fotot återgår till originalet; redigeringarna kan inte återställas."
 }

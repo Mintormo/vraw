@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Un poligono ha almeno tre punti",
  "многоугольник": "poligono",
  "точка": "punto",
- "точка добавлена": "punto aggiunto"
+ "точка добавлена": "punto aggiunto",
+ "Очистить": "Cancella",
+ "Очистить историю": "Cancella cronologia",
+ "Очистить историю: удалить все правки кадра": "Cancella cronologia: elimina tutte le modifiche della foto",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Eliminare tutte le modifiche della foto e la cronologia? La foto torna all'aspetto originale; le modifiche non si potranno ripristinare."
 }

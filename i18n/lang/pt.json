@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Um polígono precisa de pelo menos três pontos",
  "многоугольник": "polígono",
  "точка": "ponto",
- "точка добавлена": "ponto adicionado"
+ "точка добавлена": "ponto adicionado",
+ "Очистить": "Limpar",
+ "Очистить историю": "Limpar histórico",
+ "Очистить историю: удалить все правки кадра": "Limpar histórico: excluir todos os ajustes da foto",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Excluir todos os ajustes da foto e o histórico? A foto volta ao aspecto original; os ajustes não poderão ser restaurados."
 }

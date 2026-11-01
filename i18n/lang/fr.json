@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Un polygone a au moins trois points",
  "многоугольник": "polygone",
  "точка": "point",
- "точка добавлена": "point ajouté"
+ "точка добавлена": "point ajouté",
+ "Очистить": "Effacer",
+ "Очистить историю": "Effacer l'historique",
+ "Очистить историю: удалить все правки кадра": "Effacer l'historique : supprimer tous les réglages de la photo",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Supprimer tous les réglages de la photo et son historique ? La photo revient à son aspect d'origine ; les réglages ne pourront pas être restaurés."
 }

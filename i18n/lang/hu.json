@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Egy sokszögnek legalább három pontja van",
  "многоугольник": "sokszög",
  "точка": "pont",
- "точка добавлена": "pont hozzáadva"
+ "точка добавлена": "pont hozzáadva",
+ "Очистить": "Törlés",
+ "Очистить историю": "Előzmények törlése",
+ "Очистить историю: удалить все правки кадра": "Előzmények törlése: a kép összes módosításának törlése",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Törli a kép összes módosítását és az előzményeket? A kép visszakapja eredeti kinézetét, a módosítások nem állíthatók vissza."
 }

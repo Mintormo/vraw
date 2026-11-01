@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "A polygon needs at least three points",
  "многоугольник": "polygon",
  "точка": "point",
- "точка добавлена": "point added"
+ "точка добавлена": "point added",
+ "Очистить": "Clear",
+ "Очистить историю": "Clear history",
+ "Очистить историю: удалить все правки кадра": "Clear history: delete all edits of the shot",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Delete all edits of the shot and its history? The shot returns to its original look; the edits cannot be restored."
 }

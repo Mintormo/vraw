@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Mnohoúhelník má aspoň tři body",
  "многоугольник": "mnohoúhelník",
  "точка": "bod",
- "точка добавлена": "bod přidán"
+ "точка добавлена": "bod přidán",
+ "Очистить": "Vymazat",
+ "Очистить историю": "Vymazat historii",
+ "Очистить историю: удалить все правки кадра": "Vymazat historii: smazat všechny úpravy snímku",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Smazat všechny úpravy snímku a historii? Snímek se vrátí do původní podoby, úpravy nepůjde obnovit."
 }

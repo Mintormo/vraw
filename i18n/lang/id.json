@@ -710,5 +710,9 @@
  "У многоугольника не меньше трёх точек": "Poligon perlu setidaknya tiga titik",
  "многоугольник": "poligon",
  "точка": "titik",
- "точка добавлена": "titik ditambahkan"
+ "точка добавлена": "titik ditambahkan",
+ "Очистить": "Bersihkan",
+ "Очистить историю": "Bersihkan riwayat",
+ "Очистить историю: удалить все правки кадра": "Bersihkan riwayat: hapus semua penyesuaian foto",
+ "Удалить все правки кадра и историю? Кадр вернётся к исходному виду, вернуть правки будет нельзя.": "Hapus semua penyesuaian foto dan riwayatnya? Foto kembali ke tampilan aslinya; penyesuaian tidak bisa dikembalikan."
 }

@@ -167,6 +167,38 @@ fn start_history(mut st State) {
 	refresh_history(mut st)
 }
 
+// history_clearable - есть что очищать: в истории больше одной записи
+fn history_clearable(st &State) bool {
+	return st.history.len > 1
+}
+
+// clear_history - очистка истории (раздел «История»): все правки
+// удаляются, в истории остаётся только «Открыт файл» - кадр в исходном
+// виде; сайдкар перезаписывается (без правок). Не на первой записи -
+// сначала переход к ней (goto_history: превью и подготовка сырья, как
+// двойной щелчок по записи).
+fn clear_history(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut app vgui.App) {
+	if !history_clearable(st) {
+		return
+	}
+	if st.hist_pos != 0 {
+		goto_history(mut st, 0, mut cv, mut hist, mut app)
+	}
+	st.history = [st.history[0]]
+	st.hist_pos = 0
+	st.hist_ms = 0
+	st.ba_ref = 0
+	refresh_history(mut st)
+	sync_sidecar(mut st)
+	// Лента: правок нет - без отметки «изменён», миниатюра - исходного вида
+	// (живая уже пересчитана переходом; draw_mark только рисует поверх -
+	// снять отметку можно лишь новой копией миниатюры)
+	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
+		st.frames[st.frame_idx].edited = false
+		push_live_thumb(mut st)
+	}
+}
+
 // Цвета строк истории - из палитры темы (themes.v): действующие правки -
 // обычным текстом, отменённые («будущее», куда можно вернуться) -
 // приглушённо, как в Photoshop/Lightroom; текущая запись - ярче и жирным
@@ -211,6 +243,10 @@ fn refresh_history(mut st State) {
 		}
 	}
 	sync_avail(mut st) // «Отменить», «Вернуть», «Маска фильтра»
+	if !isnil(st.hist_clear) {
+		mut b := st.hist_clear
+		b.enabled = history_clearable(st)
+	}
 }
 
 // set_edit выставляет снимок в State и во все виджеты правки - без
