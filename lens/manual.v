@@ -297,7 +297,7 @@ pub fn manual_geometry(buf &u16, w int, h int, m Manual) bool {
 	defer {
 		bigbuf.free(mut src)
 	}
-	unsafe { vmemcpy(src.data, buf, u64(w) * u64(h) * 3 * 2) }
+	unsafe { vmemcpy(src.data, buf, w * h * 3 * 2) }
 	full := Region{0, 0, w, h}
 	p.remap(unsafe { &u16(src.data) }, full, full, buf)
 	return true

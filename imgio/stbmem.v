@@ -18,7 +18,7 @@ mut:
 }
 
 // stb_append - приёмник stbi_write_func: дописать кусок в StbOut
-fn stb_append(ctx voidptr, data voidptr, size int) {
+fn stb_append(ctx voidptr, data voidptr, size i32) {
 	mut o := unsafe { &StbOut(ctx) }
 	unsafe { o.data.push_many(data, size) }
 }

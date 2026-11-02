@@ -25,7 +25,7 @@ fn alloc[T](n int) []T {
 	if n <= 0 {
 		return a
 	}
-	bytes := usize(n) * sizeof(T)
+	bytes := uint(n) * sizeof(T)
 	p := os_alloc(bytes)
 	if p == unsafe { nil } {
 		panic('bigbuf: нет памяти на ${bytes >> 20} МБ')
@@ -66,7 +66,7 @@ pub fn is_big[T](a []T) bool {
 // освобождать результат, который бывает и тем, и другим.
 pub fn free[T](mut a []T) {
 	if is_big(a) {
-		os_free(a.data, usize(a.cap) * sizeof(T))
+		os_free(a.data, uint(a.cap) * sizeof(T))
 	}
 	a = []T{}
 }
