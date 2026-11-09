@@ -140,7 +140,7 @@ fn stage_title(s ExportStage) string {
 }
 
 // StagePlan - этапы экспорта для настроек кадра и их веса (примерные
-// секунды на 24 Мп в рабочей сборке, см. замеры в PROJECT.md)
+// секунды на 24 Мп в рабочей сборке, см. docs/measurements.md)
 struct StagePlan {
 	stages  []ExportStage
 	weights []f64
