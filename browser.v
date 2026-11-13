@@ -1303,3 +1303,161 @@ fn set_strip_open(mut st State, open bool) {
 	save_settings(st.settings)
 	layout_strip(mut st)
 }
+
+// build_strip - лента кадров папки: переход к кадру, список с миниатюрами,
+// полоса над ним (подпись, фильтр, звёзды, кнопки) и клавиши ленты
+// (стрелки, Home/End, Enter, цифры отбора, Escape). Всё - в State.
+// Вынесено из main() 13.11.2026 (аудит, п. 11).
+fn build_strip(mut st State, mut app vgui.App, win &vgui.Window, open_file fn (string)) {
+	mut wh := unsafe { win } // привязка клавиш окна
+	// Переход к кадру: правки текущего уже в его сайдкаре (пишется после
+	// каждой правки), следующий открывается со своими. Не открылся -
+	// выделение возвращается на текущий.
+	goto_frame := fn [mut st, open_file] (idx int) {
+		if idx < 0 || idx >= st.frames.len || idx == st.frame_idx {
+			return
+		}
+		// Куда листают - туда и предзагрузка (prefetch.v)
+		if st.frame_idx >= 0 {
+			st.nav_dir = if idx > st.frame_idx { 1 } else { -1 }
+		}
+		open_file(st.frames[idx].path)
+		sync_strip(mut st)
+	}
+	st.goto_frame = goto_frame
+	st.thumb_done = fn [mut st] (res ThumbResult) {
+		take_thumb(mut st, res)
+	}
+	st.heads_done = fn [mut st] (res HeadsResult) {
+		take_heads(mut st, res)
+	}
+	st.app = app
+	mut strip := vgui.list_box_h(strip_item_width(strip_pane_h))
+	strip.pad = strip_pad
+	// Колесо крутит ленту по наведению, без фокуса (vgui ListBox), и на
+	// краю не уходит дальше; щелчок колеса - один кадр (fit_strip_items)
+	strip.scroll_x_speed = strip.item_width
+	// Прокрутили - миниатюры видимой части (дальние отдаются, browser.v)
+	strip.on_scroll = fn [mut st] (x f32, y f32) {
+		strip_thumbs(mut st)
+	}
+	// Одиночный щелчок (и стрелки при фокусе на ленте) только выделяет
+	// миниатюру; открыть кадр - двойным щелчком или Enter
+	// Строка ленты - не номер кадра: с фильтром строк меньше (rating.v)
+	strip.on_dbl_click = fn [mut st, goto_frame] (row int, text string) {
+		goto_frame(frame_of_row(st, row))
+	}
+	// Ctrl/Shift+щелчок - несколько кадров: в них вставляются настройки
+	// (presets.v); число выделенных - в подписи над лентой
+	strip.multi_select = true
+	strip.on_select = fn [mut st] (idx int, text string) {
+		strip_info_text(mut st)
+		pair_select(mut st, idx) // при сравнении - этот кадр слева
+		sync_avail(mut st) // отбор, вставка, сравнение - по выделенным
+	}
+	st.strip = strip
+	mut strip_info := vgui.label('')
+	st.secondary_labels << strip_info
+	st.strip_info = strip_info
+	// Кнопки полосы - значки; значок и подсказку свернуть/развернуть
+	// ставит layout_strip
+	mut strip_refresh := icon_button('refresh-cw', i18n.tr('Обновить ленту'))
+	strip_refresh.on_click = fn [mut st] () {
+		refresh_folder(mut st)
+	}
+	mut strip_toggle := icon_button('panel-bottom-close', i18n.tr('Свернуть ленту'))
+	strip_toggle.on_click = fn [mut st] () {
+		set_strip_open(mut st, !st.strip_open)
+	}
+	st.strip_toggle = strip_toggle
+	// Фильтр ленты по пометкам отбора (rating.v)
+	mut filter_cb := vgui.combo_box()
+	filter_cb.set_items(i18n.tr_all(filter_names))
+	filter_cb.set_selected(0)
+	filter_cb.on_change = fn [mut st] (i int, _ string) {
+		if i >= 0 && i < filter_keys.len && filter_keys[i] != st.filter {
+			set_filter(mut st, filter_keys[i])
+		}
+	}
+	st.filter_cb = filter_cb
+	// Звёзды открытого кадра: щелчок ставит оценку (как клавиши 0..5 - на
+	// выделенные кадры или открытый), повторный по той же - снимает. Фокус
+	// звёзды не берут: стрелки листают кадры, цифры - пункты меню «Отбор»
+	mut strip_rating := vgui.rating()
+	strip_rating.star_size = 15
+	strip_rating.gap = 3
+	strip_rating.focusable = false
+	strip_rating.tooltip = i18n.tr('Оценка: щелчок - поставить, повторный - снять (клавиши 0..5)')
+	strip_rating.on_change = fn [mut st] (v int) {
+		set_rating(mut st, v)
+	}
+	st.strip_rating = strip_rating
+	mut strip_bar := vgui.create_hbox_fill()
+	strip_bar.set_spacing(8)
+	strip_bar.add(strip_info, flex: 1)
+	strip_bar.add(strip_rating)
+	strip_bar.add(filter_cb)
+	strip_bar.add(strip_refresh)
+	strip_bar.add(strip_toggle)
+	st.strip_bar = strip_bar
+	// ←/→, Home/End - соседний, первый, последний кадр (если фокус не у
+	// ползунка: его стрелки двигают значение)
+	// Кадрирование: Enter - применить, Esc - отменить правки режима
+	wh.bind_hotkey('Enter', fn [mut st] () {
+		if st.poly_open {
+			poly_finish(mut st) // многоугольник фильтра: замкнуть
+		} else if st.crop_mode {
+			set_crop_mode(mut st, false)
+		} else if st.spot_mode {
+			set_spot_mode(mut st, false)
+		}
+	})
+	// Удаление пятен: Delete / Backspace - выделенное пятно (в полях ввода
+	// клавиши забирает поле - сюда не доходят)
+	for k in ['Delete', 'Backspace'] {
+		wh.bind_hotkey(k, fn [mut st] () {
+			if st.spot_mode && spot_valid(st) {
+				delete_spot(mut st)
+			} else if poly_vertex_valid(st) {
+				delete_poly_vertex(mut st) // вершина многоугольника
+			}
+		})
+	}
+	wh.bind_hotkey('Escape', fn [mut st] () {
+		if st.horizon {
+			st.horizon = false
+			st.crop_drag = CropDrag{}
+			sync_crop_ui(mut st)
+		} else if st.crop_mode {
+			crop_cancel(mut st)
+		} else if st.spot_mode {
+			// Пятна: снять выделение, второй Esc - выйти из режима
+			if spot_valid(st) {
+				select_spot(mut st, -1)
+			} else {
+				set_spot_mode(mut st, false)
+			}
+		} else if st.poly_open {
+			poly_finish(mut st) // многоугольник: замкнуть (меньше 3 точек - убрать)
+		} else if st.mask_pick {
+			set_mask_pick(mut st, false) // пипетка цвета фильтра - отмена
+		} else if st.mask_sel >= 0 {
+			select_mask(mut st, -1) // градиентный фильтр: снять выделение
+		} else if st.fullscreen {
+			set_fullscreen(mut st, false)
+		}
+	})
+	// Соседи - среди кадров фильтра ленты
+	wh.bind_hotkey('Left', fn [mut st, goto_frame] () {
+		goto_frame(next_shown(st, st.frame_idx, -1))
+	})
+	wh.bind_hotkey('Right', fn [mut st, goto_frame] () {
+		goto_frame(next_shown(st, st.frame_idx, 1))
+	})
+	wh.bind_hotkey('Home', fn [mut st, goto_frame] () {
+		goto_frame(frame_of_row(st, 0))
+	})
+	wh.bind_hotkey('End', fn [mut st, goto_frame] () {
+		goto_frame(frame_of_row(st, st.shown.len - 1))
+	})
+}

@@ -98,7 +98,16 @@ LTO после кадрирования были пустые превью и г
 вывод V некуда писать), `SDL_RENDER_DRIVER=software|opengl` — сравнить
 отрисовщики.
 
-Файлы: `app.v` — State, окно, панель, пересчёты, `main()`; `wb_ui.v` — секция «Баланс белого»; `history.v`
+Файлы: `app.v` — State, пересчёты, `main()` (~300 строк: настройки,
+окно, холсты, приёмники результатов, затем по порядку вызовы сборщиков
+ниже); `panel_ui.v` — секции панели (`lens_nr_rows`, `tone_rows`,
+`curve_rows`, `hsl_rows`, `sharp_rows`, `haze_rows`, `fx_rows`,
+`history_rows`) и сборка панели (`build_panel`, `PanelItems`);
+`menu_ui.v` — меню окна (`build_menu`, `MenuActions`); `file_ui.v` —
+открытие кадра и итог загрузки (`build_open`), открыть/закрыть/удалить
+отклонённые (`file_actions`), экспорт (`build_export`), «Сброс» и
+«Автотон» (`tone_actions`), раскладка окна (`build_layout`), выход
+(`shutdown_app`); лента — `build_strip` (browser.v); `wb_ui.v` — секция «Баланс белого»; `history.v`
 — EditState и история; `sidecar.v` — формат сайдкара и чтение/запись;
 `sidecar_strokes.v` — таблица мазков кисти сайдкара v3;
 `loader.v` — фоновое открытие кадра и камерная кривая; `post.v` —

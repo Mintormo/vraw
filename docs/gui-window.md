@@ -20,6 +20,21 @@
   «Неразрушающее редактирование и история»), `quality`, `suppress bool`.
   Фоновая подготовка: `file_gen`, `lens_dirty`, `prep_running`,
   `prep_threads`, `prep_done`.
+- **Сборка окна** (13.11.2026, аудит п. 11: `main()` был 2285 строк):
+  `main()` создаёт настройки, окно, State, холсты и приёмники, затем
+  зовёт сборщики по порядку: секции панели (panel_ui.v) → история →
+  `build_open` → `build_strip` → `file_actions`, `build_export`,
+  `tone_actions` → `build_menu` → `build_panel` → `build_layout` →
+  `app.run()` → `shutdown_app`. Порядок важен: `build_panel` зовёт
+  `hk_refresh` — подписи с сочетаниями, когда меню уже зарегистрировало
+  все действия. Общие действия передаются значениями (`MenuActions`,
+  `FileActions`, `open_file`), виджеты секций — рядами (`[]SectionRow`,
+  `PanelItems`). Замыкания внутри захватывают локальные имена, как было
+  в `main()`: сборщик заводит их в начале (`tone_fx := st.tone_fx`,
+  `prep_fx := prep_fx_fn(...)`), привязка клавиш окна — через
+  `mut wh := unsafe { win }`. Новую секцию — функцией, возвращающей ряды,
+  по образцу `profile_row`/`bw_section`. `State` (около 250 полей) не
+  дробили: сотни обращений `st.поле` по всем файлам ради малой пользы.
 - **Компоновка и оформление** (тёмная тема): корень — VBox: меню
   (`vgui.menu_bar`, 28 px) и под ним горизонтальный `vgui.Splitter`
   (`top`/`st.hsplit`, полоса 3 px цвета `divider_color`, мин. 400 |
