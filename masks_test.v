@@ -245,14 +245,21 @@ fn test_mask_parts_history_copy() {
 	}
 	assert snap.params.masks[1].parts[0].ax == 0.3
 	assert snap.params.masks[1].parts.len == 2
-	// Мазки кисти - тоже свои (основа и части)
+	// Списки мазков - свои (основа и части), а готовые мазки снимки делят:
+	// мазок после завершения не меняется (Stroke.copy, сайдкар v3)
 	snap2 := e.clone()
-	e.params.masks[2].strokes[0].pts[0] = 0.9
+	n := e.params.masks[2].strokes.len
 	e.params.masks[2].strokes << pipeline.Stroke{}
-	e.params.masks[2].parts[0].strokes[0].pts[0] = 0.9
+	e.params.masks[2].parts[0].strokes << pipeline.Stroke{}
+	assert snap2.params.masks[2].strokes.len == n
+	assert snap2.params.masks[2].parts[0].strokes.len == 1
+	assert snap2.params.masks[2].strokes[0].pts.data == e.params.masks[2].strokes[0].pts.data
+	// Рисуемый мазок дописывает точки в свой массив - снимок их не видит
+	k := e.params.masks[2].strokes.len - 1
+	snap3 := e.clone()
+	e.params.masks[2].strokes[k].pts << [f32(0.5), 0.5]
+	assert snap3.params.masks[2].strokes[k].pts.len == 0
 	assert snap2.params.masks[2].strokes[0].pts[0] == 0.1
-	assert snap2.params.masks[2].strokes.len == 2
-	assert snap2.params.masks[2].parts[0].strokes[0].pts[0] == 0.2
 }
 
 // Размер и поворот радиальной формы с панели: большая полуось - % высоты

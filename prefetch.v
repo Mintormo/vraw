@@ -63,10 +63,10 @@ fn prefetch_worker(done &Done, job PfJob, mut app vgui.App, on_done fn (PfResult
 	}
 	mut lens_corr := neutral_edit().lens_corr
 	mut man := lens.Manual{}
-	if side := load_sidecar(sidecar_path(job.path)) {
-		if side.history.len > 0 {
-			lens_corr = side.history[side.current].state.lens_corr
-			man = side.history[side.current].state.lman
+	if side := load_side_current(sidecar_path(job.path)) {
+		if side.has {
+			lens_corr = side.state.lens_corr
+			man = side.state.lman
 		}
 	}
 	mut res := load_compute(LoadJob{

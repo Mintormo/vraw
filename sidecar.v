@@ -21,9 +21,11 @@ module main
 // значит по умолчанию), числа - до 6 значащих цифр, точки кривых - парами
 // [x, y], запись истории - одной строкой. Каждая запись хранит свои
 // настройки целиком (не разницу с предыдущей): испорченная запись не
-// тянет за собой остальные. Версия 1 (до 01.11.2026: все поля, отступ на
-// каждое значение - в 15-30 раз больше) читается (SideFile), при первой
-// правке файл перезаписывается версией 2.
+// тянет за собой остальные. Версия 3 (13.11.2026, sidecar_strokes.v) -
+// то же, но мазки кисти один раз, в таблице "strokes", а в настройках -
+// их номера; без мазков файл пишется версией 2. Версия 1 (до 01.11.2026:
+// все поля, отступ на каждое значение - в 15-30 раз больше) читается
+// (SideFile), при первой правке файл перезаписывается заново.
 import os
 import math
 import strings
@@ -34,7 +36,7 @@ import lens
 import i18n
 
 const sidecar_ext = '.vraw.json'
-const sidecar_version = 2
+const sidecar_version = 3
 fn sidecar_path(raw_path string) string {
 	return raw_path + sidecar_ext
 }
@@ -745,8 +747,9 @@ fn encode_history(history []HistEntry, pos int, mark Mark) string {
 	defs := side_obj(side_defaults())
 	mut entries := []string{cap: history.len}
 	mut cur := ''
+	mut table := StrokeTable{}
 	for i, h in history {
-		state := any_line(json2.Any(side_sparse(side_state(h.state), defs)))
+		state := state_line(h.state, defs, mut table)
 		if i == pos {
 			cur = state
 		}
@@ -757,8 +760,15 @@ fn encode_history(history []HistEntry, pos int, mark Mark) string {
 		entries << e + ', "state": ${state}}'
 	}
 	mut b := strings.new_builder(256 + 128 * history.len)
-	b.write_string('{\n  "app": "vraw", "version": ${sidecar_version}, "rating": ${mark.rating}, ')
+	// Без мазков - версия 2 (её читает и прежний vraw), с ними - 3
+	version := if table.lines.len > 0 { sidecar_version } else { 2 }
+	b.write_string('{\n  "app": "vraw", "version": ${version}, "rating": ${mark.rating}, ')
 	b.write_string('"flag": ${mark.flag}, "current": ${pos},\n')
+	if table.lines.len > 0 {
+		b.write_string('  "strokes": [\n    ')
+		b.write_string(table.lines.join(',\n    '))
+		b.write_string('\n  ],\n')
+	}
 	b.write_string('  "state": ${cur},\n  "history": [\n    ')
 	b.write_string(entries.join(',\n    '))
 	b.write_string('\n  ]\n}\n')
@@ -921,6 +931,7 @@ fn any_line(a json2.Any) string {
 
 // LoadedSidecar - прочитанный сайдкар: снимки ещё без производных полей
 struct LoadedSidecar {
+mut:
 	history []HistEntry
 	current int
 	mark    Mark
@@ -944,7 +955,9 @@ fn decode_sidecar(text string) !LoadedSidecar {
 		return error(i18n.trf('версия {0} новее программы', '${version}'))
 	}
 	if version < 2 {
-		return decode_sidecar_v1(text)
+		mut v1 := decode_sidecar_v1(text)!
+		share_strokes(mut v1.history)
+		return v1
 	}
 	hist := m['history'] or { json2.Any(0) }
 	current := (m['current'] or { json2.Any(-1) }).int()
@@ -953,6 +966,7 @@ fn decode_sidecar(text string) !LoadedSidecar {
 		return error(i18n.tr('пустая или испорченная история'))
 	}
 	defs := side_obj(side_defaults())
+	table := stroke_table_of(m['strokes'] or { json2.Any(0) })!
 	mut hs := []HistEntry{}
 	for h in hist.as_array() {
 		if h !is map[string]json2.Any {
@@ -962,9 +976,12 @@ fn decode_sidecar(text string) !LoadedSidecar {
 		hs << HistEntry{
 			name:  (hm['name'] or { json2.Any('') }).str()
 			key:   (hm['key'] or { json2.Any('') }).str()
-			state: edit_state(side_from_obj(hm['state'] or { json2.Any(map[string]json2.Any{}) },
-				defs)!)!
+			state: state_of_obj(hm['state'] or { json2.Any(map[string]json2.Any{}) }, defs,
+				table)!
 		}
+	}
+	if table.len == 0 {
+		share_strokes(mut hs) // версия 2: мазки записаны в каждой записи
 	}
 	return LoadedSidecar{
 		history: hs
@@ -1100,6 +1117,59 @@ fn load_sidecar(path string) !LoadedSidecar {
 	}
 	text := os.read_file(path)!
 	return decode_sidecar(text)!
+}
+
+// SideCurrent - текущие настройки кадра по сайдкару (has - сайдкар есть)
+struct SideCurrent {
+	state   EditState
+	current int
+	has     bool
+}
+
+// load_side_current - только текущие настройки и позиция: миниатюрам,
+// пакету, сравнению, предзагрузке история не нужна. Нет файла - has false.
+fn load_side_current(path string) !SideCurrent {
+	if !os.exists(path) {
+		return SideCurrent{}
+	}
+	text := os.read_file(path)!
+	return decode_side_current(text)!
+}
+
+// decode_side_current - разбирается только начало файла версий 2 и 3
+// (шапка, таблица мазков, "state") - до истории, она больше всего
+// остального; иначе (версия 1, чужая разметка) - весь файл
+fn decode_side_current(text string) !SideCurrent {
+	at := text.index('\n  "history": [') or { -1 }
+	if at > 0 {
+		head := text[..at].trim_right(' \n,') + '\n}'
+		root := json2.decode[json2.Any](head) or { json2.Any(0) }
+		if root is map[string]json2.Any {
+			m := root.as_map()
+			app := (m['app'] or { json2.Any('') }).str()
+			version := (m['version'] or { json2.Any(0) }).int()
+			cur := (m['current'] or { json2.Any(-1) }).int()
+			if app == 'vraw' && version >= 2 && version <= sidecar_version && cur >= 0 {
+				if st := m['state'] {
+					table := stroke_table_of(m['strokes'] or { json2.Any(0) })!
+					return SideCurrent{
+						state:   state_of_obj(st, side_obj(side_defaults()), table)!
+						current: cur
+						has:     true
+					}
+				}
+			}
+		}
+	}
+	full := decode_sidecar(text)!
+	if full.history.len == 0 {
+		return SideCurrent{}
+	}
+	return SideCurrent{
+		state:   full.history[full.current].state
+		current: full.current
+		has:     true
+	}
 }
 
 // sync_sidecar записывает историю и пометку в сайдкар (после правки,

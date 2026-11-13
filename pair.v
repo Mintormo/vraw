@@ -106,8 +106,8 @@ fn pair_render(job PairJob) PairResult {
 
 // pair_side_edit - настройки кадра из его сайдкара (нет - нейтральные)
 fn pair_side_edit(path string) EditState {
-	side := load_sidecar(sidecar_path(path)) or { return neutral_edit() }
-	return if side.history.len > 0 { side.history[side.current].state } else { neutral_edit() }
+	side := load_side_current(sidecar_path(path)) or { return neutral_edit() }
+	return if side.has { side.state } else { neutral_edit() }
 }
 
 // pair_candidate - кадр для левой половины: выделенный в ленте, а если

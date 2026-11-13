@@ -242,11 +242,11 @@ fn fit_thumb_into(mut out []u8, src []u8, w int, h int, flip int, bw int, bh int
 // thumb_geom - геометрия кадра из его сайдкара (как на выходе:
 // out_geom); нет сайдкара или не читается - без изменений
 fn thumb_geom(path string) pipeline.Geom {
-	side := load_sidecar(sidecar_path(path)) or { return pipeline.Geom{} }
-	if side.history.len == 0 {
+	side := load_side_current(sidecar_path(path)) or { return pipeline.Geom{} }
+	if !side.has {
 		return pipeline.Geom{}
 	}
-	return out_geom(&side.history[side.current].state)
+	return out_geom(&side.state)
 }
 
 // thumb_geom_max - наибольшая сторона картинки, по которой миниатюра
@@ -390,11 +390,11 @@ fn thumb_one(done &Done, path string, g pipeline.Geom, db &lens.Database, stop &
 // side_thumb_edit - настройки кадра из сайдкара, если в нём есть правки
 // (current > 0); нет сайдкара или правок - none (миниатюра - JPEG камеры)
 fn side_thumb_edit(path string) ?EditState {
-	side := load_sidecar(sidecar_path(path)) or { return none }
-	if side.history.len == 0 || side.current <= 0 || side.current >= side.history.len {
+	side := load_side_current(sidecar_path(path)) or { return none }
+	if !side.has || side.current <= 0 {
 		return none
 	}
-	return side.history[side.current].state
+	return side.state
 }
 
 // tone_thumb - миниатюра с правками: проявка по настройкам e путём

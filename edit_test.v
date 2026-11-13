@@ -341,7 +341,7 @@ fn test_sidecar_v2_compact() {
 	assert with_derived(min.history[0].state, st.look, st.cam) == with_derived(neutral_edit(),
 		st.look, st.cam)
 	// Новая версия, испорченная запись, неверная позиция - отказ
-	for bad in [text.replace('"version": 2', '"version": 3'),
+	for bad in [text.replace('"version": 2', '"version": ${sidecar_version + 1}'),
 		text.replace('"state": {}', '"state": 5'), text.replace('"current": 2', '"current": 3'),
 		text.replace('"history": [', '"history": [7, ')] {
 		if _ := decode_sidecar(bad) {

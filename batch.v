@@ -232,14 +232,14 @@ fn batch_items(st &State, paths []string) ([]BatchItem, []string) {
 				derived: true
 			}
 		} else {
-			side := load_sidecar(sidecar_path(p)) or {
+			side := load_side_current(sidecar_path(p)) or {
 				bad << os.file_name(p)
-				LoadedSidecar{}
+				SideCurrent{}
 			}
 			BatchItem{
 				src:  p
-				edit: if side.history.len > 0 {
-					side.history[side.current].state
+				edit: if side.has {
+					side.state
 				} else {
 					neutral_edit()
 				}
