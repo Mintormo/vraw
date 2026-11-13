@@ -69,7 +69,10 @@ mut:
 }
 
 // load_worker выполняется в spawn; результат - через app.post
-fn load_worker(job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
+fn load_worker(done &Done, job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
+	defer {
+		done.mark()
+	}
 	post_load(mut app, on_done, load_compute(job))
 }
 
@@ -575,10 +578,7 @@ fn wait_loads(mut st State) {
 		s.stop = true
 	}
 	prefetch_cancel(mut st) // предзагрузка соседа - в тех же потоках
-	for t in st.load_threads {
-		t.wait()
-	}
-	st.load_threads.clear()
+	wait_all(mut st.load_threads)
 }
 
 // set_canvas_size - холст под новый размер (приём Canvas.load_from_surface);

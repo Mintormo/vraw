@@ -172,7 +172,8 @@ fn ba_prep_start(mut st State, b EditState, key string) {
 	st.ba_running = true
 	st.ba_want = key
 	mut app := st.app
-	st.ba_threads << spawn prep_worker(job, mut app, st.ba_prep_done)
+	wd := &Done{}
+	track(mut st.ba_threads, spawn prep_worker(wd, job, mut app, st.ba_prep_done), wd)
 }
 
 // ba_prep_take - сырьё «до» готово (главный поток)
@@ -220,10 +221,7 @@ fn ba_forget(mut st State) {
 
 // wait_ba - дождаться подготовки «до» на выходе
 fn wait_ba(mut st State) {
-	for t in st.ba_threads {
-		t.wait()
-	}
-	st.ba_threads.clear()
+	wait_all(mut st.ba_threads)
 	st.ba_running = false
 }
 

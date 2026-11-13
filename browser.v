@@ -289,7 +289,10 @@ fn make_thumb(path string, g pipeline.Geom) ![]u8 {
 // проходом - правленные кадры (edited, кроме открытого cur: его
 // миниатюра - из превью) с правками (tone_thumb), с пониженным
 // приоритетом: окно и открытый кадр важнее.
-fn thumb_worker(paths []string, order []int, edited []bool, cur int, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+fn thumb_worker(done &Done, paths []string, order []int, edited []bool, cur int, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+	defer {
+		done.mark()
+	}
 	for idx in order {
 		if stop.stop {
 			return
@@ -334,7 +337,10 @@ fn thumb_worker(paths []string, order []int, edited []bool, cur int, db &lens.Da
 // thumb_one выполняется в spawn: одна миниатюра заново (refresh_thumb):
 // с правками из сайдкара - проявкой (tone_thumb), без них - JPEG камеры с
 // геометрией g
-fn thumb_one(path string, g pipeline.Geom, db &lens.Database, stop &StopFlag, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
+fn thumb_one(done &Done, path string, g pipeline.Geom, db &lens.Database, stop &StopFlag, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
+	defer {
+		done.mark()
+	}
 	mut pix := []u8{}
 	mut geom := g
 	if e := side_thumb_edit(path) {
@@ -495,10 +501,7 @@ fn stop_thumbs(mut st State) {
 
 fn wait_thumbs(mut st State) {
 	stop_thumbs(mut st)
-	for t in st.thumb_threads {
-		t.wait()
-	}
-	st.thumb_threads.clear()
+	wait_all(mut st.thumb_threads)
 }
 
 // StripCell - ячейка ленты: холст миниатюры, подпись, контейнер и
@@ -592,8 +595,9 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	st.thumb_stop = stop
 	st.thumb_seq++
 	edited := st.frames.map(it.edited)
-	st.thumb_threads << spawn thumb_worker(paths, thumb_order(paths.len, cur), edited, cur,
-		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.thumb_done)
+	wd := &Done{}
+	track(mut st.thumb_threads, spawn thumb_worker(wd, paths, thumb_order(paths.len, cur), edited, cur,
+		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.thumb_done), wd)
 	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
 	// (F6) показывается
 	if cur_path == '' && paths.len > 0 && !strip_on(st) {
@@ -627,8 +631,9 @@ fn refresh_thumb(mut st State, idx int, g pipeline.Geom) {
 	st.frames[idx].geom = g
 	st.frames[idx].seq = st.thumb_seq
 	mut app := st.app
-	st.thumb_threads << spawn thumb_one(st.frames[idx].path, g, st.lens_db, st.thumb_stop,
-		st.thumb_gen, st.thumb_seq, idx, mut app, st.thumb_done)
+	wd := &Done{}
+	track(mut st.thumb_threads, spawn thumb_one(wd, st.frames[idx].path, g, st.lens_db, st.thumb_stop,
+		st.thumb_gen, st.thumb_seq, idx, mut app, st.thumb_done), wd)
 }
 
 // sync_thumb - миниатюра открытого кадра после записи сайдкара (правка,

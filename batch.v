@@ -154,7 +154,8 @@ fn apply_load(l LoadLevel) {
 
 // batch_derive - производные поля настроек неоткрытого кадра: цвет
 // камеры (баланс белого), сила коррекции виньетирования (при коррекции
-// объектива) и камерная кривая (если включена) - как в загрузчике окна
+// объектива) и камерная кривая (если включена, по сырью после коррекции
+// объектива профилем и ручной) - как в загрузчике окна
 fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 	mut d := raw.open(path)!
 	defer {
@@ -175,12 +176,20 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 				t.free()
 			}
 		}
-		mut lm := LensMatch{}
-		if e.lens_corr {
-			m := d.meta()
-			corr := db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
-			lm = lens_match(cj, d.flip(), corr, lin, w, h, m)
-			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, true, lm.vign, lm.zoom, lens.Manual{})
+		// Как загрузчик окна (load_compute -> prep_compute): сила виньетки
+		// и масштаб - по профилю кадра всегда, коррекция - профилем (если
+		// включена) и ручная (всегда, если задана): камерная кривая
+		// строится по уже исправленному сырью
+		m := d.meta()
+		corr := if isnil(db) {
+			unsafe { &lens.Corrector(nil) }
+		} else {
+			db.find(m.cam_make, m.cam_model, m.lens) or { unsafe { nil } }
+		}
+		lm := lens_match(cj, d.flip(), corr, lin, w, h, m)
+		if e.lens_corr || e.lman.active() {
+			correct_lens(unsafe { &u16(lin.data) }, w, h, m, db, e.lens_corr, lm.vign, lm.zoom,
+				e.lman)
 		}
 		if e.use_curve {
 			look = CamLook{
@@ -256,7 +265,10 @@ fn (mut t BatchTally) add(r BatchDone) {
 // batch_worker выполняется в spawn: координатор - кадры потокам
 // (batch_frame_job), не больше level.par одновременно (и не больше, чем
 // помещается в свободную память - mem_par); итог - report
-fn batch_worker(job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
+fn batch_worker(done &Done, job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
+	defer {
+		done.mark()
+	}
 	sw := time.new_stopwatch()
 	mut level := load_level(job.settings.export_load)
 	apply_load(level)

@@ -66,6 +66,13 @@ fn test_batch_derive() {
 	d2 := batch_derive(path, off, unsafe { nil })!
 	assert d2.params.curve.len == 0 && d2.params.cam_sat == 1
 	assert d.params.cam_sat > 0.5 && d.params.cam_sat <= 2
+	// Ручная коррекция объектива - как в окне: кривая строится по сырью
+	// после неё (и без профиля, коррекция объектива выключена)
+	mut man := neutral_edit()
+	man.lens_corr = false
+	man.lman.vign = 60
+	d3 := batch_derive(path, man, unsafe { nil })!
+	assert d3.params.curve.len == d.params.curve.len && d3.params.curve != d.params.curve
 }
 
 // Пути пакета: занятые ещё не записанными кадрами тоже обходятся

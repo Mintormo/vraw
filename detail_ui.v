@@ -69,7 +69,7 @@ mut:
 	running  bool
 	pending  bool // запрос во время работы - ещё проход после
 	drop     bool // кадр сменился во время работы - src и lens выбросить
-	threads  []thread
+	threads  []Worker
 	run_key  string     // ключ подготовки идущего расчёта (со стороной)
 	run_frac DetailFrac // его видимая часть с запасом
 	frag      [2]DetailFrag
@@ -356,10 +356,14 @@ fn detail_start(mut st State, side int) {
 	dt.run_key = run_key
 	dt.run_frac = detail_frac(st)
 	mut app := st.app
-	dt.threads << spawn detail_worker(req, mut app, st.dt_done)
+	wd := &Done{}
+	track(mut dt.threads, spawn detail_worker(wd, req, mut app, st.dt_done), wd)
 }
 
-fn detail_worker(req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
+fn detail_worker(done &Done, req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
+	defer {
+		done.mark()
+	}
 	mut res := DetailRes{
 		req:  req
 		src:  req.src
@@ -696,8 +700,5 @@ fn wait_details(mut st State) {
 		return
 	}
 	mut dt := st.dt
-	for t in dt.threads {
-		t.wait()
-	}
-	dt.threads.clear()
+	wait_all(mut dt.threads)
 }

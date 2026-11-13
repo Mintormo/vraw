@@ -30,7 +30,7 @@
   формат, путь и размер (`size: settings.export_size_opts()`) — из окна
   «Экспорт», качество — `settings.jpeg_quality`), выход —
   `report(mut app, on_done, SaveOutcome, msg)` → `post_result` (post.v).
-  Хендлы потоков — в `State.save_threads`, `wait()` после `app.run()`,
+  Хендлы потоков — в `State.save_threads` (`[]Worker`, workers.v), `wait_all` после `app.run()`,
   чтобы закрытие окна не оборвало запись файла. Ровно ОДИН `wait()` на
   поток: повторный (был при переходе на общую базу lensfun) — аварийное
   завершение «V thread join failed: 3» при закрытии после экспорта.
@@ -126,8 +126,10 @@
   `app.post` → `batch_event` (`ExportCtl.frames` — кадры в работе,
   `finished`). `batch_derive` для неоткрытого кадра:
   свой `raw.open`, `cam_color`, при `use_curve` или коррекции объектива —
-  проявка half-size, `cam_jpeg`, `vign_match`,
-  `correct_lens` с этой силой, `camera_look` (как загрузчик:
+  проявка half-size, `cam_jpeg`, `lens_match` (сила виньетки и масштаб по
+  профилю — всегда), `correct_lens` профилем (если включён) и ручной
+  `e.lman` (всегда, если задана; до 13.11.2026 ручная здесь не
+  применялась и кривая чуть расходилась с окном), `camera_look` (как загрузчик:
   A.jpg из окна и B.jpg пакетом из копии того же CR3 совпали до
   пикселя), затем `with_derived`; `develop_full(size)` → `imgio.write`.
   Ошибка кадра — в список, пакет идёт дальше; отмена (`ctl.cancel`) —

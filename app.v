@@ -44,14 +44,14 @@ mut:
 	look         CamLook // «как JPEG» кадра (кривая и насыщенность), пусто - нет превью
 	nr_applied   [4]f32 = [f32(-1), -1, -1, -1]! // значения последней подготовки сырья
 	dc_applied   [3]f32 = [f32(-1), -1, -1]! // Capture-резкость последней подготовки (dc_key)
-	save_threads []thread // хендлы фоновых сохранений: wait после app.run()
+	save_threads []Worker // хендлы фоновых сохранений (workers.v): wait_all после app.run()
 	// Подготовка сырья в фоне (prep_worker): не больше одного воркера.
 	// Запрос во время работы только меняет настройки - prep_done сверит
 	// их с применёнными и запустит ещё один проход.
 	file_gen     int  // номер открытого файла: результат старого файла отбрасывается
 	lens_dirty   bool // raw_linear устарел - нужна коррекция объектива из dev_linear
 	prep_running bool
-	prep_threads []thread
+	prep_threads []Worker
 	prep_done    fn (PrepResult) = unsafe { nil } // приём результата в главном потоке
 	// Тональные кривые: точки - в edit.curve_pts, редактор показывает
 	// выбранный канал (curve_ch), остальные - призраками
@@ -106,7 +106,7 @@ mut:
 	strip_open    bool           = true
 	thumb_gen     int
 	thumb_stop    &StopFlag = unsafe { nil }
-	thumb_threads []thread
+	thumb_threads []Worker
 	thumb_done    fn (ThumbResult) = unsafe { nil }
 	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
 	// Миниатюра открытого кадра из его превью (browser.v, update_live_thumb)
@@ -134,7 +134,7 @@ mut:
 	// предупреждение о сайдкаре для показа по окончании
 	loading      bool
 	load_stop    &StopFlag = unsafe { nil }
-	load_threads []thread
+	load_threads []Worker
 	load_msg     string
 	on_load_done fn (LoadResult) = unsafe { nil }
 	load_ov      &LoadOverlay    = unsafe { nil } // оверлей «Обработка» (loading.v)
@@ -370,7 +370,7 @@ mut:
 	ba_want      string
 	ba_gen       int
 	ba_running   bool
-	ba_threads   []thread
+	ba_threads   []Worker
 	ba_prep_done fn (PrepResult) = unsafe { nil }
 	// Бок о бок: холст «до» слева, ряд холстов, пункт меню, последний
 	// связанный вид
@@ -389,7 +389,7 @@ mut:
 	pair_gen     int
 	pair_busy    bool
 	pair_flag    &StopFlag = unsafe { nil }
-	pair_threads []thread
+	pair_threads []Worker
 	pair_done    fn (PairResult) = unsafe { nil }
 	m_pair       &vgui.MenuItem  = unsafe { nil }
 	// «Вид - JPEG камеры» (camjpeg.v): показ, JPEG кадра (RGBA pw x ph
@@ -772,7 +772,10 @@ fn drop_prep(res PrepResult) {
 
 // prep_worker выполняется в spawn; результат уходит в главный поток
 // через app.post() (единственный потокобезопасный вход vgui).
-fn prep_worker(job PrepJob, mut app vgui.App, on_done fn (PrepResult)) {
+fn prep_worker(done &Done, job PrepJob, mut app vgui.App, on_done fn (PrepResult)) {
+	defer {
+		done.mark()
+	}
 	res := prep_compute(job)
 	post_result(mut app, on_done, res)
 }
@@ -794,7 +797,8 @@ fn request_prep(mut st State, mut app vgui.App, redo_lens bool) {
 	}
 	st.prep_running = true
 	job := make_prep_job(mut st)
-	st.prep_threads << spawn prep_worker(job, mut app, st.prep_done)
+	wd := &Done{}
+	track(mut st.prep_threads, spawn prep_worker(wd, job, mut app, st.prep_done), wd)
 }
 
 // wait_prep дожидается фонового воркера.
@@ -802,10 +806,7 @@ fn request_prep(mut st State, mut app vgui.App, redo_lens bool) {
 // lensfun). Результат дождавшегося воркера уже в очереди
 // app.post - его отбросит проверка file_gen/prep_running в prep_done.
 fn wait_prep(mut st State) {
-	for t in st.prep_threads {
-		t.wait()
-	}
-	st.prep_threads.clear()
+	wait_all(mut st.prep_threads)
 	st.prep_running = false
 }
 
@@ -830,7 +831,10 @@ struct SaveJob {
 // save_worker выполняется в spawn: полная проявка и запись файла без единого
 // обращения к vgui или общему состоянию - кроме app.post() (потокобезопасен
 // по контракту vgui). Результат - уведомление через report.
-fn save_worker(job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
+fn save_worker(done &Done, job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
+	defer {
+		done.mark()
+	}
 	sw := time.new_stopwatch()
 	apply_load(job.load)
 	mut progress := ExportPoster{
@@ -2867,7 +2871,8 @@ fn main() {
 		st.exp = ctl
 		show_export(mut st, mut app, win)
 		export_started(mut st)
-		st.save_threads << spawn save_worker(job, mut app, save_done)
+		wd := &Done{}
+		track(mut st.save_threads, spawn save_worker(wd, job, mut app, save_done), wd)
 	}
 	st.exp_event = fn [mut st] (ctl &ExportCtl, ev BatchEvent) {
 		batch_event(mut st, ctl, ev)
@@ -2902,7 +2907,8 @@ fn main() {
 		show_export(mut st, mut app, win)
 		export_started(mut st)
 		sync_settings_ui(mut st)
-		st.save_threads << spawn batch_worker(job, mut app, save_done)
+		wd := &Done{}
+		track(mut st.save_threads, spawn batch_worker(wd, job, mut app, save_done), wd)
 	}
 
 	// «Сброс» тональный: коррекция объектива, камерная кривая
@@ -3644,9 +3650,7 @@ fn main() {
 	app.run()
 
 	// Не обрывать записывающийся файл, если окно закрыли во время сохранения
-	for t in st.save_threads {
-		t.wait()
-	}
+	wait_all(mut st.save_threads)
 	if !isnil(st.dev) {
 		st.dev.close()
 	}
@@ -3656,10 +3660,8 @@ fn main() {
 	wait_pair(mut st) // и левый кадр сравнения
 	wait_thumbs(mut st)
 	wait_loads(mut st)
-	// Потоки сохранения уже дождались выше (повторный wait того же потока
-	// роняет программу: «V thread join failed»); база lensfun, которой они
-	// пользуются, освобождается только после них
-	st.save_threads.clear()
+	// Потоки сохранения уже дождались выше (wait_all); база lensfun,
+	// которой они пользуются, освобождается только после них
 	if !isnil(st.lens_db) {
 		st.lens_db.free()
 	}

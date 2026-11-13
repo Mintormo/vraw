@@ -50,7 +50,10 @@ fn (mut p PairStop) stage(_ ExportStage, _ int, _ int) bool {
 	return isnil(p.stop) || !p.stop.stop
 }
 
-fn pair_worker(job PairJob, mut app vgui.App, on_done fn (PairResult)) {
+fn pair_worker(done &Done, job PairJob, mut app vgui.App, on_done fn (PairResult)) {
+	defer {
+		done.mark()
+	}
 	post_result(mut app, on_done, pair_render(job))
 }
 
@@ -213,7 +216,8 @@ fn pair_load(mut st State, path string) {
 		stop: stop
 	}
 	mut app := st.app
-	st.pair_threads << spawn pair_worker(job, mut app, st.pair_done)
+	wd := &Done{}
+	track(mut st.pair_threads, spawn pair_worker(wd, job, mut app, st.pair_done), wd)
 	pair_redraw(st)
 }
 
@@ -374,8 +378,5 @@ fn pair_overlay(st &State, mut ctx vgui.RenderContext) {
 // wait_pair - дождаться проявок левого кадра на выходе
 fn wait_pair(mut st State) {
 	pair_stop(mut st)
-	for t in st.pair_threads {
-		t.wait()
-	}
-	st.pair_threads.clear()
+	wait_all(mut st.pair_threads)
 }

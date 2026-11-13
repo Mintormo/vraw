@@ -40,7 +40,10 @@ struct PfResult {
 }
 
 // prefetch_worker - в spawn: открыть, проявить, закрыть хендл -> on_done
-fn prefetch_worker(job PfJob, mut app vgui.App, on_done fn (PfResult)) {
+fn prefetch_worker(done &Done, job PfJob, mut app vgui.App, on_done fn (PfResult)) {
+	defer {
+		done.mark()
+	}
 	apply_load(LoadLevel{
 		nice: pf_nice
 	})
@@ -122,7 +125,8 @@ fn prefetch_next(mut st State) {
 		stop: stop
 	}
 	mut app := st.app
-	st.load_threads << spawn prefetch_worker(job, mut app, st.pf_done)
+	wd := &Done{}
+	track(mut st.load_threads, spawn prefetch_worker(wd, job, mut app, st.pf_done), wd)
 }
 
 // prefetch_cancel - отменить идущую предзагрузку (её итог отбросится) и
@@ -211,5 +215,6 @@ fn load_start(mut st State, nd &raw.Developer) {
 		stop:      stop
 	}
 	mut app := st.app
-	st.load_threads << spawn load_worker(job, mut app, st.on_load_done)
+	wd := &Done{}
+	track(mut st.load_threads, spawn load_worker(wd, job, mut app, st.on_load_done), wd)
 }
