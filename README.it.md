@@ -61,6 +61,7 @@ strumenti rispondono all'istante.
 **Visualizzazione e selezione**
 - Striscia con tutti i file RAW della cartella; gli scatti vicini vengono
   sviluppati in anticipo, quindi lo scorrimento con ←/→ è istantaneo.
+  Le cartelle con migliaia di scatti si aprono senza attese.
 - Valutazioni 0–5, bandierine scelta/scarto, filtri; gli scatti scartati
   finiscono nel cestino di sistema.
 - Prima/dopo: tenere premuto `\` o usare la vista divisa (Y).
@@ -102,7 +103,7 @@ MSYS2 dovrebbe funzionare, ma non è ancora stata provata.
 
 | Componente | Versione | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| Compilatore V | 0.5.2 (a1c9e93) o successiva | dai sorgenti (passo 3) | dai sorgenti |
+| Compilatore V | 0.5.2 (7886931) o successiva | dai sorgenti (passo 3) | dai sorgenti |
 | gcc (con OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -222,7 +223,7 @@ raccoglierle).
 ### Documentazione per sviluppatori
 
 Il codice è commentato in dettaglio. Le note di progetto sono in russo:
-[PROJECT.md](PROJECT.md) — moduli e pipeline,
+[PROJECT.md](PROJECT.md) — indice della cartella [docs](docs): moduli, pipeline, interfaccia,
 [ROADMAP.md](ROADMAP.md) — cosa è fatto e cosa è in programma,
 [REQUIREMENTS.md](REQUIREMENTS.md) — cosa fa il programma adesso.
 

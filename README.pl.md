@@ -59,6 +59,7 @@ a wszystkie narzędzia reagują natychmiast.
 - Taśma miniatur ze wszystkimi plikami RAW z folderu; sąsiednie zdjęcia
   są wywoływane z wyprzedzeniem, więc przełączanie ←/→ jest
   natychmiastowe.
+  Foldery z tysiącami zdjęć otwierają się bez opóźnień.
 - Oceny 0–5, flagi „wybrane/odrzucone”, filtry; odrzucone zdjęcia trafiają
   do systemowego kosza.
 - Przed/po: przytrzymać `\` lub widok dzielony (Y).
@@ -100,7 +101,7 @@ powinno działać, ale nie zostało jeszcze sprawdzone.
 
 | Składnik | Wersja | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| Kompilator V | 0.5.2 (a1c9e93) lub nowszy | ze źródeł (krok 3) | ze źródeł |
+| Kompilator V | 0.5.2 (7886931) lub nowszy | ze źródeł (krok 3) | ze źródeł |
 | gcc (z OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -219,7 +220,7 @@ biblioteki DLL z `C:\msys64\mingw64\bin` (jak je zebrać, pokazuje
 ### Dokumentacja dla programistów
 
 Kod jest szczegółowo skomentowany. Notatki projektowe są po rosyjsku:
-[PROJECT.md](PROJECT.md) — moduły i potok,
+[PROJECT.md](PROJECT.md) — spis treści folderu [docs](docs): moduły, potok, interfejs,
 [ROADMAP.md](ROADMAP.md) — co zrobione i co w planach,
 [REQUIREMENTS.md](REQUIREMENTS.md) — co program robi teraz.
 

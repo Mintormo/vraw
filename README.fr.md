@@ -60,6 +60,7 @@ et tous les outils réagissent instantanément.
 **Visualisation et tri**
 - Bande de vignettes avec tous les RAW du dossier ; les images voisines
   sont développées à l'avance, le passage avec ←/→ est donc instantané.
+  Les dossiers de milliers d'images s'ouvrent sans attente.
 - Notes de 0 à 5, marqueurs « retenue/rejetée », filtres ; les images
   rejetées partent dans la corbeille du système.
 - Avant/après : maintenir `\` ou vue partagée (Y).
@@ -101,7 +102,7 @@ MSYS2 devrait aussi fonctionner, mais n'a pas encore été testée.
 
 | Composant | Version | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| Compilateur V | 0.5.2 (a1c9e93) ou plus récent | depuis les sources (étape 3) | depuis les sources |
+| Compilateur V | 0.5.2 (7886931) ou plus récent | depuis les sources (étape 3) | depuis les sources |
 | gcc (avec OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -223,7 +224,7 @@ comment les rassembler).
 ### Documentation pour les développeurs
 
 Le code est commenté en détail. Les notes de conception sont en russe :
-[PROJECT.md](PROJECT.md) — modules et pipeline,
+[PROJECT.md](PROJECT.md) — sommaire du dossier [docs](docs) : modules, pipeline, interface,
 [ROADMAP.md](ROADMAP.md) — ce qui est fait et ce qui est prévu,
 [REQUIREMENTS.md](REQUIREMENTS.md) — ce que fait le programme
 aujourd'hui.

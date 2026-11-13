@@ -61,6 +61,7 @@ ferramentas respondem de imediato.
 **Visualização e seleção**
 - Faixa de miniaturas com todos os RAW da pasta; as fotos vizinhas são
   reveladas antecipadamente, por isso passar com ←/→ é instantâneo.
+  As pastas com milhares de fotos abrem sem demora.
 - Classificação de 0 a 5, marcas «escolhida/rejeitada», filtros; as fotos
   rejeitadas vão para a reciclagem do sistema.
 - Antes/depois: manter `\` premido ou vista dividida (Y).
@@ -102,7 +103,7 @@ também deverá funcionar, mas ainda não foi testado.
 
 | Componente | Versão | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| Compilador V | 0.5.2 (a1c9e93) ou mais recente | a partir do código-fonte (passo 3) | a partir do código-fonte |
+| Compilador V | 0.5.2 (7886931) ou mais recente | a partir do código-fonte (passo 3) | a partir do código-fonte |
 | gcc (com OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -224,7 +225,7 @@ dele as DLL necessárias de `C:\msys64\mingw64\bin` (o
 ### Documentação para programadores
 
 O código está comentado em pormenor. As notas de conceção estão em
-russo: [PROJECT.md](PROJECT.md) — módulos e pipeline,
+russo: [PROJECT.md](PROJECT.md) — índice da pasta [docs](docs): módulos, pipeline, interface,
 [ROADMAP.md](ROADMAP.md) — o que está feito e o que está planeado,
 [REQUIREMENTS.md](REQUIREMENTS.md) — o que o programa faz agora.
 

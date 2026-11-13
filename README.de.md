@@ -60,6 +60,7 @@ Werkzeuge reagieren sofort.
 **Ansicht und Auswahl**
 - Filmstreifen mit allen RAW-Dateien des Ordners; benachbarte Bilder
   werden im Voraus entwickelt, Blättern mit ←/→ ist daher sofort.
+  Ordner mit Tausenden Bildern öffnen sich ohne Verzögerung.
 - Bewertungen 0–5, Markierungen „ausgewählt/abgelehnt“, Filter;
   abgelehnte Bilder wandern in den Papierkorb des Systems.
 - Vorher/Nachher: `\` gedrückt halten oder geteilte Ansicht (Y).
@@ -103,7 +104,7 @@ getestet.
 
 | Komponente | Version | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| V-Compiler | 0.5.2 (a1c9e93) oder neuer | aus dem Quellcode (Schritt 3) | aus dem Quellcode |
+| V-Compiler | 0.5.2 (7886931) oder neuer | aus dem Quellcode (Schritt 3) | aus dem Quellcode |
 | gcc (mit OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -224,7 +225,7 @@ einsammelt, zeigt `tools/windows.sh`).
 ### Entwicklerdokumentation
 
 Der Code ist ausführlich kommentiert. Die Entwurfsnotizen sind auf
-Russisch: [PROJECT.md](PROJECT.md) — Module und Pipeline,
+Russisch: [PROJECT.md](PROJECT.md) — Inhaltsverzeichnis des Ordners [docs](docs): Module, Pipeline, Oberfläche,
 [ROADMAP.md](ROADMAP.md) — Erledigtes und Geplantes,
 [REQUIREMENTS.md](REQUIREMENTS.md) — was das Programm jetzt kann.
 

@@ -59,6 +59,7 @@ instantly.
 **Viewing and culling**
 - Film strip with all RAW files of the folder; neighbouring shots are
   developed in advance, so flipping with ←/→ is instant.
+  Folders with thousands of shots open without delay.
 - Ratings 0–5, pick/reject flags, filters; rejected shots go to the
   system trash.
 - Before/after: hold `\` or use a split view (Y).
@@ -101,7 +102,7 @@ tested yet.
 
 | Component | Version | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| V compiler | 0.5.2 (a1c9e93) or newer | from source (step 3) | from source |
+| V compiler | 0.5.2 (7886931) or newer | from source (step 3) | from source |
 | gcc (with OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -219,7 +220,7 @@ shows how they are collected).
 ### Developer documentation
 
 The code is commented in detail. Design notes are in Russian:
-[PROJECT.md](PROJECT.md) — how the modules and the pipeline work,
+[PROJECT.md](PROJECT.md) — contents of the [docs](docs) folder: modules, pipeline, interface,
 [ROADMAP.md](ROADMAP.md) — what is done and what is planned,
 [REQUIREMENTS.md](REQUIREMENTS.md) — what the program does now.
 

@@ -61,6 +61,7 @@ herramientas responden al instante.
 **Visualización y selección**
 - Tira de miniaturas con todos los RAW de la carpeta; las fotos vecinas
   se revelan por adelantado, así que pasar con ←/→ es instantáneo.
+  Las carpetas con miles de fotos se abren sin esperas.
 - Valoraciones de 0 a 5, marcas «elegida/rechazada», filtros; las fotos
   rechazadas van a la papelera del sistema.
 - Antes/después: mantener `\` o vista dividida (Y).
@@ -102,7 +103,7 @@ también debería funcionar, pero aún no se ha probado.
 
 | Componente | Versión | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| Compilador V | 0.5.2 (a1c9e93) o posterior | desde el código fuente (paso 3) | desde el código fuente |
+| Compilador V | 0.5.2 (7886931) o posterior | desde el código fuente (paso 3) | desde el código fuente |
 | gcc (con OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -222,7 +223,7 @@ muestra cómo reunirlas).
 ### Documentación para desarrolladores
 
 El código está comentado en detalle. Las notas de diseño están en ruso:
-[PROJECT.md](PROJECT.md) — módulos y pipeline,
+[PROJECT.md](PROJECT.md) — índice de la carpeta [docs](docs): módulos, pipeline, interfaz,
 [ROADMAP.md](ROADMAP.md) — qué está hecho y qué está previsto,
 [REQUIREMENTS.md](REQUIREMENTS.md) — qué hace el programa ahora.
 

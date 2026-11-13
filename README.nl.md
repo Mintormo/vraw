@@ -61,6 +61,7 @@ gereedschappen reageren meteen.
 **Bekijken en selecteren**
 - Filmstrip met alle RAW-bestanden uit de map; naburige foto's worden
   vooraf ontwikkeld, dus bladeren met ←/→ gaat meteen.
+  Mappen met duizenden foto's openen zonder vertraging.
 - Beoordelingen 0–5, vlaggen "gekozen/afgewezen", filters; afgewezen
   foto's gaan naar de prullenbak van het systeem.
 - Voor/na: `\` ingedrukt houden of gesplitste weergave (Y).
@@ -103,7 +104,7 @@ ook moeten werken, maar is nog niet getest.
 
 | Onderdeel | Versie | Linux (Ubuntu / Debian / Mint) | Windows (MSYS2, MINGW64) |
 |---|---|---|---|
-| V-compiler | 0.5.2 (a1c9e93) of nieuwer | vanuit de broncode (stap 3) | vanuit de broncode |
+| V-compiler | 0.5.2 (7886931) of nieuwer | vanuit de broncode (stap 3) | vanuit de broncode |
 | gcc (met OpenMP) | 13+ | `build-essential` | `mingw-w64-x86_64-gcc` |
 | LibRaw | 0.21+ | `libraw-dev` | `mingw-w64-x86_64-libraw` |
 | lensfun | 0.3.4 | `liblensfun-dev` | `mingw-w64-x86_64-lensfun` |
@@ -224,7 +225,7 @@ worden verzameld).
 ### Documentatie voor ontwikkelaars
 
 De code is uitgebreid van commentaar voorzien. De ontwerpnotities zijn
-in het Russisch: [PROJECT.md](PROJECT.md) — modules en pipeline,
+in het Russisch: [PROJECT.md](PROJECT.md) — inhoudsopgave van de map [docs](docs): modules, pipeline, interface,
 [ROADMAP.md](ROADMAP.md) — wat klaar is en wat gepland is,
 [REQUIREMENTS.md](REQUIREMENTS.md) — wat het programma nu doet.
 
