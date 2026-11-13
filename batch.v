@@ -27,6 +27,7 @@ import vgui
 import raw
 import lens
 import imgio
+import bigbuf
 import i18n
 
 // BatchItem - кадр пакета: настройки (derived - уже с производными
@@ -167,7 +168,12 @@ fn batch_derive(path string, e EditState, db &lens.Database) !EditState {
 		mut img := d.develop(half: true)!
 		w := img.width
 		h := img.height
-		mut lin := []u16{len: w * h * 3}
+		// Вне сборщика (~36 МБ на кадр пакета, миниатюру, левый кадр
+		// сравнения): нужен только здесь
+		mut lin := bigbuf.new_u16(w * h * 3)
+		defer {
+			bigbuf.free(mut lin)
+		}
 		unsafe { vmemcpy(lin.data, img.data_u16(), w * h * 6) }
 		img.free()
 		mut cj := cam_jpeg(mut d)

@@ -5,15 +5,20 @@ module imgio
 // (разность с тем же байтом левого пикселя, 6 байт назад) у всех строк:
 // для фотографии он почти так же хорош, как подбор фильтра на строку, и
 // прост. Сжатие - zlib из stb (zlib_compress, tiff.v). EXIF и ICC
-// вставляет write (with_meta) - сразу за IHDR, как и у 8-битного PNG.
+// вставляет write (png_meta) - сразу за IHDR, как и у 8-битного PNG.
 import hash.crc32
+import bigbuf
 
 // encode_png16 - PNG кадра w x h: rgb - u16 в машинном порядке байт
 // (w * h * 6 байт)
 fn encode_png16(w int, h int, rgb []u8) ![]u8 {
 	row := w * 6
 	// Сырые строки: байт фильтра (1 - Sub) и отсчёты big-endian
-	mut raw := []u8{len: h * (row + 1)}
+	// Вне сборщика: у 24 Мп это ~145 МБ, после сжатия не нужны
+	mut raw := bigbuf.new_u8(h * (row + 1))
+	defer {
+		bigbuf.free(mut raw)
+	}
 	mut be := []u8{len: row}
 	for y in 0 .. h {
 		p := unsafe { &u16(&rgb[y * row]) }
@@ -41,11 +46,14 @@ fn encode_png16(w int, h int, rgb []u8) ![]u8 {
 	return out
 }
 
-// png_chunk - чанк PNG: длина, тип, данные, CRC (по типу и данным)
+// png_chunk - чанк PNG: длина, тип, данные, CRC (по типу и данным -
+// подряд, без копии данных: у 16-битного IDAT это ~100 МБ)
 fn png_chunk(mut out []u8, typ string, data []u8) {
 	put_u32_be(mut out, u32(data.len))
-	mut body := typ.bytes()
-	body << data
-	out << body
-	put_u32_be(mut out, crc32.sum(body))
+	t := typ.bytes()
+	out << t
+	out << data
+	put_u32_be(mut out, crc_ieee.update(crc32.sum(t), data))
 }
+
+const crc_ieee = crc32.new(crc32.ieee)

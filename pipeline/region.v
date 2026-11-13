@@ -41,12 +41,21 @@ pub fn (r Region) expand(m int, w int, h int) Region {
 // crop_region - копия прямоугольника r буфера w x h с ch каналами
 pub fn crop_region(src &u16, w int, ch int, r Region) []u16 {
 	mut out := []u16{len: r.w * r.h * ch}
+	crop_region_into(src, w, ch, r, mut out)
+	return out
+}
+
+// crop_region_into - crop_region в готовый буфер out (r.w * r.h * ch,
+// например из bigbuf)
+pub fn crop_region_into(src &u16, w int, ch int, r Region, mut out []u16) {
+	if out.len < r.w * r.h * ch {
+		return
+	}
 	unsafe {
 		for j in 0 .. r.h {
 			vmemcpy(&u16(out.data) + j * r.w * ch, src + ((r.y + j) * w + r.x) * ch, r.w * ch * 2)
 		}
 	}
-	return out
 }
 
 // geom_source_box - прямоугольник источника w x h, из которого

@@ -18,9 +18,15 @@ fn jpeg_active(st &State) bool {
 		&& !st.haze_show && !st.dust_show && !st.sharp_show && st.sharp_drag == .off
 }
 
-// jpeg_pixels - JPEG камеры в холст gw x gh с геометрией кадра
-fn jpeg_pixels(st &State) []u8 {
-	return pipeline.geom_rgba(st.cam_view, st.pw, st.ph, st.edit.geom, true, st.gw, st.gh)
+// jpeg_pixels - JPEG камеры в холст gw x gh с геометрией кадра; буфер
+// холста dst того же размера переиспользуется (новый - только при смене
+// размера), а не выделяется на каждый пересчёт
+fn jpeg_pixels(st &State, mut dst []u8) {
+	if dst.len != st.gw * st.gh * 4 {
+		dst = []u8{len: st.gw * st.gh * 4}
+	}
+	pipeline.geom_rgba_into(st.cam_view, st.pw, st.ph, st.edit.geom, true, st.gw, st.gh, mut
+		dst)
 }
 
 // set_jpeg_show - вкл/выкл (K, меню «Вид»); без JPEG - сообщение

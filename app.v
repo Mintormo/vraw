@@ -559,7 +559,7 @@ fn apply_pipeline(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas) {
 	}
 	// JPEG камеры (camjpeg.v) - вместо проявки, гистограмма - по нему
 	if jpeg_active(st) {
-		cv.pixels = jpeg_pixels(st)
+		jpeg_pixels(st, mut cv.pixels)
 		st.hist_r, st.hist_g, st.hist_b = render_histogram(mut st, mut hist, cv.pixels)
 		update_curve_histogram(mut st)
 		show_clip_marks(mut st, mut hist)
@@ -3649,7 +3649,14 @@ fn main() {
 
 	app.run()
 
-	// Не обрывать записывающийся файл, если окно закрыли во время сохранения
+	// Не обрывать записывающийся файл, если окно закрыли во время сохранения.
+	// Пакет отменяется: без окна он работал бы невидимо до последнего
+	// кадра; отмена - между этапами, начатая запись файла дописывается
+	// (одиночный экспорт - дожидается целиком)
+	if !isnil(st.exp) && st.exp.n > 1 {
+		mut c := st.exp
+		c.cancel = true
+	}
 	wait_all(mut st.save_threads)
 	if !isnil(st.dev) {
 		st.dev.close()

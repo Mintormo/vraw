@@ -122,14 +122,14 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	}
 	data := if o.bits16 {
 		match f {
-			.png { with_meta(encode_png16(w, h, rgb)!, o, png_with_exif, png_with_icc)! }
+			.png { png_meta(encode_png16(w, h, rgb)!, o)! }
 			.tiff { encode_tiff16(w, h, rgb, o.exif, o.icc)! }
 			else { return error(i18n.trf('{0} не бывает 16-битным', f.name())) }
 		}
 	} else {
 		match f {
-			.jpeg { with_meta(stb_jpg(w, h, rgb, o.quality)!, o, jpeg_with_exif, jpeg_with_icc)! }
-			.png { with_meta(stb_png(w, h, rgb)!, o, png_with_exif, png_with_icc)! }
+			.jpeg { jpeg_meta(stb_jpg(w, h, rgb, o.quality)!, o)! }
+			.png { png_meta(stb_png(w, h, rgb)!, o)! }
 			.bmp { stb_bmp(w, h, rgb)! }
 			.tiff { encode_tiff(w, h, rgb, o.exif, o.icc)! }
 			.qoi { encode_qoi(w, h, rgb) }
@@ -159,14 +159,52 @@ fn write_atomic(path string, data []u8) ! {
 	}
 }
 
-// with_meta - вставить EXIF и ICC-профиль в закодированный stbi файл
-fn with_meta(file []u8, o WriteOpts, with_exif fn ([]u8, Exif) ![]u8, with_icc fn ([]u8, []u8) ![]u8) ![]u8 {
-	mut data := file.clone()
-	if !isnil(o.exif) {
-		data = with_exif(data, *o.exif)!
+// png_meta - PNG с ICC-профилем (iCCP) и EXIF (eXIf) сразу за IHDR.
+// Файл копируется один раз (у 16-битного PNG это ~100 МБ); без
+// метаданных - как есть
+fn png_meta(png []u8, o WriteOpts) ![]u8 {
+	if isnil(o.exif) && o.icc.len == 0 {
+		return png
 	}
-	if o.icc.len > 0 {
-		data = with_icc(data, o.icc)!
+	// Подпись 8 байт, IHDR: длина 4 + тип 4 + 13 данных + CRC 4
+	ihdr_end := 8 + 25
+	if png.len < ihdr_end || png[12..16].bytestr() != 'IHDR' {
+		return error(i18n.tr('не PNG'))
 	}
-	return data
+	icc := if o.icc.len > 0 { png_icc_chunk(o.icc)! } else { []u8{} }
+	exif := if isnil(o.exif) { []u8{} } else { png_exif_chunk(*o.exif) }
+	mut out := []u8{cap: png.len + icc.len + exif.len}
+	out << png[..ihdr_end]
+	out << icc
+	out << exif
+	out << png[ihdr_end..]
+	return out
+}
+
+// jpeg_meta - JPEG с EXIF (APP1 сразу за SOI) и ICC-профилем (APP2 за
+// сегментами APP0/APP1 в начале). Файл копируется один раз; без
+// метаданных - как есть
+fn jpeg_meta(jpg []u8, o WriteOpts) ![]u8 {
+	if isnil(o.exif) && o.icc.len == 0 {
+		return jpg
+	}
+	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
+		return error(i18n.tr('не JPEG'))
+	}
+	exif := if isnil(o.exif) { []u8{} } else { jpeg_exif_seg(*o.exif)! }
+	icc := if o.icc.len > 0 { jpeg_icc_seg(o.icc)! } else { []u8{} }
+	mut at := 2
+	for at + 4 <= jpg.len && jpg[at] == 0xFF && (jpg[at + 1] == 0xE0 || jpg[at + 1] == 0xE1) {
+		at += 2 + (int(jpg[at + 2]) << 8 | int(jpg[at + 3]))
+	}
+	if at > jpg.len {
+		return error(i18n.tr('битый JPEG'))
+	}
+	mut out := []u8{cap: jpg.len + exif.len + icc.len}
+	out << jpg[..2]
+	out << exif
+	out << jpg[2..at]
+	out << icc
+	out << jpg[at..]
+	return out
 }

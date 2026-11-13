@@ -17,7 +17,6 @@ module imgio
 //   (из цветностей sRGB, Брэдфорд D65 -> D50); rTRC, gTRC, bTRC - одна
 //   общая таблица кривой sRGB (icc_curve_n точек, данные одни на три тега).
 import math
-import hash.crc32
 import i18n
 
 const icc_curve_n = 1024
@@ -216,49 +215,29 @@ fn mat_inv(a [][]f64) [][]f64 {
 	return r
 }
 
-// jpeg_with_icc - JPEG с профилем: сегмент APP2 «ICC_PROFILE» (номер 1 из
-// 1) за SOI и сегментами APP0/APP1 в начале (EXIF остаётся первым)
-fn jpeg_with_icc(jpg []u8, icc []u8) ![]u8 {
-	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
-		return error(i18n.tr('не JPEG'))
-	}
+// jpeg_icc_seg - сегмент APP2 «ICC_PROFILE» (номер 1 из 1) целиком;
+// встаёт за SOI и сегментами APP0/APP1 в начале - EXIF остаётся первым
+// (jpeg_meta)
+fn jpeg_icc_seg(icc []u8) ![]u8 {
 	n := 2 + 12 + 2 + icc.len // длина сегмента - вместе с полем длины
 	if n > 65535 {
 		return error(i18n.tr('ICC-профиль больше 64 КБ'))
 	}
-	mut at := 2
-	for at + 4 <= jpg.len && jpg[at] == 0xFF && (jpg[at + 1] == 0xE0 || jpg[at + 1] == 0xE1) {
-		at += 2 + (int(jpg[at + 2]) << 8 | int(jpg[at + 3]))
-	}
-	if at > jpg.len {
-		return error(i18n.tr('битый JPEG'))
-	}
-	mut out := []u8{cap: jpg.len + n + 2}
-	out << jpg[..at]
+	mut out := []u8{cap: n + 2}
 	out << [u8(0xFF), 0xE2, u8(n >> 8), u8(n)]
 	out << 'ICC_PROFILE'.bytes()
 	out << [u8(0), 1, 1]
 	out << icc
-	out << jpg[at..]
 	return out
 }
 
-// png_with_icc - PNG с чанком iCCP (имя, метод сжатия 0, профиль в zlib)
-// сразу за IHDR - до PLTE и IDAT, как требует PNG
-fn png_with_icc(png []u8, icc []u8) ![]u8 {
-	ihdr_end := 8 + 25
-	if png.len < ihdr_end || png[12..16].bytestr() != 'IHDR' {
-		return error(i18n.tr('не PNG'))
-	}
-	mut chunk := 'iCCP'.bytes()
-	chunk << 'sRGB'.bytes()
-	chunk << [u8(0), 0]
-	chunk << zlib_compress(icc)!
-	mut out := []u8{cap: png.len + chunk.len + 8}
-	out << png[..ihdr_end]
-	put_u32_be(mut out, u32(chunk.len - 4))
-	out << chunk
-	put_u32_be(mut out, crc32.sum(chunk))
-	out << png[ihdr_end..]
+// png_icc_chunk - чанк iCCP целиком (имя, метод сжатия 0, профиль в
+// zlib); встаёт сразу за IHDR - до PLTE и IDAT, как требует PNG (png_meta)
+fn png_icc_chunk(icc []u8) ![]u8 {
+	mut data := 'sRGB'.bytes()
+	data << [u8(0), 0]
+	data << zlib_compress(icc)!
+	mut out := []u8{cap: data.len + 12}
+	png_chunk(mut out, 'iCCP', data)
 	return out
 }

@@ -7,7 +7,6 @@ module imgio
 // кладётся сегментом APP1 сразу за SOI, в PNG - чанком eXIf перед IDAT,
 // в TIFF теги пишутся прямо в IFD кадра (encode_tiff). BMP, QOI и GIF
 // метаданных EXIF не держат.
-import hash.crc32
 import math
 import i18n
 
@@ -224,42 +223,28 @@ pub fn exif_tiff(e Exif) []u8 {
 	return out
 }
 
-// jpeg_with_exif - JPEG с сегментом APP1 «Exif» сразу за SOI (так
+// jpeg_exif_seg - сегмент APP1 «Exif» целиком; встаёт сразу за SOI (так
 // требует стандарт EXIF; APP0 JFIF от stb остаётся следом - читатели
-// понимают оба порядка)
-fn jpeg_with_exif(jpg []u8, e Exif) ![]u8 {
-	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
-		return error(i18n.tr('не JPEG'))
-	}
+// понимают оба порядка), вставляет jpeg_meta (imgio.v)
+fn jpeg_exif_seg(e Exif) ![]u8 {
 	tiff := exif_tiff(e)
 	n := 2 + 6 + tiff.len // длина сегмента - вместе с полем длины
 	if n > 65535 {
 		return error(i18n.tr('EXIF больше 64 КБ'))
 	}
-	mut out := []u8{cap: jpg.len + n + 2}
-	out << [u8(0xFF), 0xD8, 0xFF, 0xE1, u8(n >> 8), u8(n)]
+	mut out := []u8{cap: n + 2}
+	out << [u8(0xFF), 0xE1, u8(n >> 8), u8(n)]
 	out << 'Exif'.bytes()
 	out << [u8(0), 0]
 	out << tiff
-	out << jpg[2..]
 	return out
 }
 
-// png_with_exif - PNG с чанком eXIf (PNG 1.5) сразу за IHDR - до IDAT
-fn png_with_exif(png []u8, e Exif) ![]u8 {
-	// Подпись 8 байт, IHDR: длина 4 + тип 4 + 13 данных + CRC 4
-	ihdr_end := 8 + 25
-	if png.len < ihdr_end || png[12..16].bytestr() != 'IHDR' {
-		return error(i18n.tr('не PNG'))
-	}
+// png_exif_chunk - чанк eXIf (PNG 1.5) целиком; встаёт за IHDR - до IDAT
+// (png_meta)
+fn png_exif_chunk(e Exif) []u8 {
 	tiff := exif_tiff(e)
-	mut chunk := 'eXIf'.bytes()
-	chunk << tiff
-	mut out := []u8{cap: png.len + chunk.len + 8}
-	out << png[..ihdr_end]
-	put_u32_be(mut out, u32(tiff.len))
-	out << chunk
-	put_u32_be(mut out, crc32.sum(chunk))
-	out << png[ihdr_end..]
+	mut out := []u8{cap: tiff.len + 12}
+	png_chunk(mut out, 'eXIf', tiff)
 	return out
 }

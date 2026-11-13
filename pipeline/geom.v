@@ -253,8 +253,22 @@ pub fn geom_apply_into(src &u16, w int, h int, ch int, g Geom, crop bool, mut ou
 // Ближайший пиксель - превью на доли секунды.
 pub fn geom_rgba(src []u8, w int, h int, g Geom, crop bool, ow int, oh int) []u8 {
 	mut out := []u8{len: ow * oh * 4}
+	geom_rgba_into(src, w, h, g, crop, ow, oh, mut out)
+	return out
+}
+
+// geom_rgba_into - geom_rgba в готовый буфер out (ow * oh * 4 байт, иначе
+// не трогается): холст перерисовывается без нового буфера на каждый
+// пересчёт. Вне кадра - чёрный непрозрачный.
+pub fn geom_rgba_into(src []u8, w int, h int, g Geom, crop bool, ow int, oh int, mut out []u8) {
+	if out.len != ow * oh * 4 {
+		return
+	}
 	if w <= 0 || h <= 0 || src.len < w * h * 4 {
-		return out
+		for o := 0; o < out.len; o += 4 {
+			out[o], out[o + 1], out[o + 2], out[o + 3] = 0, 0, 0, 255
+		}
+		return
 	}
 	m := geom_affine(g, w, h, crop, ow, oh)
 	pp := if g.has_persp() { geom_proj(g, w, h, crop, ow, oh) } else { Proj{} }
@@ -272,7 +286,7 @@ pub fn geom_rgba(src []u8, w int, h int, g Geom, crop bool, ow int, oh int) []u8
 			}
 			o := (j * ow + i) * 4
 			if sx < 0 || sy < 0 || sx >= w || sy >= h {
-				out[o + 3] = 255
+				out[o], out[o + 1], out[o + 2], out[o + 3] = 0, 0, 0, 255
 				continue
 			}
 			s := (sy * w + sx) * 4
@@ -282,7 +296,6 @@ pub fn geom_rgba(src []u8, w int, h int, g Geom, crop bool, ow int, oh int) []u8
 			out[o + 3] = 255
 		}
 	}
-	return out
 }
 
 // ── Рамка кадрирования в R ──

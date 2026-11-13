@@ -29,7 +29,9 @@ jpg/jpeg, tif/tiff), `lossy()`; `format_by_path` — по расширению �
   little-endian. PNG — свой кодер `png16.v` (stb пишет только 8 бит):
   IHDR 16 бит RGB, фильтр Sub у всех строк (шаг 6 байт), отсчёты
   big-endian, zlib — `zlib_compress` из tiff.v; EXIF и ICC вставляются как
-  у 8-битного (`with_meta`, за IHDR). Тест `test_lossless16`: свой разбор
+  у 8-битного (`png_meta`, за IHDR). Сырые строки (~145 МБ на 24 Мп) —
+  в bigbuf, освобождаются сразу после сжатия; `png_chunk` считает CRC
+  по типу и данным подряд (`crc_ieee.update`), без копии IDAT. Тест `test_lossless16`: свой разбор
   обоих форматов — байт в байт; stb читает 16-битный PNG (сводит в 8 бит)
   в пределах 1. Вручную: `tiffinfo -D` и Pillow открывают без ошибок.
 - **QOI** (`qoi.v`, свой) — байт в байт как эталонный qoi.h (RGB,
@@ -56,9 +58,12 @@ jpg/jpeg, tif/tiff), `lossy()`; `format_by_path` — по расширению �
   поля не пишутся. Общий построитель IFD (`IfdEntry`, `put_ifd`: теги по
   возрастанию, данные длиннее 4 байт — сразу за IFD по чётным
   смещениям; `ifd_size` — чтобы заранее знать смещение Exif IFD) — им же
-  теперь пишет и `encode_tiff`. JPEG: stb пишет файл (с APP0 JFIF), затем
-  `add_meta` перечитывает и вставляет APP1 «Exif\0\0» сразу за SOI; PNG
-  — чанк eXIf (CRC — `hash.crc32`) сразу за IHDR; TIFF — теги EXIF в IFD
+  теперь пишет и `encode_tiff`. JPEG: stb пишет файл в память (с APP0 JFIF), затем
+  `jpeg_meta` вставляет APP1 «Exif\0\0» (`jpeg_exif_seg`) сразу за SOI и
+  APP2 ICC (`jpeg_icc_seg`) за APP0/APP1; PNG (`png_meta`) — чанки iCCP
+  (`png_icc_chunk`) и eXIf (`png_exif_chunk`) сразу за IHDR. Обе вставки —
+  одной копией файла (с 13.11.2026; раньше `with_meta` копировал его
+  трижды: clone, EXIF, ICC); TIFF — теги EXIF в IFD
   кадра, Exif IFD следом (`put_exif_ifds`). Тест `exif_test.v`: свой
   мини-читатель IFD (порядок тегов, чётные смещения, значения), JPEG —
   за сегментом тот же поток, PNG и TIFF читаются как прежде. Вручную —

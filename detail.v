@@ -113,7 +113,8 @@ struct DetailJob {
 	margin int = detail_margin
 }
 
-// lens_piece - прямоугольник p кадра после коррекции объектива: профиль
+// lens_piece - прямоугольник p кадра после коррекции объектива (буфер вне
+// сборщика - освобождает вызывающий, bigbuf.free): профиль
 // (ln nil - без него) и ручная man; побитово равен той же области полной
 // коррекции (lens_full: виньетирование профиля и ручное, ремап профиля,
 // ручной ремап)
@@ -123,14 +124,18 @@ fn lens_piece(src &DetailSrc, ln &DetailLens, man lens.Manual, p Region) []u16 {
 	}
 	// Ручной ремап: кусок исправленного профилем кадра под p, из него - p
 	p1 := mp.source_box(p)
-	piece := prof_piece(src, ln, lens.manual_vign_lut(man), p1)
-	mut buf := []u16{len: p.w * p.h * 3}
+	mut piece := prof_piece(src, ln, lens.manual_vign_lut(man), p1)
+	defer {
+		bigbuf.free(mut piece)
+	}
+	mut buf := bigbuf.new_u16(p.w * p.h * 3)
 	mp.remap(unsafe { &u16(piece.data) }, p1, p, unsafe { &u16(buf.data) })
 	return buf
 }
 
 // prof_piece - прямоугольник p кадра после профиля объектива (ln nil - без
-// него) и ручного виньетирования (mlut пусто - без него)
+// него) и ручного виньетирования (mlut пусто - без него); буфер вне
+// сборщика - освобождает вызывающий
 fn prof_piece(src &DetailSrc, ln &DetailLens, mlut []f32, p Region) []u16 {
 	w := src.w
 	h := src.h
@@ -138,16 +143,21 @@ fn prof_piece(src &DetailSrc, ln &DetailLens, mlut []f32, p Region) []u16 {
 	if !isnil(ln) && !isnil(ln.plan) {
 		// Дисторсия: кусок источника под p, виньетирование по нему, ремап
 		sb := ln.plan.source_box(p)
-		mut piece := pipeline.crop_region(unsafe { &u16(src.dev.data) }, w, 3, sb)
+		mut piece := bigbuf.new_u16(sb.w * sb.h * 3)
+		defer {
+			bigbuf.free(mut piece)
+		}
+		pipeline.crop_region_into(unsafe { &u16(src.dev.data) }, w, 3, sb, mut piece)
 		if has_lut {
 			lens.vign_apply_region(unsafe { &u16(piece.data) }, sb, w, h, ln.lut)
 		}
 		lens.manual_vign_region(unsafe { &u16(piece.data) }, sb, w, h, mlut)
-		mut buf := []u16{len: p.w * p.h * 3}
+		mut buf := bigbuf.new_u16(p.w * p.h * 3)
 		ln.plan.remap(unsafe { &u16(piece.data) }, sb, p, unsafe { &u16(buf.data) })
 		return buf
 	}
-	buf := pipeline.crop_region(unsafe { &u16(src.dev.data) }, w, 3, p)
+	mut buf := bigbuf.new_u16(p.w * p.h * 3)
+	pipeline.crop_region_into(unsafe { &u16(src.dev.data) }, w, 3, p, mut buf)
 	if has_lut {
 		lens.vign_apply_region(unsafe { &u16(buf.data) }, p, w, h, ln.lut)
 	}
@@ -172,7 +182,12 @@ fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob) []u16 {
 	w := src.w
 	h := src.h
 	p := detail_region(src, job)
+	// Промежуточные куски - вне сборщика (десятки МБ на пересчёт 1:1),
+	// в итоге - только выход геометрии
 	mut buf := lens_piece(src, ln, job.man, p)
+	defer {
+		bigbuf.free(mut buf)
+	}
 	pb := unsafe { &u16(buf.data) }
 	if job.nr[0] > 0 {
 		pipeline.impulse(pb, p.w, p.h, job.nr[0])
@@ -183,8 +198,14 @@ fn detail_prep(src &DetailSrc, ln &DetailLens, job DetailJob) []u16 {
 	if job.nr[3] > 0 {
 		pipeline.defringe(pb, p.w, p.h, job.nr[3])
 	}
+	mut dc := []u16{}
+	defer {
+		bigbuf.free(mut dc)
+	}
 	lin := if job.dc.dc_amount > 0 {
-		pipeline.deconvolve(pb, p.w, p.h, job.dc, 1.0)
+		dc = bigbuf.new_u16(p.w * p.h * 3)
+		pipeline.deconvolve_into(pb, p.w, p.h, job.dc, 1.0, mut dc)
+		dc
 	} else {
 		buf
 	}

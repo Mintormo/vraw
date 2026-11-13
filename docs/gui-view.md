@@ -305,7 +305,10 @@
   (`vign_lut` + `GeomPlan`), `detail_prep` — сырьё фрагмента той же
   цепочкой, что `develop_full`: кусок под прямоугольник с запасом
   `detail_margin` (96 px) → виньетка и ремап по куску → импульсы, шумодав,
-  ореолы → Capture (scale 1) → `geom_apply_region`. `detail_render` —
+  ореолы → Capture (scale 1) → `geom_apply_region`. Промежуточные куски
+  (`lens_piece`, `prof_piece` через `crop_region_into`, итог Capture) —
+  в bigbuf с `defer { free }` (13.11.2026), в сборщике — только выход
+  геометрии (`DetailFrag.lin`). `detail_render` —
   финальный проход (`apply_image_view`, scale 1 — резкость в настоящем
   радиусе), маска окрестности («Тени/Света» и вес Clarity) и карта дымки
   — из превью с увеличением (все гладкие). Тесты `detail_test.v`: сырьё фрагмента = та же область
