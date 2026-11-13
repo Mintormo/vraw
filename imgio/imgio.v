@@ -122,14 +122,14 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	}
 	data := if o.bits16 {
 		match f {
-			.png { png_meta(encode_png16(w, h, rgb)!, o)! }
+			.png { png_meta(encode_png16(w, h, rgb)!, w, h, o)! }
 			.tiff { encode_tiff16(w, h, rgb, o.exif, o.icc)! }
 			else { return error(i18n.trf('{0} не бывает 16-битным', f.name())) }
 		}
 	} else {
 		match f {
-			.jpeg { jpeg_meta(stb_jpg(w, h, rgb, o.quality)!, o)! }
-			.png { png_meta(stb_png(w, h, rgb)!, o)! }
+			.jpeg { jpeg_meta(stb_jpg(w, h, rgb, o.quality)!, w, h, o)! }
+			.png { png_meta(stb_png(w, h, rgb)!, w, h, o)! }
 			.bmp { stb_bmp(w, h, rgb)! }
 			.tiff { encode_tiff(w, h, rgb, o.exif, o.icc)! }
 			.qoi { encode_qoi(w, h, rgb) }
@@ -162,7 +162,7 @@ fn write_atomic(path string, data []u8) ! {
 // png_meta - PNG с ICC-профилем (iCCP) и EXIF (eXIf) сразу за IHDR.
 // Файл копируется один раз (у 16-битного PNG это ~100 МБ); без
 // метаданных - как есть
-fn png_meta(png []u8, o WriteOpts) ![]u8 {
+fn png_meta(png []u8, w int, h int, o WriteOpts) ![]u8 {
 	if isnil(o.exif) && o.icc.len == 0 {
 		return png
 	}
@@ -172,7 +172,7 @@ fn png_meta(png []u8, o WriteOpts) ![]u8 {
 		return error(i18n.tr('не PNG'))
 	}
 	icc := if o.icc.len > 0 { png_icc_chunk(o.icc)! } else { []u8{} }
-	exif := if isnil(o.exif) { []u8{} } else { png_exif_chunk(*o.exif) }
+	exif := if isnil(o.exif) { []u8{} } else { png_exif_chunk(*o.exif, w, h) }
 	mut out := []u8{cap: png.len + icc.len + exif.len}
 	out << png[..ihdr_end]
 	out << icc
@@ -184,14 +184,14 @@ fn png_meta(png []u8, o WriteOpts) ![]u8 {
 // jpeg_meta - JPEG с EXIF (APP1 сразу за SOI) и ICC-профилем (APP2 за
 // сегментами APP0/APP1 в начале). Файл копируется один раз; без
 // метаданных - как есть
-fn jpeg_meta(jpg []u8, o WriteOpts) ![]u8 {
+fn jpeg_meta(jpg []u8, w int, h int, o WriteOpts) ![]u8 {
 	if isnil(o.exif) && o.icc.len == 0 {
 		return jpg
 	}
 	if jpg.len < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
 		return error(i18n.tr('не JPEG'))
 	}
-	exif := if isnil(o.exif) { []u8{} } else { jpeg_exif_seg(*o.exif)! }
+	exif := if isnil(o.exif) { []u8{} } else { jpeg_exif_seg(*o.exif, w, h)! }
 	icc := if o.icc.len > 0 { jpeg_icc_seg(o.icc)! } else { []u8{} }
 	mut at := 2
 	for at + 4 <= jpg.len && jpg[at] == 0xFF && (jpg[at + 1] == 0xE0 || jpg[at + 1] == 0xE1) {

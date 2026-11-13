@@ -205,29 +205,56 @@ fn (e Exif) exif_entries() []IfdEntry {
 }
 
 // put_exif_ifds дописывает в out IFD0 (теги кадра extra + теги камеры +
-// ссылка на Exif IFD) и сразу за ним Exif IFD; смещения - от начала out.
-fn put_exif_ifds(mut out []u8, e Exif, extra []IfdEntry) {
+// ссылка на Exif IFD) и сразу за ним Exif IFD (теги съёмки + exif_extra);
+// смещения - от начала out.
+fn put_exif_ifds(mut out []u8, e Exif, extra []IfdEntry, exif_extra []IfdEntry) {
 	mut ifd0 := extra.clone()
 	ifd0 << e.ifd0_entries()
 	exif_at := out.len + ifd_size(ifd0) + 12 // + запись ссылки на Exif IFD
 	ifd0 << long_entry(34665, u32(exif_at))
 	put_ifd(mut out, ifd0)
-	put_ifd(mut out, e.exif_entries())
+	mut ex := e.exif_entries()
+	ex << exif_extra
+	put_ifd(mut out, ex)
 }
 
-// exif_tiff - блок EXIF: TIFF little-endian, IFD0 с тегами камеры и Exif IFD
-pub fn exif_tiff(e Exif) []u8 {
+// exif_frame_tags - теги о самом файле, обязательные по EXIF 2.32
+// (exiftool -validate) для блока EXIF в JPEG и PNG: IFD0 - разрешение
+// 72 dpi, Exif IFD - FlashpixVersion и размер кадра (PixelX/YDimension);
+// у JPEG ещё YCbCrPositioning и ComponentsConfiguration (Y, Cb, Cr). У
+// TIFF разрешение и размер - в IFD кадра (tiff.v). Возвращает (IFD0, Exif
+// IFD)
+fn exif_frame_tags(w int, h int, jpeg bool) ([]IfdEntry, []IfdEntry) {
+	mut ifd0 := []IfdEntry{}
+	ifd0 << rational_entry(282, 72, 1) // XResolution
+	ifd0 << rational_entry(283, 72, 1) // YResolution
+	ifd0 << short_entry(296, 2) // ResolutionUnit: дюймы
+	mut ex := []IfdEntry{}
+	ex << IfdEntry{40960, 7, 4, '0100'.bytes()} // FlashpixVersion
+	ex << long_entry(40962, u32(w)) // PixelXDimension
+	ex << long_entry(40963, u32(h)) // PixelYDimension
+	if jpeg {
+		ifd0 << short_entry(531, 1) // YCbCrPositioning: по центру
+		ex << IfdEntry{37121, 7, 4, [u8(1), 2, 3, 0]} // ComponentsConfiguration
+	}
+	return ifd0, ex
+}
+
+// exif_tiff - блок EXIF: TIFF little-endian, IFD0 (теги кадра ifd0 + теги
+// камеры) и Exif IFD (теги съёмки + exif)
+pub fn exif_tiff(e Exif, ifd0 []IfdEntry, exif []IfdEntry) []u8 {
 	mut out := [u8(`I`), `I`, 42, 0]
 	put_u32_le(mut out, 8)
-	put_exif_ifds(mut out, e, []IfdEntry{})
+	put_exif_ifds(mut out, e, ifd0, exif)
 	return out
 }
 
 // jpeg_exif_seg - сегмент APP1 «Exif» целиком; встаёт сразу за SOI (так
 // требует стандарт EXIF; APP0 JFIF от stb остаётся следом - читатели
 // понимают оба порядка), вставляет jpeg_meta (imgio.v)
-fn jpeg_exif_seg(e Exif) ![]u8 {
-	tiff := exif_tiff(e)
+fn jpeg_exif_seg(e Exif, w int, h int) ![]u8 {
+	i0, ex := exif_frame_tags(w, h, true)
+	tiff := exif_tiff(e, i0, ex)
 	n := 2 + 6 + tiff.len // длина сегмента - вместе с полем длины
 	if n > 65535 {
 		return error(i18n.tr('EXIF больше 64 КБ'))
@@ -242,8 +269,9 @@ fn jpeg_exif_seg(e Exif) ![]u8 {
 
 // png_exif_chunk - чанк eXIf (PNG 1.5) целиком; встаёт за IHDR - до IDAT
 // (png_meta)
-fn png_exif_chunk(e Exif) []u8 {
-	tiff := exif_tiff(e)
+fn png_exif_chunk(e Exif, w int, h int) []u8 {
+	i0, ex := exif_frame_tags(w, h, false)
+	tiff := exif_tiff(e, i0, ex)
 	mut out := []u8{cap: tiff.len + 12}
 	png_chunk(mut out, 'eXIf', tiff)
 	return out

@@ -129,7 +129,11 @@ fn tiff_encode(w int, h int, rgb []u8, b16 bool, exif &Exif, icc []u8) ![]u8 {
 		tags << ascii_entry(305, 'vraw') // Software
 		put_ifd(mut out, tags)
 	} else {
-		put_exif_ifds(mut out, exif, tags) // Software - из exif
+		// Software - из exif; разрешение и размер - в тегах кадра (размер в
+		// Exif IFD у TIFF запрещён)
+		put_exif_ifds(mut out, exif, tags, [
+			IfdEntry{40960, 7, 4, '0100'.bytes()}, // FlashpixVersion
+		])
 	}
 	return out
 }

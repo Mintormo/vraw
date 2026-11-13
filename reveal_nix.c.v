@@ -13,8 +13,9 @@ const fm1_name = 'org.freedesktop.FileManager1'
 // reveal_in_folder - показать файлы paths (из одной папки) в файловом
 // менеджере. Ответ ShowItems не ждём: менеджер может запускаться секунду,
 // окно программы за это время не замирает. Есть ли кому ответить,
-// проверяем заранее (fm1_available, ответ шины - миллисекунды).
-fn reveal_in_folder(paths []string) ! {
+// проверяем заранее (fm1_available, ответ шины - миллисекунды). procs -
+// запущенные xdg-open (open_folder_plain), State.reveal_procs.
+fn reveal_in_folder(paths []string, mut procs []&os.Process) ! {
 	if paths.len == 0 {
 		return
 	}
@@ -29,7 +30,7 @@ fn reveal_in_folder(paths []string) ! {
 			return
 		}
 	}
-	open_folder_plain(os.dir(paths[0]))!
+	open_folder_plain(os.dir(paths[0]), mut procs)!
 }
 
 // fm1_available - на сеансовой шине есть файловый менеджер с FileManager1:
@@ -47,10 +48,13 @@ fn fm1_available() bool {
 	return act.exit_code == 0 && act.output.contains('"${fm1_name}"')
 }
 
-// open_folder_plain - папка в программе по умолчанию (xdg-open). Не ждём:
-// его вывод не перехватываем, завершения дожидается фоновый поток (иначе
-// остался бы зомби-процесс)
-fn open_folder_plain(dir string) ! {
+// open_folder_plain - папка в программе по умолчанию (xdg-open). Не ждём
+// (бывает, xdg-open живёт, пока открыт файловый менеджер): процесс - в
+// procs, закончившиеся забирает (waitpid без ожидания - is_alive) следующий
+// вызов, чтобы не копились зомби-процессы. Без фонового потока: его
+// пришлось бы ждать, а ждать открытый менеджер на выходе нельзя.
+fn open_folder_plain(dir string, mut procs []&os.Process) ! {
+	reap_procs(mut procs)
 	exe := os.find_abs_path_of_executable('xdg-open') or {
 		return error(i18n.tr('не найден файловый менеджер (xdg-open)'))
 	}
@@ -60,10 +64,16 @@ fn open_folder_plain(dir string) ! {
 	if p.err != '' {
 		return error(p.err)
 	}
-	spawn reap_process(mut p)
+	procs << p
 }
 
-fn reap_process(mut p os.Process) {
-	p.wait()
-	p.close()
+// reap_procs - забрать закончившиеся процессы и убрать их из списка
+fn reap_procs(mut procs []&os.Process) {
+	for i := procs.len - 1; i >= 0; i-- {
+		mut p := procs[i]
+		if !p.is_alive() {
+			p.close()
+			procs.delete(i)
+		}
+	}
 }

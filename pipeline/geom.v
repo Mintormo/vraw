@@ -178,13 +178,11 @@ fn geom_affine(g Geom, w int, h int, crop bool, ow int, oh int) Affine {
 	ry0 := if crop { f64(g.y0) * h0 } else { 0.0 }
 	rw := if crop { f64(g.x1 - g.x0) * w0 } else { f64(w0) }
 	rh := if crop { f64(g.y1 - g.y0) * h0 } else { f64(h0) }
-	at := fn [g, w, h, rx0, ry0, rw, rh, ow, oh] (i f64, j f64) (f64, f64) {
-		return g.point_to_source(rx0 + (i + 0.5) * rw / f64(ow), ry0 + (j + 0.5) * rh / f64(oh),
-			w, h)
-	}
-	x00, y00 := at(0, 0)
-	x10, y10 := at(1, 0)
-	x01, y01 := at(0, 1)
+	// Центр пикселя (i, j) выхода -> точка R -> источник (без замыкания:
+	// зовётся на каждое применение геометрии)
+	x00, y00 := g.point_to_source(rx0 + 0.5 * rw / f64(ow), ry0 + 0.5 * rh / f64(oh), w, h)
+	x10, y10 := g.point_to_source(rx0 + 1.5 * rw / f64(ow), ry0 + 0.5 * rh / f64(oh), w, h)
+	x01, y01 := g.point_to_source(rx0 + 0.5 * rw / f64(ow), ry0 + 1.5 * rh / f64(oh), w, h)
 	return Affine{
 		a: x10 - x00
 		b: x01 - x00

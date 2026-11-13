@@ -101,12 +101,35 @@ fn check_tiff_exif(d []u8) {
 	assert ex_str(ex[42036]) == 'RF24-50mm F4.5-6.3 IS STM'
 }
 
+// Обязательные по EXIF 2.32 теги файла (exiftool -validate без
+// предупреждений): у JPEG - разрешение, YCbCrPositioning,
+// ComponentsConfiguration, FlashpixVersion, размер кадра; у PNG - без
+// YCbCr-тегов
+fn test_exif_frame_tags() {
+	seg := jpeg_exif_seg(sample_exif(), 640, 480)!
+	d := seg[10..] // FF E1, длина, «Exif\0\0»
+	check_tiff_exif(d)
+	ifd0 := ex_ifd(d, int(ex_u32(d, 4)))
+	assert ex_rat(ifd0[282]) == 72 && ex_rat(ifd0[283]) == 72
+	assert ex_u16(ifd0[296].data, 0) == 2 && ex_u16(ifd0[531].data, 0) == 1
+	ex := ex_ifd(d, int(ex_u32(ifd0[34665].data, 0)))
+	assert ex[40960].data.bytestr() == '0100'
+	assert ex_u32(ex[40962].data, 0) == 640 && ex_u32(ex[40963].data, 0) == 480
+	assert ex[37121].data == [u8(1), 2, 3, 0]
+	ch := png_exif_chunk(sample_exif(), 640, 480)
+	p := ch[8..ch.len - 4] // длина, «eXIf» ... CRC
+	pifd0 := ex_ifd(p, int(ex_u32(p, 4)))
+	assert 282 in pifd0 && 531 !in pifd0
+	pex := ex_ifd(p, int(ex_u32(pifd0[34665].data, 0)))
+	assert 37121 !in pex && ex_u32(pex[40962].data, 0) == 640
+}
+
 fn test_exif_block() {
-	check_tiff_exif(exif_tiff(sample_exif()))
+	check_tiff_exif(exif_tiff(sample_exif(), []IfdEntry{}, []IfdEntry{}))
 	// Длинная выдержка - десятыми, пустые поля не пишутся
 	d := exif_tiff(Exif{
 		exposure: 2.5
-	})
+	}, []IfdEntry{}, []IfdEntry{})
 	ifd0 := ex_ifd(d, 8)
 	assert 271 !in ifd0 && 33432 !in ifd0
 	ex := ex_ifd(d, int(ex_u32(ifd0[34665].data, 0)))

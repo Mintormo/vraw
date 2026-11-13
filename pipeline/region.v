@@ -106,6 +106,13 @@ fn clamp_i(v int, lo int, hi int) int {
 	return if v < lo { lo } else if v > hi { hi } else { v }
 }
 
+// region_at - пиксель (sx, sy) полного кадра в куске sb (функция, не
+// замыкание: зовётся на каждый пересчёт)
+@[inline]
+fn region_at(src &u16, sb Region, ch int, sx int, sy int) &u16 {
+	return unsafe { src + ((sy - sb.y) * sb.w + (sx - sb.x)) * ch }
+}
+
 // geom_apply_region - прямоугольник r выхода geom_apply(src полного кадра
 // w x h). src - не весь кадр, а его кусок sb (обычно geom_source_box(r)
 // или шире): буфер sb.w x sb.h с ch каналами. Отображение и правила
@@ -116,14 +123,10 @@ pub fn geom_apply_region(src &u16, sb Region, w int, h int, ch int, g Geom, crop
 	if r.is_empty() {
 		return out
 	}
-	// Читает пиксель (sx, sy) полного кадра из куска sb
-	at := fn [src, sb, ch] (sx int, sy int) &u16 {
-		return unsafe { src + ((sy - sb.y) * sb.w + (sx - sb.x)) * ch }
-	}
 	if geom_is_copy(g, crop) {
 		for j in 0 .. r.h {
 			unsafe {
-				vmemcpy(&u16(out.data) + j * r.w * ch, at(r.x, r.y + j), r.w * ch * 2)
+				vmemcpy(&u16(out.data) + j * r.w * ch, region_at(src, sb, ch, r.x, r.y + j), r.w * ch * 2)
 			}
 		}
 		return out
@@ -141,7 +144,7 @@ pub fn geom_apply_region(src &u16, sb Region, w int, h int, ch int, g Geom, crop
 			for i in r.x .. r.x + r.w {
 				sx := clamp_i(int(math.floor(m.a * i + m.b * j + m.c)), 0, w - 1)
 				sy := clamp_i(int(math.floor(m.d * i + m.e * j + m.f)), 0, h - 1)
-				s := at(sx, sy)
+				s := region_at(src, sb, ch, sx, sy)
 				for c in 0 .. ch {
 					d[c] = s[c]
 				}

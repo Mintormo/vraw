@@ -55,7 +55,14 @@ jpg/jpeg, tif/tiff), `lossy()`; `format_by_path` — по расширению �
   0.4 → 4/10, 0.6 → 6/10, 0.8 → 8/10, 2.5 → 25/10 (до 13.11.2026 0.4 с
   писалась как 1/3; тест `test_exposure_rational`), FNumber, ISO, ExifVersion 0232,
   DateTimeOriginal/Digitized, FocalLength, LensMake, LensModel); пустые
-  поля не пишутся. Общий построитель IFD (`IfdEntry`, `put_ifd`: теги по
+  поля не пишутся. Теги файла (`exif_frame_tags`, 13.11.2026 — по
+  `exiftool -validate`): у JPEG и PNG в IFD0 разрешение 72 dpi, в Exif IFD
+  FlashpixVersion 0100 и PixelX/YDimension; у JPEG ещё YCbCrPositioning 1
+  и ComponentsConfiguration (Y, Cb, Cr). TIFF — только FlashpixVersion
+  (разрешение и размер — в IFD кадра, размер в Exif IFD у TIFF запрещён).
+  JPEG и PNG проходят `-validate` без предупреждений; у TIFF остаётся
+  «Invalid value for Compression» — Deflate 8 (TIFF Tech Note 2, читают
+  libtiff, Pillow, Photoshop), exiftool его не знает. Общий построитель IFD (`IfdEntry`, `put_ifd`: теги по
   возрастанию, данные длиннее 4 байт — сразу за IFD по чётным
   смещениям; `ifd_size` — чтобы заранее знать смещение Exif IFD) — им же
   теперь пишет и `encode_tiff`. JPEG: stb пишет файл в память (с APP0 JFIF), затем

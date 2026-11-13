@@ -12,7 +12,8 @@ import i18n
 fn C.vr_reveal_w(folder &u16, files &&u16, n int) int
 
 // reveal_in_folder - показать файлы paths (из одной папки) в Проводнике
-fn reveal_in_folder(paths []string) ! {
+// (procs - для Linux, здесь процессов не запускаем)
+fn reveal_in_folder(paths []string, mut _ []&os.Process) ! {
 	if paths.len == 0 {
 		return
 	}

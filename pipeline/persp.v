@@ -43,12 +43,9 @@ fn (p Proj) then(q Proj) Proj {
 	}
 }
 
-// proj_affine - аффинное отображение по трём точкам: f(0, 0), f(1, 0),
-// f(0, 1)
-fn proj_affine(f fn (f64, f64) (f64, f64)) Proj {
-	x00, y00 := f(0, 0)
-	x10, y10 := f(1, 0)
-	x01, y01 := f(0, 1)
+// proj_affine - аффинное отображение по образам трёх точек: (0, 0) ->
+// (x00, y00), (1, 0) -> (x10, y10), (0, 1) -> (x01, y01)
+fn proj_affine(x00 f64, y00 f64, x10 f64, y10 f64, x01 f64, y01 f64) Proj {
 	return Proj{
 		m: [x10 - x00, x01 - x00, x00, y10 - y00, y01 - y00, y00, 0, 0, 1]!
 	}
@@ -135,14 +132,17 @@ fn geom_proj(g Geom, w int, h int, crop bool, ow int, oh int) Proj {
 	ry0 := if crop { f64(g.y0) * fh0 } else { 0.0 }
 	rw := if crop { f64(g.x1 - g.x0) * fw0 } else { fw0 }
 	rh := if crop { f64(g.y1 - g.y0) * fh0 } else { fh0 }
-	to_v := proj_affine(fn [g, rx0, ry0, rw, rh, ow, oh, fw0, fh0] (i f64, j f64) (f64, f64) {
-		return g.r_to_v(rx0 + (i + 0.5) * rw / f64(ow), ry0 + (j + 0.5) * rh / f64(oh), fw0,
-			fh0)
-	})
-	to_s := proj_affine(fn [g, w, h, fw0, fh0] (x f64, y f64) (f64, f64) {
-		s, t := g.v_to_s(x / fw0, y / fh0)
-		return s * f64(w), t * f64(h)
-	})
+	// Без замыканий (зовётся на каждое применение геометрии): точки
+	// (0, 0), (1, 0), (0, 1) каждого отображения - явно
+	vx00, vy00 := g.r_to_v(rx0 + 0.5 * rw / f64(ow), ry0 + 0.5 * rh / f64(oh), fw0, fh0)
+	vx10, vy10 := g.r_to_v(rx0 + 1.5 * rw / f64(ow), ry0 + 0.5 * rh / f64(oh), fw0, fh0)
+	vx01, vy01 := g.r_to_v(rx0 + 0.5 * rw / f64(ow), ry0 + 1.5 * rh / f64(oh), fw0, fh0)
+	to_v := proj_affine(vx00, vy00, vx10, vy10, vx01, vy01)
+	sx00, sy00 := g.v_to_s(0, 0)
+	sx10, sy10 := g.v_to_s(1 / fw0, 0)
+	sx01, sy01 := g.v_to_s(0, 1 / fh0)
+	to_s := proj_affine(sx00 * f64(w), sy00 * f64(h), sx10 * f64(w), sy10 * f64(h), sx01 * f64(w),
+		sy01 * f64(h))
 	if !g.has_persp() {
 		return to_v.then(to_s)
 	}

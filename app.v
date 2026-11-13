@@ -109,6 +109,7 @@ mut:
 	thumb_threads []Worker
 	thumb_done    fn (ThumbResult) = unsafe { nil }
 	heads_done    fn (HeadsResult) = unsafe { nil }
+	reveal_procs  []&os.Process // запущенные xdg-open (reveal_nix.c.v)
 	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
 	// Миниатюра открытого кадра из его превью (browser.v, update_live_thumb)
 	// и номер файла, к которому она относится
@@ -2977,7 +2978,7 @@ fn main() {
 	mut m_reveal := vgui.menu_action(i18n.tr('Показать в папке'))
 	m_reveal.shortcut = 'Ctrl+R'
 	m_reveal.on_click = fn [mut st, mut nm] () {
-		reveal_in_folder(reveal_paths(st)) or {
+		reveal_in_folder(reveal_paths(st), mut st.reveal_procs) or {
 			nm.show_error(i18n.trf('Не удалось открыть папку: {0}', err.msg()))
 		}
 	}
