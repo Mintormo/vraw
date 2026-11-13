@@ -80,6 +80,10 @@ mut:
 	// edited и mark уже прочитаны из сайдкара (в фоне - HeadsResult, или
 	// сразу - ensure_head, когда кадр трогают раньше)
 	head bool
+	// Что в пикселях холста (strip_thumbs): 0 - ничего (заглушка 3x2, кадр
+	// далеко от видимой части ленты), 1 - JPEG камеры, 2 - окончательная
+	// (с правками или живая открытого кадра), -1 - файл не читается
+	thumb int
 }
 
 // HeadsResult - пометки и признаки правок всех кадров папки (из фона,
@@ -95,7 +99,25 @@ struct ThumbResult {
 	idx  int
 	pix  []u8
 	geom pipeline.Geom
+	kind int // Frame.thumb: 1 - JPEG камеры, 2 - с правками, -1 - не вышло
 }
+
+// ThumbItem - кадр для воркера миниатюр: нужен JPEG камеры (camera) и/или
+// проявка с правками (tone)
+struct ThumbItem {
+	idx    int
+	path   string
+	camera bool
+	tone   bool
+}
+
+// Окно миниатюр ленты (strip_thumbs), в экранах ленты по обе стороны от
+// видимой части: считать - 2 (прокрутка и увеличение окна до трёх раз
+// не застают пустых ячеек), держать - 4 (туда-обратно не пересчитывает)
+const strip_load_screens = 2
+const strip_keep_screens = 4
+// Видимых ячеек, пока лента не разложена (bounds нулевые)
+const strip_vis_guess = 16
 
 // is_raw_file - файл с расширением RAW (без учёта регистра)
 fn is_raw_file(name string) bool {
@@ -296,18 +318,12 @@ fn make_thumb(path string, g pipeline.Geom) ![]u8 {
 	return fit_thumb(rgb, cw, ch, 0, thumb_w, thumb_h)
 }
 
-// thumb_worker выполняется в spawn: миниатюры по порядку order, каждая -
-// в главный поток через app.post (единственный потокобезопасный вход
-// vgui). Не читаемый файл пропускается - остаётся пустая ячейка. Вторым
-// проходом - правленные кадры (по сайдкару, кроме открытого cur: его
-// миниатюра - из превью) с правками (tone_thumb), с пониженным
-// приоритетом: окно и открытый кадр важнее.
-fn thumb_worker(done &Done, paths []string, order []int, cur int, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_heads fn (HeadsResult), on_done fn (ThumbResult)) {
+// heads_worker выполняется в spawn: пометки и правки всех кадров папки
+// по сайдкарам - одной посылкой (фильтр ленты пересобирается один раз)
+fn heads_worker(done &Done, paths []string, gen int, stop &StopFlag, mut app vgui.App, on_heads fn (HeadsResult)) {
 	defer {
 		done.set()
 	}
-	// Сначала пометки и правки всех кадров - одной посылкой (фильтр ленты
-	// пересобирается один раз)
 	mut heads := []SideHead{cap: paths.len}
 	for p in paths {
 		if stop.is_set() {
@@ -319,43 +335,58 @@ fn thumb_worker(done &Done, paths []string, order []int, cur int, db &lens.Datab
 		gen:   gen
 		heads: heads
 	})
-	for idx in order {
-		if stop.is_set() {
-			return
-		}
-		g := thumb_geom(paths[idx])
-		pix := make_thumb(paths[idx], g) or { continue }
-		res := ThumbResult{
-			gen:  gen
-			seq:  seq
-			idx:  idx
-			pix:  pix
-			geom: g
-		}
-		post_result(mut app, on_done, res)
+}
+
+// thumb_worker выполняется в spawn: миниатюры кадров items (видимая часть
+// ленты с запасом, strip_thumbs) по порядку, каждая - в главный поток
+// через post_result. Сначала JPEG камеры, вторым проходом - кадры с
+// правками (tone_thumb) с пониженным приоритетом: окно и открытый кадр
+// важнее. Не читаемый файл - результат kind -1 (больше не просить).
+fn thumb_worker(done &Done, items []ThumbItem, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+	defer {
+		done.set()
 	}
-	mut slow := false
-	for idx in order {
-		if stop.is_set() {
-			return
-		}
-		if idx == cur || !heads[idx].edited {
+	for it in items {
+		if !it.camera {
 			continue
 		}
-		e := side_thumb_edit(paths[idx]) or { continue }
+		if stop.is_set() {
+			return
+		}
+		g := thumb_geom(it.path)
+		pix := make_thumb(it.path, g) or { []u8{} }
+		post_result(mut app, on_done, ThumbResult{
+			gen:  gen
+			seq:  seq
+			idx:  it.idx
+			pix:  pix
+			geom: g
+			kind: if pix.len > 0 { 1 } else { -1 }
+		})
+	}
+	mut slow := false
+	for it in items {
+		if !it.tone {
+			continue
+		}
+		if stop.is_set() {
+			return
+		}
+		e := side_thumb_edit(it.path) or { continue }
 		if !slow {
 			apply_load(LoadLevel{
 				nice: pf_nice
 			})
 			slow = true
 		}
-		pix := tone_thumb(paths[idx], e, db, stop) or { continue }
+		pix := tone_thumb(it.path, e, db, stop) or { continue }
 		post_result(mut app, on_done, ThumbResult{
 			gen:  gen
 			seq:  seq
-			idx:  idx
+			idx:  it.idx
 			pix:  pix
 			geom: out_geom(&e)
+			kind: 2
 		})
 	}
 }
@@ -369,12 +400,14 @@ fn thumb_one(done &Done, path string, g pipeline.Geom, db &lens.Database, stop &
 	}
 	mut pix := []u8{}
 	mut geom := g
+	mut kind := 1
 	if e := side_thumb_edit(path) {
 		apply_load(LoadLevel{
 			nice: pf_nice
 		})
 		pix = tone_thumb(path, e, db, stop) or { return }
 		geom = out_geom(&e)
+		kind = 2
 	} else {
 		pix = make_thumb(path, g) or { return }
 	}
@@ -384,6 +417,7 @@ fn thumb_one(done &Done, path string, g pipeline.Geom, db &lens.Database, stop &
 		idx:  idx
 		pix:  pix
 		geom: geom
+		kind: kind
 	})
 }
 
@@ -511,8 +545,9 @@ fn push_live_thumb(mut st State) {
 	st.frames[idx].seq = st.thumb_seq
 	st.frames[idx].geom = out_geom(&st.edit)
 	st.frames[idx].live = true
+	st.frames[idx].thumb = 2
 	mut cv := st.frames[idx].cv
-	cv.pixels = st.live_thumb.clone()
+	set_thumb_pixels(mut cv, st.live_thumb.clone())
 	draw_mark(mut st, idx)
 }
 
@@ -521,6 +556,10 @@ fn push_live_thumb(mut st State) {
 fn stop_thumbs(mut st State) {
 	if !isnil(st.thumb_stop) {
 		mut s := st.thumb_stop
+		s.set()
+	}
+	if !isnil(st.thumb_win_stop) {
+		mut s := st.thumb_win_stop
 		s.set()
 	}
 }
@@ -551,6 +590,7 @@ fn strip_cell(mut st State, idx int) &StripCell {
 		return st.cells[idx]
 	}
 	mut cv := vgui.canvas(thumb_w, thumb_h)
+	clear_thumb(mut cv) // пиксели - когда кадр в видимой части ленты
 	// Вписывание с сохранением пропорций (auto_fit): любая высота ленты
 	cv.stretch = false
 	cv.passive = true // только рисует: щелчок уходит в список
@@ -603,7 +643,7 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 		cell.tooltip = if sub != '' { os.join_path(sub, os.file_name(p)) } else { '' }
 		name.font_style = .regular
 		name.color = st.pal.secondary
-		cv.fill(thumb_bg)
+		clear_thumb(mut cv)
 		// Сайдкары (пометка, правки) читает поток миниатюр - на холодном
 		// диске или сетевой папке тысячи открытий файлов заморозили бы
 		// окно; открываемый кадр - сразу (фильтр и подпись - по нему)
@@ -619,21 +659,28 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 		}
 		draw_mark(mut st, st.frames.len - 1)
 	}
+	// Ячейки запаса сверх этой папки (была больше) - без пикселей
+	for i in st.frames.len .. st.cells.len {
+		mut cv := st.cells[i].cv
+		clear_thumb(mut cv)
+	}
+	st.thumb_req = map[int]bool{}
 	apply_filter(mut st)
-	cur := paths.index(cur_path)
 	stop := &StopFlag{}
 	st.thumb_stop = stop
 	st.thumb_seq++
 	wd := &Done{}
-	track(mut st.thumb_threads, spawn thumb_worker(wd, paths, thumb_order(paths.len, cur), cur,
-		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.heads_done, st.thumb_done), wd)
+	track(mut st.thumb_threads, spawn heads_worker(wd, paths, st.thumb_gen, stop, mut app,
+		st.heads_done), wd)
 	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
 	// (F6) показывается
 	if cur_path == '' && paths.len > 0 && !strip_on(st) {
 		set_strip_visible(mut st, true)
+		strip_thumbs(mut st)
 		return
 	}
 	layout_strip(mut st)
+	strip_thumbs(mut st)
 }
 
 // take_thumb принимает миниатюру из воркера (главный поток)
@@ -642,12 +689,147 @@ fn take_thumb(mut st State, res ThumbResult) {
 		|| res.seq < st.frames[res.idx].seq {
 		return
 	}
+	if res.kind < 0 {
+		st.frames[res.idx].thumb = -1 // не читается - больше не просить
+		return
+	}
+	// JPEG камеры после проявки с правками того же расчёта - мимо
+	if res.seq == st.frames[res.idx].seq && res.kind < st.frames[res.idx].thumb {
+		return
+	}
 	st.frames[res.idx].seq = res.seq
 	st.frames[res.idx].geom = res.geom
 	st.frames[res.idx].live = false
+	st.frames[res.idx].thumb = res.kind
 	mut cv := st.frames[res.idx].cv
-	cv.pixels = res.pix
+	set_thumb_pixels(mut cv, res.pix)
 	draw_mark(mut st, res.idx)
+}
+
+// set_thumb_pixels - миниатюра (thumb_w x thumb_h RGBA) в холст ячейки
+// (после заглушки размер другой - текстуру холст пересоздаст сам)
+fn set_thumb_pixels(mut cv vgui.Canvas, pix []u8) {
+	cv.width = thumb_w
+	cv.height = thumb_h
+	cv.pixels = pix
+	cv.mark_dirty()
+}
+
+// clear_thumb - холст ячейки без миниатюры: заглушка 3x2 цвета фона (те
+// же пропорции - ячейка выглядит, как пустая миниатюра) и без текстуры:
+// ~200 КБ пикселей и текстура отдаются
+fn clear_thumb(mut cv vgui.Canvas) {
+	cv.width = 3
+	cv.height = 2
+	mut blank := []u8{len: 3 * 2 * 4}
+	for i := 0; i < blank.len; i += 4 {
+		blank[i] = thumb_bg.r
+		blank[i + 1] = thumb_bg.g
+		blank[i + 2] = thumb_bg.b
+		blank[i + 3] = 255
+	}
+	cv.pixels = blank
+	cv.destroy_texture()
+	cv.mark_dirty()
+}
+
+// unload_thumb - кадр i ушёл далеко от видимой части ленты: миниатюра
+// отдаётся (вернётся - посчитается заново)
+fn unload_thumb(mut st State, i int) {
+	mut cv := st.frames[i].cv
+	if !isnil(cv) {
+		clear_thumb(mut cv)
+	}
+	st.frames[i].thumb = 0
+	st.frames[i].live = false
+	st.thumb_req.delete(i)
+}
+
+// strip_thumbs - миниатюры по видимой части ленты (было - всей папки
+// сразу: 2000 кадров - ~400 МБ пикселей и текстур до выхода). Видимые
+// строки - по прокрутке и ширине ленты; дальше strip_keep_screens экранов
+// миниатюры отдаются (кроме открытого кадра), в пределах
+// strip_load_screens недостающие считает воркер - от середины видимой
+// части наружу. Зовут: прокрутка вводом (ListBox.on_scroll), center_strip
+// (раскладка, смена кадра, фильтр, сплиттеры), пришедшие пометки (кадрам с
+// правками - проявка), открытие папки.
+fn strip_thumbs(mut st State) {
+	if isnil(st.strip) || isnil(st.app) || st.frames.len == 0 {
+		return
+	}
+	strip := st.strip
+	n := st.shown.len
+	iw := if strip.item_width > 0 { strip.item_width } else { f32(100) }
+	vw := strip.bounds.w - 2 * strip.pad
+	vis := if vw > 0 { int(vw / iw) + 2 } else { strip_vis_guess }
+	mut first := int(strip.scroll_x / iw)
+	if first < 0 {
+		first = 0
+	}
+	last := first + vis - 1
+	mut rowof := []int{len: st.frames.len, init: -1}
+	for r, i in st.shown {
+		rowof[i] = r
+	}
+	keep_lo := first - strip_keep_screens * vis
+	keep_hi := last + strip_keep_screens * vis
+	for i in 0 .. st.frames.len {
+		r := rowof[i]
+		if st.frames[i].thumb > 0 && i != st.frame_idx && (r < keep_lo || r > keep_hi) {
+			unload_thumb(mut st, i)
+		}
+	}
+	if n == 0 {
+		return
+	}
+	lo := if first - strip_load_screens * vis < 0 { 0 } else { first - strip_load_screens * vis }
+	hi := if last + strip_load_screens * vis > n - 1 {
+		n - 1
+	} else {
+		last + strip_load_screens * vis
+	}
+	if lo > hi {
+		return
+	}
+	mid := (first + (if last < n - 1 { last } else { n - 1 })) / 2
+	mut items := []ThumbItem{}
+	mut covered := true
+	for k in thumb_order(hi - lo + 1, mid - lo) {
+		i := st.shown[lo + k]
+		f := st.frames[i]
+		camera := f.thumb == 0
+		tone := f.edited && f.thumb >= 0 && f.thumb < 2 && i != st.frame_idx && !f.live
+		if !camera && !tone {
+			continue
+		}
+		items << ThumbItem{
+			idx:    i
+			path:   f.path
+			camera: camera
+			tone:   tone
+		}
+		if !st.thumb_req[i] {
+			covered = false
+		}
+	}
+	// Всё нужное уже заказано идущему воркеру - не перезапускать
+	if items.len == 0 || covered {
+		return
+	}
+	if !isnil(st.thumb_win_stop) {
+		mut s := st.thumb_win_stop
+		s.set()
+	}
+	stop := &StopFlag{}
+	st.thumb_win_stop = stop
+	st.thumb_req = map[int]bool{}
+	for it in items {
+		st.thumb_req[it.idx] = true
+	}
+	mut app := st.app
+	wd := &Done{}
+	track(mut st.thumb_threads, spawn thumb_worker(wd, items, st.lens_db, st.thumb_gen,
+		st.thumb_seq, stop, mut app, st.thumb_done), wd)
 }
 
 // take_heads - пометки и правки кадров папки из фона (главный поток):
@@ -675,6 +857,7 @@ fn take_heads(mut st State, res HeadsResult) {
 		apply_filter(mut st)
 		layout_strip(mut st)
 	}
+	strip_thumbs(mut st) // кадрам с правками - проявка
 }
 
 // ensure_head - пометка и правки кадра i, если их ещё не принёс фон:
@@ -736,7 +919,8 @@ fn draw_mark(mut st State, idx int) {
 		return
 	}
 	mut cv := f.cv
-	if f.edited {
+	// Заглушка (кадр далеко от видимой части) - отметку нарисует take_thumb
+	if f.edited && cv.pixels.len == thumb_w * thumb_h * 4 {
 		draw_dot(mut cv.pixels, thumb_w - 18, 18, 12, mark_ring)
 		draw_dot(mut cv.pixels, thumb_w - 18, 18, 9, mark_color)
 	}
@@ -1019,6 +1203,11 @@ fn fit_strip_items(mut st State) {
 // перетаскивания горизонтального сплиттера bounds ленты ещё старые,
 // поэтому она считается от доли сплиттера «просмотр | панель».
 fn center_strip(mut st State) {
+	// Ширина, прокрутка или строки ленты могли измениться - миниатюры по
+	// видимой части (и когда кадра в ленте нет - фильтр, папка без него)
+	defer {
+		strip_thumbs(mut st)
+	}
 	row := row_of(st, st.frame_idx)
 	if isnil(st.strip) || row < 0 {
 		return

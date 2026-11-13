@@ -109,6 +109,10 @@ mut:
 	thumb_threads []Worker
 	thumb_done    fn (ThumbResult) = unsafe { nil }
 	heads_done    fn (HeadsResult) = unsafe { nil }
+	// Воркер миниатюр видимой части ленты (strip_thumbs): его остановка и
+	// заказанные кадры
+	thumb_win_stop &StopFlag = unsafe { nil }
+	thumb_req      map[int]bool
 	reveal_procs  []&os.Process // запущенные xdg-open (reveal_nix.c.v)
 	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
 	// Миниатюра открытого кадра из его превью (browser.v, update_live_thumb)
@@ -2524,6 +2528,10 @@ fn main() {
 	// Колесо крутит ленту по наведению, без фокуса (vgui ListBox), и на
 	// краю не уходит дальше; щелчок колеса - один кадр (fit_strip_items)
 	strip.scroll_x_speed = strip.item_width
+	// Прокрутили - миниатюры видимой части (дальние отдаются, browser.v)
+	strip.on_scroll = fn [mut st] (x f32, y f32) {
+		strip_thumbs(mut st)
+	}
 	// Одиночный щелчок (и стрелки при фокусе на ленте) только выделяет
 	// миниатюру; открыть кадр - двойным щелчком или Enter
 	// Строка ленты - не номер кадра: с фильтром строк меньше (rating.v)
