@@ -264,9 +264,11 @@ fn (s &Settings) demosaic_qual() int {
 }
 
 // save_settings - ошибка записи не критична (молча: настройки просто не
-// запомнятся)
+// запомнятся). Через временный файл (write_atomic, sidecar.v): сбой на
+// середине не оставит обрезанный settings.json, который при запуске
+// прочитался бы как настройки по умолчанию
 fn save_settings(s Settings) {
 	path := settings_path()
 	os.mkdir_all(os.dir(path)) or { return }
-	os.write_file(path, json2.encode(s, prettify: true, indent_string: '  ')) or {}
+	write_atomic(path, json2.encode(s, prettify: true, indent_string: '  ')) or {}
 }

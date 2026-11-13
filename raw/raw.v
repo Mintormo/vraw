@@ -97,7 +97,7 @@ pub struct C.libraw_lensinfo_t {
 fn C.libraw_init(flags u32) &C.libraw_data_t
 fn C.libraw_unpack(lr &C.libraw_data_t) int
 fn C.libraw_dcraw_process(lr &C.libraw_data_t) int
-fn C.libraw_dcraw_make_mem_image(lr &C.libraw_data_t, errc &int) &C.libraw_processed_image_t
+fn C.libraw_dcraw_make_mem_image(lr &C.libraw_data_t, errc &i32) &C.libraw_processed_image_t
 fn C.libraw_dcraw_clear_mem(img &C.libraw_processed_image_t)
 fn C.libraw_close(lr &C.libraw_data_t)
 fn C.libraw_get_iparams(lr &C.libraw_data_t) &C.libraw_iparams_t
@@ -105,7 +105,7 @@ fn C.libraw_get_lensinfo(lr &C.libraw_data_t) &C.libraw_lensinfo_t
 fn C.libraw_get_imgother(lr &C.libraw_data_t) &C.libraw_imgother_t
 fn C.libraw_unpack_thumb(lr &C.libraw_data_t) int
 fn C.libraw_unpack_thumb_ex(lr &C.libraw_data_t, idx int) int
-fn C.libraw_dcraw_make_mem_thumb(lr &C.libraw_data_t, errc &int) &C.libraw_processed_image_t
+fn C.libraw_dcraw_make_mem_thumb(lr &C.libraw_data_t, errc &i32) &C.libraw_processed_image_t
 fn C.libraw_strerror(errorcode int) &char
 
 // LIBRAW_OUT_OF_ORDER_CALL - вызов не в том состоянии конвейера
@@ -208,10 +208,10 @@ pub fn (mut d Developer) develop(p DevParams) !DevImage {
 	if code != 0 {
 		return error(i18n.trf('проявка: {0}', '${err_text(code)}'))
 	}
-	errc := 0
+	mut errc := i32(0) // C int: i32, не int V (64 бит)
 	img := C.libraw_dcraw_make_mem_image(d.lr, &errc)
 	if errc != 0 || isnil(img) {
-		return error(i18n.trf('получение RGB-изображения: {0}', '${err_text(errc)}'))
+		return error(i18n.trf('получение RGB-изображения: {0}', '${err_text(int(errc))}'))
 	}
 	mut w := int(img.width)
 	mut h := int(img.height)
@@ -422,10 +422,10 @@ pub fn (d &Developer) flip() int {
 
 // thumb_jpeg - копия распакованного превью (после unpack_thumb[_ex])
 fn (mut d Developer) thumb_jpeg() ![]u8 {
-	errc := 0
+	mut errc := i32(0) // C int: i32, не int V (64 бит)
 	img := C.libraw_dcraw_make_mem_thumb(d.lr, &errc)
 	if errc != 0 || isnil(img) {
-		return error(i18n.trf('получение превью: {0}', '${err_text(errc)}'))
+		return error(i18n.trf('получение превью: {0}', '${err_text(int(errc))}'))
 	}
 	defer {
 		C.libraw_dcraw_clear_mem(img)

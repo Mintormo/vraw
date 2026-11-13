@@ -120,44 +120,42 @@ pub fn write(path string, f Format, w int, h int, rgb []u8, o WriteOpts) ! {
 	if w <= 0 || h <= 0 || rgb.len < w * h * bpp {
 		return error(i18n.trf('неверный размер кадра {0}x{1}', '${w}', '${h}'))
 	}
-	if o.bits16 {
+	data := if o.bits16 {
 		match f {
-			.png {
-				os.write_file_array(path, with_meta(encode_png16(w, h, rgb)!, o, png_with_exif,
-					png_with_icc)!)!
-			}
-			.tiff {
-				os.write_file_array(path, encode_tiff16(w, h, rgb, o.exif, o.icc)!)!
-			}
-			else {
-				return error(i18n.trf('{0} не бывает 16-битным', f.name()))
+			.png { with_meta(encode_png16(w, h, rgb)!, o, png_with_exif, png_with_icc)! }
+			.tiff { encode_tiff16(w, h, rgb, o.exif, o.icc)! }
+			else { return error(i18n.trf('{0} не бывает 16-битным', f.name())) }
+		}
+	} else {
+		match f {
+			.jpeg { with_meta(stb_jpg(w, h, rgb, o.quality)!, o, jpeg_with_exif, jpeg_with_icc)! }
+			.png { with_meta(stb_png(w, h, rgb)!, o, png_with_exif, png_with_icc)! }
+			.bmp { stb_bmp(w, h, rgb)! }
+			.tiff { encode_tiff(w, h, rgb, o.exif, o.icc)! }
+			.qoi { encode_qoi(w, h, rgb) }
+			.gif {
+				if w > 65535 || h > 65535 {
+					return error(i18n.tr('GIF не бывает больше 65535 px по стороне'))
+				}
+				encode_gif(w, h, rgb)
 			}
 		}
-		return
 	}
-	match f {
-		.jpeg {
-			os.write_file_array(path, with_meta(stb_jpg(w, h, rgb, o.quality)!, o, jpeg_with_exif,
-				jpeg_with_icc)!)!
-		}
-		.png {
-			os.write_file_array(path, with_meta(stb_png(w, h, rgb)!, o, png_with_exif, png_with_icc)!)!
-		}
-		.bmp {
-			os.write_file_array(path, stb_bmp(w, h, rgb)!)!
-		}
-		.tiff {
-			os.write_file_array(path, encode_tiff(w, h, rgb, o.exif, o.icc)!)!
-		}
-		.qoi {
-			os.write_file_array(path, encode_qoi(w, h, rgb))!
-		}
-		.gif {
-			if w > 65535 || h > 65535 {
-				return error(i18n.tr('GIF не бывает больше 65535 px по стороне'))
-			}
-			os.write_file_array(path, encode_gif(w, h, rgb))!
-		}
+	write_atomic(path, data)!
+}
+
+// write_atomic - запись через временный файл рядом и переименование:
+// сбой записи (кончилось место) не портит прежний файл с тем же именем
+// (режим «перезаписать»), недописанный временный удаляется
+fn write_atomic(path string, data []u8) ! {
+	tmp := path + '.vraw-tmp'
+	os.write_file_array(tmp, data) or {
+		os.rm(tmp) or {}
+		return err
+	}
+	os.mv(tmp, path) or {
+		os.rm(tmp) or {}
+		return err
 	}
 }
 

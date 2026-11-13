@@ -190,3 +190,24 @@ fn test_has_exif() {
 	assert Format.jpeg.has_exif() && Format.png.has_exif() && Format.tiff.has_exif()
 	assert !Format.bmp.has_exif() && !Format.qoi.has_exif() && !Format.gif.has_exif()
 }
+
+// ex_shutter - выдержка дробью строкой (кортежи assert не сравнивает)
+fn ex_shutter(s f32) string {
+	n, d := exposure_rational(s)
+	return '${n}/${d}'
+}
+
+fn test_exposure_rational() {
+	// Ровные доли секунды - 1/N, в т.ч. с неточностью APEX (1/128 вместо 1/125)
+	assert ex_shutter(f32(1.0 / 250)) == '1/250'
+	assert ex_shutter(f32(1.0 / 128)) == '1/128'
+	assert ex_shutter(0.25) == '1/4'
+	assert ex_shutter(0.5) == '1/2'
+	// Шкала Canon между 1/4 и 1 с - десятыми
+	assert ex_shutter(0.3) == '3/10'
+	assert ex_shutter(0.4) == '4/10'
+	assert ex_shutter(0.6) == '6/10'
+	assert ex_shutter(0.8) == '8/10'
+	assert ex_shutter(2.5) == '25/10'
+	assert ex_shutter(0) == '0/10'
+}

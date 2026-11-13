@@ -1129,7 +1129,10 @@ fn sync_sidecar(mut st State) {
 // посреди записи не оставит обрезанный файл
 fn write_atomic(path string, text string) ! {
 	tmp := path + '.tmp'
-	os.write_file(tmp, text)!
+	os.write_file(tmp, text) or {
+		os.rm(tmp) or {}
+		return err
+	}
 	os.mv(tmp, path) or {
 		os.rm(tmp) or {}
 		return err

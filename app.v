@@ -25,7 +25,7 @@ const raw_patterns = 'CR3;CR2;CRW;NEF;ARW;DNG;RAF;ORF;RW2;cr3;cr2;crw;nef;arw;dn
 
 struct State {
 mut:
-	dev          &raw.Developer = unsafe { nil }
+	dev          &raw.Developer = unsafe { nil } // открытый кадр; хендл LibRaw закрыт после загрузки (path, full_size)
 	dev_linear   []u16 // превью прямо из LibRaw, без коррекции объектива
 	raw_linear   []u16 // превью после коррекции объектива, ДО шумодава
 	linear       []u16 // линейное 16-битное RGB-превью (half-size), сырьё пайплайна
@@ -2436,6 +2436,7 @@ fn main() {
 			return
 		}
 		st.dev = res.dev
+		st.dev.close() // нужны только путь и полный размер (кадр из кэша - хендл открыт)
 		st.meta = res.meta
 		st.corr = res.corr
 		show_lens(st, mut lens_cb, mut lens_lb)

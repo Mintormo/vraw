@@ -7,7 +7,10 @@
 qoi, gif; у формата — `name()` (для людей), `key()` (в настройках),
 `ext()` (новый файл), `exts()` (распознавание и фильтр диалога:
 jpg/jpeg, tif/tiff), `lossy()`; `format_by_path` — по расширению без
-учёта регистра, `format_by_key`.
+учёта регистра, `format_by_key`. Файл пишется атомарно (13.11.2026,
+`write_atomic`): во временный `<путь>.vraw-tmp` рядом и переименованием —
+сбой записи (кончилось место) в режиме «перезаписать» не губит прежний
+файл, недописанный временный удаляется.
 
 - **JPEG, PNG, BMP** — stbi из stdlib V (`stbi_write_*`). PNG у stbi
   сжимает слабовато и медленно (~4 с на 24 Мп, ~53 МБ), зато без
@@ -46,7 +49,9 @@ jpg/jpeg, tif/tiff), `lossy()`; `format_by_path` — по расширению �
   него; `Format.has_exif` — JPEG, PNG, TIFF). Блок — маленький TIFF
   little-endian: IFD0 (Make, Model, Orientation 1, Software, DateTime —
   дата записи, Artist, Copyright, ссылка 34665) и Exif IFD (ExposureTime —
-  1/N короче секунды, FNumber, ISO, ExifVersion 0232,
+  1/N для ровных долей секунды и всего короче 0.29 с, остальное десятыми:
+  0.4 → 4/10, 0.6 → 6/10, 0.8 → 8/10, 2.5 → 25/10 (до 13.11.2026 0.4 с
+  писалась как 1/3; тест `test_exposure_rational`), FNumber, ISO, ExifVersion 0232,
   DateTimeOriginal/Digitized, FocalLength, LensMake, LensModel); пустые
   поля не пишутся. Общий построитель IFD (`IfdEntry`, `put_ifd`: теги по
   возрастанию, данные длиннее 4 байт — сразу за IFD по чётным

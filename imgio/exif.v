@@ -8,6 +8,7 @@ module imgio
 // в TIFF теги пишутся прямо в IFD кадра (encode_tiff). BMP, QOI и GIF
 // метаданных EXIF не держат.
 import hash.crc32
+import math
 import i18n
 
 // Exif - метаданные для записи; пустые строки и нули не пишутся
@@ -131,11 +132,19 @@ fn put_ifd(mut out []u8, entries []IfdEntry) int {
 	return next_at
 }
 
-// exposure_rational - выдержка дробью RATIONAL: короче секунды - 1/N,
-// иначе десятыми (прочие числа - тоже десятыми)
+// exposure_rational - выдержка дробью RATIONAL: 1/N, если s - ровно
+// (с точностью 2%) доля секунды, а короче 0.3 с - всегда; иначе
+// десятыми (0.4 -> 4/10, 0.6 -> 6/10, 0.8 -> 8/10, 2.5 -> 25/10)
 fn exposure_rational(s f32) (u32, u32) {
+	if s <= 0 {
+		return 0, 10
+	}
 	if s < 1 {
-		return 1, u32(f32(1) / s + 0.5)
+		inv := f32(1) / s
+		n := u32(inv + 0.5)
+		if s < 0.29 || math.abs(inv - f32(n)) <= 0.02 * inv {
+			return 1, n
+		}
 	}
 	return u32(s * 10 + 0.5), 10
 }

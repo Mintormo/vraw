@@ -117,7 +117,12 @@ fn load_compute(job LoadJob) LoadResult {
 			t.free()
 		}
 	}
-	lm := lens_match(cj, d.flip(), res.corr, dev_linear, w, h, meta)
+	// LibRaw больше не нужен: после проявки хендл держит ~95 МБ своих
+	// буферов. Закрытый Developer хранит путь и полный размер (их и берёт
+	// окно); экспорт, пакет и 1:1 открывают свой хендл
+	flip := d.flip()
+	d.close()
+	lm := lens_match(cj, flip, res.corr, dev_linear, w, h, meta)
 	vign := lm.vign
 	// Задание забирает свою ссылку на dev_linear (prep_compute отпустит)
 	mut prep := prep_compute(PrepJob{
@@ -149,10 +154,10 @@ fn load_compute(job LoadJob) LoadResult {
 		linear:     prep.linear
 		mask:       prep.mask
 		look:       CamLook{
-			...camera_look(cj, d.flip(), prep.linear, w, h, vign)
+			...camera_look(cj, flip, prep.linear, w, h, vign)
 			zoom: lm.zoom
 		}
-		cam_view:   cam_view(cj, d.flip(), w, h)
+		cam_view:   cam_view(cj, flip, w, h)
 	}
 	return res
 }

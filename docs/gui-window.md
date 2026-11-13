@@ -170,7 +170,8 @@
   `panel_order`, `panel_hidden`, `panel_w` — ширина панели, px — см.
   «Раскладка окна» и «Компоновка»),
   читаются в начале main, пишутся при изменении (`set_viewer_bg`,
-  `set_strip_open`, `apply_theme`); испорченный файл — значения по
+  `set_strip_open`, `apply_theme`) атомарно (`write_atomic`: `.tmp` и
+  переименование — сбой не оставит обрезанный файл); испорченный файл — значения по
   умолчанию (поля прежних версий — `ai_model`, `export_no_ai`,
   `no_ai_cache`, `fs_panel`, `fs_strip` — молча пропускаются, тесты
   `test_settings_old_ai_fields`, `test_panel_settings_roundtrip`).
