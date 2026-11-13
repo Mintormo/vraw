@@ -150,6 +150,7 @@ fn set_mark(mut st State, change MarkEdit) {
 	}
 	mut failed := []string{}
 	for i in targets {
+		ensure_head(mut st, i) // пометка ещё не пришла из фона
 		m := change.apply(st.frames[i].mark)
 		if i == st.frame_idx && st.history.len > 0 {
 			st.mark = m

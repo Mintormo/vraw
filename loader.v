@@ -71,7 +71,7 @@ mut:
 // load_worker выполняется в spawn; результат - через app.post
 fn load_worker(done &Done, job LoadJob, mut app vgui.App, on_done fn (LoadResult)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	post_load(mut app, on_done, load_compute(job))
 }
@@ -107,7 +107,7 @@ fn load_compute(job LoadJob) LoadResult {
 	mut dev_linear := own_new[u16](w * h * 3)
 	unsafe { vmemcpy(dev_linear.data, img.data_u16(), w * h * 6) }
 	img.free()
-	if job.stop.stop {
+	if job.stop.is_set() {
 		drop(mut dev_linear)
 		return res
 	}
@@ -141,7 +141,7 @@ fn load_compute(job LoadJob) LoadResult {
 		zoom:      lm.zoom
 		man:       job.man
 	})
-	if job.stop.stop {
+	if job.stop.is_set() {
 		drop(mut dev_linear)
 		drop(mut prep.raw_linear)
 		drop(mut prep.linear)
@@ -575,7 +575,7 @@ fn free_load(res LoadResult) {
 fn wait_loads(mut st State) {
 	if !isnil(st.load_stop) {
 		mut s := st.load_stop
-		s.stop = true
+		s.set()
 	}
 	prefetch_cancel(mut st) // предзагрузка соседа - в тех же потоках
 	wait_all(mut st.load_threads)

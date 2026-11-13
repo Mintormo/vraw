@@ -13,12 +13,12 @@ import vgui
 import imgio
 import i18n
 
-// ExportCtl - один экспорт. cancel пишет главный поток, читает воркер
-// между этапами (опоздание на этап безвредно). Остальное - главный поток.
+// ExportCtl - один экспорт. cancel ставит главный поток, читает воркер
+// между этапами (Flag - атомарно). Остальное - главный поток.
 @[heap]
 struct ExportCtl {
 mut:
-	cancel  bool
+	cancel  Flag
 	src     string
 	dst     string
 	fmt     imgio.Format
@@ -163,7 +163,7 @@ fn build_export_ui(mut st State, mut app vgui.App, parent &vgui.Window) ! {
 	btn.on_click = fn [mut st, mut dlg] () {
 		if !isnil(st.exp) {
 			mut c := st.exp
-			c.cancel = true
+			c.cancel.set()
 			if !isnil(st.eui) {
 				mut s := st.eui.stage
 				s.text = i18n.tr('Отмена...')
@@ -299,7 +299,7 @@ fn sync_export_ui(mut st State) {
 	}
 	mut u := st.eui
 	c := st.exp
-	if c.cancel {
+	if c.cancel.is_set() {
 		return // «Отмена...» уже написано
 	}
 	mut s := u.stage
@@ -423,5 +423,5 @@ fn (mut p ExportPoster) stage(stage ExportStage, done int, total int) bool {
 		done:        done
 		total:       total
 	})
-	return !c.cancel
+	return !c.cancel.is_set()
 }

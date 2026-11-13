@@ -194,6 +194,7 @@ fn clear_history(mut st State, mut cv vgui.Canvas, mut hist vgui.Canvas, mut app
 	// (живая уже пересчитана переходом; draw_mark только рисует поверх -
 	// снять отметку можно лишь новой копией миниатюры)
 	if st.frame_idx >= 0 && st.frame_idx < st.frames.len {
+		ensure_head(mut st, st.frame_idx)
 		st.frames[st.frame_idx].edited = false
 		push_live_thumb(mut st)
 	}

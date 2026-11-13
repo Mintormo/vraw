@@ -32,7 +32,6 @@ import os
 import math
 import vgui
 import raw
-import stbi
 import pipeline
 import lens
 import i18n
@@ -78,15 +77,16 @@ mut:
 	geom pipeline.Geom
 	seq  int
 	live bool // показывает превью открытого кадра (с правками), не JPEG камеры
+	// edited и mark уже прочитаны из сайдкара (в фоне - HeadsResult, или
+	// сразу - ensure_head, когда кадр трогают раньше)
+	head bool
 }
 
-// StopFlag - флаг остановки фонового воркера миниатюр (смена папки,
-// выход). Читается воркером без синхронизации: bool, опоздание на одну
-// миниатюру безвредно.
-@[heap]
-struct StopFlag {
-mut:
-	stop bool
+// HeadsResult - пометки и признаки правок всех кадров папки (из фона,
+// по порядку paths); gen - как у ThumbResult
+struct HeadsResult {
+	gen   int
+	heads []SideHead
 }
 
 struct ThumbResult {
@@ -249,6 +249,10 @@ fn thumb_geom(path string) pipeline.Geom {
 	return out_geom(&side.history[side.current].state)
 }
 
+// thumb_geom_max - наибольшая сторона картинки, по которой миниатюра
+// считает геометрию кадра (кадрирование, поворот)
+const thumb_geom_max = 1620
+
 // make_thumb - миниатюра RAW-файла с геометрией g (кадрирование и
 // поворот из сайдкара): своё открытие LibRaw (воркер не делит хендл с
 // GUI), встроенное превью не меньше буфера, поворот по ориентации
@@ -261,16 +265,25 @@ fn make_thumb(path string, g pipeline.Geom) ![]u8 {
 	}
 	j := d.thumb_min(thumb_w)!
 	flip := d.flip()
-	mut img := stbi.load_from_memory(j.data, j.len, desired_channels: 3)!
+	// Декодер libjpeg - буфер вне сборщика: у форматов без малого превью
+	// это полный JPEG (72 МБ на 24 Мп) на каждую миниатюру
+	mut img := raw.decode_jpeg(j)!
 	defer {
 		img.free()
 	}
-	src := unsafe { img.data.vbytes(img.width * img.height * 3) }
+	src := img.pix
 	if g.is_identity() {
 		return fit_thumb(src, img.width, img.height, flip, thumb_w, thumb_h)
 	}
-	ow := if flip & 4 != 0 { img.height } else { img.width }
-	oh := if flip & 4 != 0 { img.width } else { img.height }
+	// Геометрия - по картинке не больше малого превью Canon (1620 px по
+	// длинной стороне): полный JPEG дал бы промежуточные буферы в сотни МБ
+	mut ow := if flip & 4 != 0 { img.height } else { img.width }
+	mut oh := if flip & 4 != 0 { img.width } else { img.height }
+	long := if ow > oh { ow } else { oh }
+	if long > thumb_geom_max {
+		ow = int(f64(ow) * thumb_geom_max / long + 0.5)
+		oh = int(f64(oh) * thumb_geom_max / long + 0.5)
+	}
 	pix := fit_thumb(src, img.width, img.height, flip, ow, oh)
 	cw, ch := g.out_size(ow, oh, true)
 	cut := pipeline.geom_rgba(pix, ow, oh, g, true, cw, ch)
@@ -286,15 +299,28 @@ fn make_thumb(path string, g pipeline.Geom) ![]u8 {
 // thumb_worker выполняется в spawn: миниатюры по порядку order, каждая -
 // в главный поток через app.post (единственный потокобезопасный вход
 // vgui). Не читаемый файл пропускается - остаётся пустая ячейка. Вторым
-// проходом - правленные кадры (edited, кроме открытого cur: его
+// проходом - правленные кадры (по сайдкару, кроме открытого cur: его
 // миниатюра - из превью) с правками (tone_thumb), с пониженным
 // приоритетом: окно и открытый кадр важнее.
-fn thumb_worker(done &Done, paths []string, order []int, edited []bool, cur int, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_done fn (ThumbResult)) {
+fn thumb_worker(done &Done, paths []string, order []int, cur int, db &lens.Database, gen int, seq int, stop &StopFlag, mut app vgui.App, on_heads fn (HeadsResult), on_done fn (ThumbResult)) {
 	defer {
-		done.mark()
+		done.set()
 	}
+	// Сначала пометки и правки всех кадров - одной посылкой (фильтр ленты
+	// пересобирается один раз)
+	mut heads := []SideHead{cap: paths.len}
+	for p in paths {
+		if stop.is_set() {
+			return
+		}
+		heads << read_side_head(p)
+	}
+	post_result(mut app, on_heads, HeadsResult{
+		gen:   gen
+		heads: heads
+	})
 	for idx in order {
-		if stop.stop {
+		if stop.is_set() {
 			return
 		}
 		g := thumb_geom(paths[idx])
@@ -310,10 +336,10 @@ fn thumb_worker(done &Done, paths []string, order []int, edited []bool, cur int,
 	}
 	mut slow := false
 	for idx in order {
-		if stop.stop {
+		if stop.is_set() {
 			return
 		}
-		if idx == cur || idx >= edited.len || !edited[idx] {
+		if idx == cur || !heads[idx].edited {
 			continue
 		}
 		e := side_thumb_edit(paths[idx]) or { continue }
@@ -339,7 +365,7 @@ fn thumb_worker(done &Done, paths []string, order []int, edited []bool, cur int,
 // геометрией g
 fn thumb_one(done &Done, path string, g pipeline.Geom, db &lens.Database, stop &StopFlag, gen int, seq int, idx int, mut app vgui.App, on_done fn (ThumbResult)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	mut pix := []u8{}
 	mut geom := g
@@ -495,7 +521,7 @@ fn push_live_thumb(mut st State) {
 fn stop_thumbs(mut st State) {
 	if !isnil(st.thumb_stop) {
 		mut s := st.thumb_stop
-		s.stop = true
+		s.set()
 	}
 }
 
@@ -578,11 +604,15 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 		name.font_style = .regular
 		name.color = st.pal.secondary
 		cv.fill(thumb_bg)
-		head := read_side_head(p)
+		// Сайдкары (пометка, правки) читает поток миниатюр - на холодном
+		// диске или сетевой папке тысячи открытий файлов заморозили бы
+		// окно; открываемый кадр - сразу (фильтр и подпись - по нему)
+		head := if p == cur_path { read_side_head(p) } else { SideHead{} }
 		st.frames << Frame{
 			path:   p
 			edited: head.edited
 			mark:   head.mark
+			head:   p == cur_path
 			name:   name
 			cv:     cv
 			cell:   cell
@@ -594,10 +624,9 @@ fn load_folder(mut st State, dir string, cur_path string, mut app vgui.App) {
 	stop := &StopFlag{}
 	st.thumb_stop = stop
 	st.thumb_seq++
-	edited := st.frames.map(it.edited)
 	wd := &Done{}
-	track(mut st.thumb_threads, spawn thumb_worker(wd, paths, thumb_order(paths.len, cur), edited, cur,
-		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.thumb_done), wd)
+	track(mut st.thumb_threads, spawn thumb_worker(wd, paths, thumb_order(paths.len, cur), cur,
+		st.lens_db, st.thumb_gen, st.thumb_seq, stop, mut app, st.heads_done, st.thumb_done), wd)
 	// Папка без открытого кадра: кадр выбирают в ленте - скрытая целиком
 	// (F6) показывается
 	if cur_path == '' && paths.len > 0 && !strip_on(st) {
@@ -619,6 +648,48 @@ fn take_thumb(mut st State, res ThumbResult) {
 	mut cv := st.frames[res.idx].cv
 	cv.pixels = res.pix
 	draw_mark(mut st, res.idx)
+}
+
+// take_heads - пометки и правки кадров папки из фона (главный поток):
+// кадры, которые уже тронули (head), не трогаются - у них свежее
+fn take_heads(mut st State, res HeadsResult) {
+	if res.gen != st.thumb_gen || res.heads.len != st.frames.len {
+		return
+	}
+	mut marks := false
+	for i, h in res.heads {
+		if st.frames[i].head {
+			continue
+		}
+		st.frames[i].head = true
+		if h.mark != st.frames[i].mark {
+			st.frames[i].mark = h.mark
+			marks = true
+		}
+		if h.edited {
+			st.frames[i].edited = true
+			draw_mark(mut st, i)
+		}
+	}
+	if marks {
+		apply_filter(mut st)
+		layout_strip(mut st)
+	}
+}
+
+// ensure_head - пометка и правки кадра i, если их ещё не принёс фон:
+// кадр открывают, помечают или правят раньше - читается его сайдкар
+fn ensure_head(mut st State, i int) {
+	if i < 0 || i >= st.frames.len || st.frames[i].head {
+		return
+	}
+	h := read_side_head(st.frames[i].path)
+	st.frames[i].head = true
+	st.frames[i].mark = h.mark
+	if h.edited && !st.frames[i].edited {
+		st.frames[i].edited = true
+		draw_mark(mut st, i)
+	}
 }
 
 // refresh_thumb - миниатюра кадра idx заново с геометрией g (после
@@ -697,6 +768,7 @@ fn draw_dot(mut pix []u8, cx int, cy int, r int, c vgui.Color) {
 // mark_edited - у текущего кадра появились правки (запись сайдкара не
 // на «Открыт файл»; одна пометка отбора правкой не считается)
 fn mark_edited(mut st State) {
+	ensure_head(mut st, st.frame_idx)
 	if st.hist_pos == 0 || st.frame_idx < 0 || st.frame_idx >= st.frames.len
 		|| st.frames[st.frame_idx].edited {
 		return
@@ -825,6 +897,7 @@ fn sync_strip(mut st State) {
 	if isnil(st.strip) {
 		return
 	}
+	ensure_head(mut st, st.frame_idx) // подпись и отбор - по сайдкару
 	mut strip := st.strip
 	strip.set_selected(row_of(st, st.frame_idx)) // не прошёл фильтр - без выделения
 	for i, f in st.frames {

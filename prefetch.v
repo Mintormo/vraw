@@ -42,7 +42,7 @@ struct PfResult {
 // prefetch_worker - в spawn: открыть, проявить, закрыть хендл -> on_done
 fn prefetch_worker(done &Done, job PfJob, mut app vgui.App, on_done fn (PfResult)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	apply_load(LoadLevel{
 		nice: pf_nice
@@ -82,7 +82,7 @@ fn prefetch_worker(done &Done, job PfJob, mut app vgui.App, on_done fn (PfResult
 		...res
 		dev: unsafe { nil }
 	}
-	if job.stop.stop && res.err.len == 0 {
+	if job.stop.is_set() && res.err.len == 0 {
 		res = LoadResult{
 			...res
 			err: i18n.tr('отменено')
@@ -134,7 +134,7 @@ fn prefetch_next(mut st State) {
 fn prefetch_cancel(mut st State) {
 	if st.pf_running {
 		mut s := st.pf_stop
-		s.stop = true
+		s.set()
 		st.pf_running = false
 		st.pf_gen++
 	}

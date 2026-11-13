@@ -58,9 +58,14 @@ fn test_pair_render() {
 	c := pair_render(PairJob{
 		path: path
 		edit: e
-		stop: &StopFlag{
-			stop: true
-		}
+		stop: stopped_flag()
 	})
 	assert c.err == '' && c.rgba.len == 0
+}
+
+// stopped_flag - уже выставленный флаг остановки
+fn stopped_flag() &StopFlag {
+	f := &StopFlag{}
+	f.set()
+	return f
 }

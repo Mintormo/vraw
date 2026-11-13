@@ -338,7 +338,10 @@ fn refresh_frame_thumb(mut st State, path string) {
 fn mark_frame_edited(mut st State, path string) {
 	pair_edited(mut st, path) // левый кадр сравнения - заново (pair.v)
 	for i, f in st.frames {
-		if f.path == path && !f.edited {
+		if f.path == path {
+			ensure_head(mut st, i)
+		}
+		if f.path == path && !st.frames[i].edited {
 			st.frames[i].edited = true
 			draw_mark(mut st, i)
 		}

@@ -47,12 +47,12 @@ struct PairStop {
 }
 
 fn (mut p PairStop) stage(_ ExportStage, _ int, _ int) bool {
-	return isnil(p.stop) || !p.stop.stop
+	return isnil(p.stop) || !p.stop.is_set()
 }
 
 fn pair_worker(done &Done, job PairJob, mut app vgui.App, on_done fn (PairResult)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	post_result(mut app, on_done, pair_render(job))
 }
@@ -193,7 +193,7 @@ fn pair_stop(mut st State) {
 	st.pair_busy = false
 	if !isnil(st.pair_flag) {
 		mut f := st.pair_flag
-		f.stop = true
+		f.set()
 	}
 }
 

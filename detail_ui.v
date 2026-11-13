@@ -362,7 +362,7 @@ fn detail_start(mut st State, side int) {
 
 fn detail_worker(done &Done, req DetailReq, mut app vgui.App, on_done fn (DetailRes)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	mut res := DetailRes{
 		req:  req

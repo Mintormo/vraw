@@ -273,7 +273,7 @@ fn (mut t BatchTally) add(r BatchDone) {
 // помещается в свободную память - mem_par); итог - report
 fn batch_worker(done &Done, job BatchJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	sw := time.new_stopwatch()
 	mut level := load_level(job.settings.export_load)
@@ -299,7 +299,7 @@ fn batch_worker(done &Done, job BatchJob, mut app vgui.App, on_done fn (SaveOutc
 			tally.add(<-ch)
 			running--
 		}
-		if c.cancel || tally.cancelled {
+		if c.cancel.is_set() || tally.cancelled {
 			break
 		}
 		dst := export_path_taken(&job.settings, it.src, job.format, taken, NameInfo{
@@ -325,7 +325,7 @@ fn batch_worker(done &Done, job BatchJob, mut app vgui.App, on_done fn (SaveOutc
 		t.wait()
 	}
 	sec := f64(sw.elapsed().milliseconds()) / 1000.0
-	res, msg := batch_outcome(n, tally.saved, tally.failed, tally.cancelled || c.cancel,
+	res, msg := batch_outcome(n, tally.saved, tally.failed, tally.cancelled || c.cancel.is_set(),
 		job.format, sec)
 	report(mut app, on_done, res, msg)
 }
@@ -367,7 +367,7 @@ fn (mut p BatchPoster) stage(stage ExportStage, done int, total int) bool {
 		done:  done
 		total: total
 	})
-	return !p.job.ctl.cancel
+	return !p.job.ctl.cancel.is_set()
 }
 
 // batch_frame_job выполняется в spawn: один кадр пакета - производные

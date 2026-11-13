@@ -108,6 +108,7 @@ mut:
 	thumb_stop    &StopFlag = unsafe { nil }
 	thumb_threads []Worker
 	thumb_done    fn (ThumbResult) = unsafe { nil }
+	heads_done    fn (HeadsResult) = unsafe { nil }
 	thumb_seq     int // номер последнего расчёта миниатюр (ThumbResult.seq)
 	// Миниатюра открытого кадра из его превью (browser.v, update_live_thumb)
 	// и номер файла, к которому она относится
@@ -774,7 +775,7 @@ fn drop_prep(res PrepResult) {
 // через app.post() (единственный потокобезопасный вход vgui).
 fn prep_worker(done &Done, job PrepJob, mut app vgui.App, on_done fn (PrepResult)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	res := prep_compute(job)
 	post_result(mut app, on_done, res)
@@ -833,7 +834,7 @@ struct SaveJob {
 // по контракту vgui). Результат - уведомление через report.
 fn save_worker(done &Done, job SaveJob, mut app vgui.App, on_done fn (SaveOutcome, string)) {
 	defer {
-		done.mark()
+		done.set()
 	}
 	sw := time.new_stopwatch()
 	apply_load(job.load)
@@ -2347,7 +2348,7 @@ fn main() {
 		// освободит on_load_done, увидев старый file_gen
 		if !isnil(st.load_stop) {
 			mut ls := st.load_stop
-			ls.stop = true
+			ls.set()
 		}
 		if !isnil(st.dev) {
 			st.dev.close()
@@ -2513,6 +2514,9 @@ fn main() {
 	st.thumb_done = fn [mut st] (res ThumbResult) {
 		take_thumb(mut st, res)
 	}
+	st.heads_done = fn [mut st] (res HeadsResult) {
+		take_heads(mut st, res)
+	}
 	st.app = app
 	mut strip := vgui.list_box_h(strip_item_width(strip_pane_h))
 	strip.pad = strip_pad
@@ -2660,7 +2664,7 @@ fn main() {
 		frame_store(mut st)
 		if !isnil(st.load_stop) {
 			mut ls := st.load_stop
-			ls.stop = true
+			ls.set()
 		}
 		st.loading = false
 		if !isnil(st.dev) {
@@ -3655,7 +3659,7 @@ fn main() {
 	// (одиночный экспорт - дожидается целиком)
 	if !isnil(st.exp) && st.exp.n > 1 {
 		mut c := st.exp
-		c.cancel = true
+		c.cancel.set()
 	}
 	wait_all(mut st.save_threads)
 	if !isnil(st.dev) {

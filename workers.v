@@ -10,20 +10,33 @@ module main
 // («V thread join failed»): поток после wait из списка уходит.
 import sync.stdatomic
 
-// Done - флаг «воркер закончил», ставится в самом конце воркера
-// (defer), после отправки результата
-@[heap]
-struct Done {
+// Flag - флаг между потоками: один ставит, другой читает (атомарно -
+// без гонки данных; снять нельзя: на новый запуск - новый флаг)
+struct Flag {
 mut:
 	v u64
 }
 
-fn (d &Done) mark() {
-	stdatomic.store_u64(&d.v, 1)
+fn (f &Flag) set() {
+	stdatomic.store_u64(&f.v, 1)
 }
 
-fn (d &Done) is_set() bool {
-	return stdatomic.load_u64(&d.v) != 0
+fn (f &Flag) is_set() bool {
+	return stdatomic.load_u64(&f.v) != 0
+}
+
+// Done - «воркер закончил»: set в самом конце воркера (defer), после
+// отправки результата
+@[heap]
+struct Done {
+	Flag
+}
+
+// StopFlag - просьба остановиться фоновому воркеру (смена папки или кадра,
+// выход): главный поток ставит, воркер проверяет между шагами
+@[heap]
+struct StopFlag {
+	Flag
 }
 
 struct Worker {
